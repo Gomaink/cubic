@@ -1,0 +1,179 @@
+@import url('https://fonts.googleapis.com/css?family=Poppins');
+
+body {
+  background: #0f1013;
+  font-family: 'Poppins';
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+
+.navbar {
+  background-color: #0f1013;
+  color: #fff;
+}
+
+.nav-link {
+  color: #fff;
+  margin-left: 10px;
+  margin-right: 10px;
+  padding: 10px;
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.nav-link:hover {
+  color: #cccccc;
+}
+
+.btn-login {
+  border: 2px solid #fff; 
+  background-color: #fff;
+  border-radius: 1.5rem;
+  color: #000;
+}
+
+.btn-login:hover {
+  border: 2px solid #fff; 
+  background-color: #fff;
+  border-radius: 1.5rem;
+  color: #a058f2;
+}
+
+.content-section {
+  background-size: cover;
+  background-position: center;
+  color: #fff; /* Cor do texto */
+  padding: 60px 0; /* Espaçamento interno */
+  text-align: center; /* Centralizar o conteúdo */
+}
+
+.content-section .container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: left; /* Ajuste para alinhar o texto à esquerda */
+  padding: 0 20px; /* Espaçamento interno para o texto */
+}
+
+.content-section .text {
+  flex: 1; /* Ocupa todo o espaço disponível na largura */
+  max-width: 100%; /* Largura máxima para telas menores */
+  margin-bottom: 20px; /* Espaçamento entre texto e imagem */
+}
+
+.content-section .image img {
+  max-width: 100%; /* Garante que a imagem não ultrapasse a largura da coluna */
+  height: auto; /* Permite que a altura da imagem seja ajustada automaticamente */
+  display: block; /* Garante que a imagem não cause problemas de layout */
+  margin: 0 auto; /* Centraliza a imagem em telas menores */
+}
+
+@media (max-width: 767.98px) {
+  .content-section .container {
+      flex-direction: column-reverse; /* Inverte a direção dos itens em coluna */
+      text-align: center; /* Centraliza o texto */
+  }
+}
+
+/*login*/
+#content::before {
+  content: "";
+  position: absolute;
+  top: -70px;
+  right: 350px; /* Ajuste a posição à direita para aproximar a imagem */
+  width: 25%; /* Ajuste a largura conforme necessário */
+  height: 100%;
+  background-image: url('/images/cubic-w-nobg.png');
+  background-size: contain; /* Ajustar para contain */
+  background-repeat: no-repeat; /* Evitar repetição da imagem */
+  background-position: center;
+  z-index: -1;
+}
+
+.login-form {
+  background-color: #181c1f;
+  border: 1px solid #181c1f;
+  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+  width: 100%;
+  max-width: 400px;
+  z-index: 1; /* Garantir que o formulário fique acima da imagem de fundo */
+}
+
+.login-form .btn-primary {
+  background-color: #007bff;
+  border-color: #007bff;
+  border-radius: 50px; /* Borda arredondada para o botão */
+}
+
+.login-form .rounded {
+  border-radius: 15px; /* Borda arredondada para a div da tela de login */
+}
+
+.login-form .small {
+  color: #3e5aa0;
+}
+
+.btn-register {
+  border: 2px solid #0d6efd; 
+  background-color: #0d6efd;
+  border-radius: 1.5rem;
+  color: #dad9d9;
+}
+
+.btn-register:hover {
+  border: 2px solid #0a58ca; 
+  background-color: #0a58ca;
+  border-radius: 1.5rem;
+  color: #dad9d9;
+}
+
+
+.login-form h2 {
+  color: #dad9d9; /* Cor do texto do título */
+  font-size: 24px;
+  font-weight: 400;
+}
+
+.form-label {
+  color: #85898f;
+  font-weight: 900;
+  font-size: 12px;
+}
+
+.form-control {
+  color: #fff;
+  background-color: #2a3236;
+  border: 1px solid #2a3236;
+}
+
+.form-control:focus {
+  color: #fff;
+  background-color: #323d43;
+  border: 1px solid #323d43;
+}
+
+.form-select {
+  color: #a3a6af;
+  background-color: #2a3236;
+  border: 1px solid #2a3236;
+}
+
+select.form-select {
+  max-height: 100px; /* Ajuste a altura máxima conforme necessário */
+  overflow-y: auto; /* Permite rolagem vertical quando o conteúdo excede a altura máxima */
+}
+
+.ast {
+  color: #ec4042;
+  font-weight: 900;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.container {
+  min-height: calc(100vh - 56px); /* Altura mínima para considerar a altura da navbar */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
