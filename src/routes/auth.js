@@ -27,7 +27,7 @@ router.post('/login', async (req, res) => {
         }
 
         req.session.userId = user._id;
-        res.redirect('/'); 
+        res.redirect('/chats'); 
     } catch (err) {
         console.error(err);
         return res.render('login', { error: 'Erro ao fazer login. Tente novamente mais tarde.' });
@@ -45,6 +45,17 @@ router.post('/register', async (req, res) => {
     const { email, username, nickname, password, day, month, year } = req.body;
 
     try {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/;
+
+        if (!emailRegex.test(email)) {
+            return res.render('register', { error: 'E-mail inválido.' });
+        }
+
+        if (!passwordRegex.test(password)) {
+            return res.render('register', { error: 'A senha deve ter pelo menos 8 caracteres, incluindo uma letra e um número.' });
+        }
+
         const existingUsername = await User.findOne({ username });
         if (existingUsername) {
             return res.render('register', { error: 'Este nome de usuário já está em uso.' });
@@ -65,7 +76,7 @@ router.post('/register', async (req, res) => {
         await newUser.save();
         
         req.session.userId = newUser._id;
-        res.redirect('/');
+        res.redirect('/chats');
     } catch (err) {
         console.error(err);
         res.render('register', { error: 'Erro ao registrar o usuário. Por favor, tente novamente mais tarde.' });

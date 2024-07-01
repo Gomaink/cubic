@@ -32,6 +32,9 @@ app.set('view engine', 'ejs');
 const authenticationRouter = require('./routes/auth');
 app.use("/auth", authenticationRouter);
 
+const chatsRouter = require('./routes/chats');
+app.use("/chats", chatsRouter);
+
 // Routes
 app.get("/", (req, res) => {
     res.render("index");

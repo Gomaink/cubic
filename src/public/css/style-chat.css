@@ -1,0 +1,100 @@
+@import url('https://fonts.googleapis.com/css?family=Poppins');
+
+    body, html {
+      background: #0f1013;
+      font-family: 'Poppins';
+      height: 100%;
+      margin: 0;
+    }
+
+    .container-fluid {
+      height: 100%;
+      display: flex;
+      color: #dad9d9;
+    }
+
+    .sidebar {
+      width: 300px;
+      border-right: 1px solid #ddd;
+      padding: 20px;
+    }
+
+    .chat-area {
+      flex-grow: 1;
+      padding: 20px;
+    }
+
+    .add-friend-title {
+      padding-top: 20px;
+      font-weight: 700;
+      font-size: 15px;
+    }
+
+    .add-friend-message {
+      font-weight: 400;
+      font-size: 12px;
+      padding-right: 20px;
+    }
+
+    .friend-list-title {
+      font-weight: 700;
+      font-size: 15px;
+    }
+
+    .form-control {
+      color: #fff;
+      background-color: #2a3236;
+      border: 1px solid #2a3236;
+      font-size: 12px;
+      padding: 0.25rem 0.5rem;
+      width: 150px; /* Ajuste a largura conforme necessário */
+    }
+
+    .form-control:focus {
+      color: #fff;
+      background-color: #323d43;
+      border: 1px solid #323d43;
+    }
+
+    .form-control::placeholder {
+      color: #fff; /* Cor do placeholder */
+      opacity: 1; /* Certifica-se de que a opacidade do placeholder é 100% */
+    }
+
+    .btn-add {
+      border: 2px solid #198754; 
+      background-color: #198754;
+      border-radius: 1.5rem;
+      color: #dad9d9;
+      font-size: 12px;
+      padding: 0.25rem 0.75rem;
+    }
+
+    .btn-add:hover {
+      border: 2px solid #105535; 
+      background-color: #105535;
+      border-radius: 1.5rem;
+      color: #dad9d9;
+    }
+
+    .list-group-item {
+      padding-right: 10px;
+      padding-bottom: 10p;
+      color: #fff;
+      background-color: #2a3236;
+      border: 1px solid #2a3236;
+      font-size: 12px;
+      padding: 0.35rem 0.5rem;
+      width: 200px; /* Ajuste a largura conforme necessário */
+    }
+
+    .list-group-item:hover {
+        padding-right: 10px;
+        padding-bottom: 10p;
+        color: #fff;
+        background-color: #323d43;
+        border: 1px solid #323d43;
+        font-size: 12px;
+        padding: 0.35rem 0.5rem;
+        width: 200px; /* Ajuste a largura conforme necessário */
+      }
