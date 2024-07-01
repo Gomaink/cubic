@@ -29,22 +29,3 @@ document.addEventListener("DOMContentLoaded", function() {
         yearSelect.appendChild(option);
     }
 });
-
-$(document).ready(function() {
-    function loadAnotherHtml() {
-        $.ajax({
-            url: 'another', 
-            type: 'GET',
-            success: function(response) {
-                $('#content').html(response);
-            },
-            error: function(xhr, status, error) {
-                console.error('Error loading page: ' + status);
-            }
-        });
-    }
-
-    $('#loadHtmlBtn').click(function() {
-        loadAnotherHtml();
-    });
-});

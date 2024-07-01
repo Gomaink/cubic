@@ -6,6 +6,7 @@ body {
   margin: 0;
   padding: 0;
   position: relative;
+  overflow-x: hidden; /* Para ocultar a barra de rolagem horizontal, se necessário */
 }
 
 .navbar {
@@ -27,31 +28,27 @@ body {
 }
 
 .btn-login {
-  border: 2px solid #fff; 
+  border: 2px solid #fff;
   background-color: #fff;
   border-radius: 1.5rem;
   color: #000;
 }
 
 .btn-login:hover {
-  border: 2px solid #fff; 
+  border: 2px solid #fff;
   background-color: #fff;
   border-radius: 1.5rem;
   color: #a058f2;
 }
 
+
 .content-section {
-  background-size: cover;
-  background-position: center;
+
   color: #fff; /* Cor do texto */
-  padding: 60px 0; /* Espaçamento interno */
-  text-align: center; /* Centralizar o conteúdo */
 }
 
+
 .content-section .container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   text-align: left; /* Ajuste para alinhar o texto à esquerda */
   padding: 0 20px; /* Espaçamento interno para o texto */
 }
@@ -71,26 +68,12 @@ body {
 
 @media (max-width: 767.98px) {
   .content-section .container {
-      flex-direction: column-reverse; /* Inverte a direção dos itens em coluna */
-      text-align: center; /* Centraliza o texto */
+    flex-direction: column-reverse; /* Inverte a direção dos itens em coluna */
+    text-align: center; /* Centraliza o texto */
   }
 }
 
 /*login*/
-#content::before {
-  content: "";
-  position: absolute;
-  top: -70px;
-  right: 350px; /* Ajuste a posição à direita para aproximar a imagem */
-  width: 25%; /* Ajuste a largura conforme necessário */
-  height: 100%;
-  background-image: url('/images/cubic-w-nobg.png');
-  background-size: contain; /* Ajustar para contain */
-  background-repeat: no-repeat; /* Evitar repetição da imagem */
-  background-position: center;
-  z-index: -1;
-}
-
 .login-form {
   background-color: #181c1f;
   border: 1px solid #181c1f;
@@ -172,8 +155,9 @@ select.form-select {
 }
 
 .container {
-  min-height: calc(100vh - 56px); /* Altura mínima para considerar a altura da navbar */
   display: flex;
   justify-content: center;
   align-items: center;
+  height: 80vh; /* Define a altura da div para ocupar toda a altura da viewport */
+  margin-top: 56px; /* Ajuste conforme necessário para compensar a altura da sua navbar */
 }

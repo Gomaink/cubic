@@ -11,45 +11,41 @@
 </head>
 <body>
 
-    <div id="content">
-
-        <nav class="navbar navbar-expand-lg">
-            <div class="container-fluid">
-                <a class="navbar-brand" href="/" style="color: #fff;">
-                    <img src="/images/cubic-w-nobg.png" alt="Logo" width="50" height="50"> Cubic
-                </a>
-            </div>
-        </nav>
-        
-        
-        <div class="container d-flex justify-content-center align-items-center min-vh-100">
-            <div class="login-form p-4 rounded">
-                <h2 class="mb-4 text-center">Bem-vindo de volta!</h2>
-                <form action="/auth/login" method="POST">
-                    <div class="mb-3">
-                        <label for="email" class="form-label">E-MAIL OU NOME DE USUÁRIO</label> <a class="ast">*</a>
-                        <input type="email" class="form-control" id="email" name="email" required>
-                    </div>
-                    <div class="mb-3">
-                        <label for="password" class="form-label">SENHA</label> <a class="ast">*</a>
-                        <input type="password" class="form-control" id="password" name="password" required>
-                    </div>
-                    <div class="text-left mb-3">
-                        <a href="#" class="small">Esqueci minha senha</a>
-                    </div>
-                    <button type="submit" class="btn btn-register w-100 rounded-pill">Logar</button>
-                    <div class="text-left mt-3">
-                        <p class="small" style="color: #6c757d;">Primeira vez aqui? <a href="/auth/register" style="color: #455e9c;">Crie uma conta</a></p>
-                    </div>
-                    <% if (typeof error !== 'undefined' && error !== null) { %>
-                        <div class="text-left mt-3">
-                            <p class="small" style="color: #ec4042;"><%= error %></p>
-                        </div>
-                    <% } %>
-                </form>
-            </div>
+    <nav class="navbar navbar-expand-md">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/" style="color: #fff;">
+                <img src="/images/cubic-w-nobg.png" alt="Logo" width="50" height="50"> Cubic
+            </a>
         </div>
-    </div>
+    </nav>
+    
+    
+    <div class="container">
+        <div class="login-form p-4 rounded">
+            <h2 class="mb-4 text-center">Bem-vindo de volta!</h2>
+            <form action="/auth/login" method="POST">
+                <div class="mb-3">
+                    <label for="email" class="form-label">E-MAIL OU NOME DE USUÁRIO</label> <a class="ast">*</a>
+                    <input type="email" class="form-control" id="email" name="email" required>
+                </div>
+                <div class="mb-3">
+                    <label for="password" class="form-label">SENHA</label> <a class="ast">*</a>
+                    <input type="password" class="form-control" id="password" name="password" required>
+                </div>
+                <div class="text-left mb-3">
+                    <a href="#" class="small">Esqueci minha senha</a>
+                </div>
+                <button type="submit" class="btn btn-register w-100 rounded-pill">Logar</button>
+                <div class="text-left mt-3">
+                    <p class="small" style="color: #6c757d;">Primeira vez aqui? <a href="/auth/register" style="color: #455e9c;">Crie uma conta</a></p>
+                </div>
+                <% if (typeof error !== 'undefined' && error !== null) { %>
+                    <div class="text-left mt-3">
+                        <p class="small" style="color: #ec4042;"><%= error %></p>
+                    </div>
+                <% } %>
+            </form>
+        </div>
     </div>
 
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
