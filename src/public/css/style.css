@@ -6,7 +6,7 @@ body {
   margin: 0;
   padding: 0;
   position: relative;
-  overflow-x: hidden; /* Para ocultar a barra de rolagem horizontal, se necessário */
+  overflow-x: hidden;
 }
 
 .navbar {
@@ -44,32 +44,32 @@ body {
 
 .content-section {
 
-  color: #fff; /* Cor do texto */
+  color: #fff; 
 }
 
 
 .content-section .container {
-  text-align: left; /* Ajuste para alinhar o texto à esquerda */
-  padding: 0 20px; /* Espaçamento interno para o texto */
+  text-align: left;
+  padding: 0 20px; 
 }
 
 .content-section .text {
-  flex: 1; /* Ocupa todo o espaço disponível na largura */
-  max-width: 100%; /* Largura máxima para telas menores */
-  margin-bottom: 20px; /* Espaçamento entre texto e imagem */
+  flex: 1; 
+  max-width: 100%; 
+  margin-bottom: 20px; 
 }
 
 .content-section .image img {
-  max-width: 100%; /* Garante que a imagem não ultrapasse a largura da coluna */
-  height: auto; /* Permite que a altura da imagem seja ajustada automaticamente */
-  display: block; /* Garante que a imagem não cause problemas de layout */
-  margin: 0 auto; /* Centraliza a imagem em telas menores */
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0 auto;
 }
 
 @media (max-width: 767.98px) {
   .content-section .container {
-    flex-direction: column-reverse; /* Inverte a direção dos itens em coluna */
-    text-align: center; /* Centraliza o texto */
+    flex-direction: column-reverse; 
+    text-align: center;
   }
 }
 
@@ -80,17 +80,17 @@ body {
   box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
   width: 100%;
   max-width: 400px;
-  z-index: 1; /* Garantir que o formulário fique acima da imagem de fundo */
+  z-index: 1;
 }
 
 .login-form .btn-primary {
   background-color: #007bff;
   border-color: #007bff;
-  border-radius: 50px; /* Borda arredondada para o botão */
+  border-radius: 50px; 
 }
 
 .login-form .rounded {
-  border-radius: 15px; /* Borda arredondada para a div da tela de login */
+  border-radius: 15px;
 }
 
 .login-form .small {
@@ -113,7 +113,7 @@ body {
 
 
 .login-form h2 {
-  color: #dad9d9; /* Cor do texto do título */
+  color: #dad9d9;
   font-size: 24px;
   font-weight: 400;
 }
@@ -143,8 +143,8 @@ body {
 }
 
 select.form-select {
-  max-height: 100px; /* Ajuste a altura máxima conforme necessário */
-  overflow-y: auto; /* Permite rolagem vertical quando o conteúdo excede a altura máxima */
+  max-height: 100px;
+  overflow-y: auto;
 }
 
 .ast {
@@ -158,6 +158,6 @@ select.form-select {
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 80vh; /* Define a altura da div para ocupar toda a altura da viewport */
-  margin-top: 56px; /* Ajuste conforme necessário para compensar a altura da sua navbar */
+  height: 80vh; 
+  margin-top: 56px; 
 }
