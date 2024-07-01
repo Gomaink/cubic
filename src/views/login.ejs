@@ -37,10 +37,15 @@
                     <div class="text-left mb-3">
                         <a href="#" class="small">Esqueci minha senha</a>
                     </div>
-                    <button type="submit" class="btn btn-primary w-100 rounded-pill">Logar</button>
+                    <button type="submit" class="btn btn-register w-100 rounded-pill">Logar</button>
                     <div class="text-left mt-3">
                         <p class="small" style="color: #6c757d;">Primeira vez aqui? <a href="/auth/register" style="color: #455e9c;">Crie uma conta</a></p>
                     </div>
+                    <% if (typeof error !== 'undefined' && error !== null) { %>
+                        <div class="text-left mt-3">
+                            <p class="small" style="color: #ec4042;"><%= error %></p>
+                        </div>
+                    <% } %>
                 </form>
             </div>
         </div>

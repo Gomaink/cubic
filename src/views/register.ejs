@@ -46,17 +46,17 @@
                         <label class="form-label">DATA DE NASCIMENTO</label> <a class="ast">*</a>
                         <div class="row g-2">
                             <div class="col-md">
-                                <select class="form-select" id="daySelect" aria-label="Dia" required>
+                                <select class="form-select" id="daySelect" name="day" aria-label="Dia" required>
                                     <option selected disabled>Dia</option>
                                 </select>
                             </div>
                             <div class="col-md">
-                                <select class="form-select" id="monthSelect" aria-label="Mês" required>
+                                <select class="form-select" id="monthSelect" name="month" aria-label="Mês" required>
                                     <option selected disabled>Mês</option>
                                 </select>
                             </div>
                             <div class="col-md">
-                                <select class="form-select" id="yearSelect" aria-label="Ano" required>
+                                <select class="form-select" id="yearSelect" name="year" aria-label="Ano" required>
                                     <option selected disabled>Ano</option>
                                 </select>
                             </div>
@@ -69,6 +69,11 @@
                     <div class="text-left mt-3">
                         <p class="small" style="color: #6c757d;">Já possui uma conta? <a href="/auth/login" style="color: #455e9c;">Entrar</a></p>
                     </div>
+                    <% if (typeof error !== 'undefined' && error !== null) { %>
+                        <div class="text-left mt-3">
+                            <p class="small" style="color: #ec4042;"><%= error %></p>
+                        </div>
+                    <% } %>
                 </form>
             </div>
         </div>
