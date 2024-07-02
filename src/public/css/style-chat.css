@@ -81,20 +81,38 @@
       padding-right: 10px;
       padding-bottom: 10p;
       color: #fff;
-      background-color: #2a3236;
-      border: 1px solid #2a3236;
+      background-color: #0f1013;
+      border: 1px solid #0f1013;
       font-size: 12px;
       padding: 0.35rem 0.5rem;
       width: 200px; /* Ajuste a largura conforme necessário */
+      text-decoration: none;
+    }
+
+    .list-group-item a {
+      text-decoration: none;
+      color: #dad9d9;
     }
 
     .list-group-item:hover {
         padding-right: 10px;
         padding-bottom: 10p;
         color: #fff;
-        background-color: #323d43;
-        border: 1px solid #323d43;
+        background-color: rgba(50, 61, 67, 0.2);
+        border: 1px solid rgba(50, 61, 67, 0.2);
         font-size: 12px;
         padding: 0.35rem 0.5rem;
         width: 200px; /* Ajuste a largura conforme necessário */
+        cursor: pointer;
+      }
+
+      .friend-avatar {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        object-fit: cover;
+      }
+
+      .text-danger {
+        font-size: 12px;
       }

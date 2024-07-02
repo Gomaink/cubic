@@ -29,3 +29,43 @@ document.addEventListener("DOMContentLoaded", function() {
         yearSelect.appendChild(option);
     }
 });
+
+$(document).ready(function () {
+    $('#addFriendForm').on('submit', function (e) {
+        e.preventDefault();
+        const friendName = $('#friendName').val();
+        if (friendName === '') {
+            $('#error-message').text('Usuário não encontrado.');
+        } else {
+            $('#error-message').text('');
+
+            // Enviar requisição AJAX para adicionar amigo
+            $.ajax({
+                url: '/chats/add-friend',
+                method: 'POST',
+                data: JSON.stringify({ friendName: friendName }), // Enviar dados como JSON
+                contentType: 'application/json', // Definir tipo de conteúdo como JSON
+                success: function (data) {
+                    if (data.success) {
+                        const avatarUrl = `/path/to/avatars/${friendName}.png`; // Atualizar este caminho conforme necessário
+                        $('#friendsList').append(`
+                            <li class="list-group-item">
+                                <a href="#" class="d-flex align-items-center friend-item" data-friend-name="${friendName}">
+                                    <img src="${avatarUrl}" alt="${friendName}" class="friend-avatar me-2">
+                                    ${friendName}
+                                </a>
+                            </li>
+                        `);
+                        $('#friendName').val('');
+                    } else {
+                        $('#error-message').text(data.error);
+                    }
+                },
+                error: function (jqXHR) {
+                    const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao adicionar amigo. Tente novamente.';
+                    $('#error-message').text(errorMessage);
+                }
+            });
+        }
+    });
+});

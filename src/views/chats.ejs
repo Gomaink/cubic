@@ -13,50 +13,33 @@
 
   <div class="container-fluid">
     <div class="sidebar d-none d-md-block">
-      <p class="add-friend-title">ADICIONAR AMIGO</p>
-      <p class="add-friend-message">Aqui você pode adicionar amigos buscando pelo nome de usuário.</p>
+        <p class="add-friend-title">ADICIONAR AMIGO</p>
+        <p class="add-friend-message">Aqui você pode adicionar amigos buscando pelo nome de usuário.</p>
 
-      <form id="addFriendForm">
-        <div class="input-group mb-3">
-          <input type="text" class="form-control" placeholder="Nome de usuário" id="friendName">
-          <button class="btn btn-add" type="submit">Add</button>
-        </div>
-        <hr style="color: #fff;">
-        <div id="error-message" class="text-danger"></div>
-      </form>
+        <form id="addFriendForm">
+            <div class="input-group mb-3">
+                <input type="text" class="form-control" placeholder="Nome de usuário" id="friendName">
+                <button type="submit" class="btn btn-add">Add</button>
+            </div>
+            <hr style="color: #fff;">
+            <div id="error-message" class="text-danger"></div>
+        </form>
 
-      <h5 class="friend-list-title mt-4">LISTA DE AMIGOS</h5>
-      <ul class="list-group" id="friendsList">
-        <!-- Friends will be listed here -->
-      </ul>
+        <h5 class="friend-list-title mt-4">LISTA DE AMIGOS</h5>
+        <ul class="list-group" id="friendsList">
+            <!-- Friends will be listed here -->
+        </ul>
     </div>
 
     <div class="chat-area">
-      <h4>Chat Area</h4>
-      <div id="chatContent">
-        <!-- Chat content will be here -->
-      </div>
+        <h4>Chat Area</h4>
+        <div id="chatContent">
+            <!-- Chat content will be here -->
+        </div>
     </div>
-  </div>
+</div>
 
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="/scripts/script.js"></script>
-    <script>
-        $(document).ready(function(){
-      $('#addFriendForm').on('submit', function(e) {
-        e.preventDefault();
-        const friendName = $('#friendName').val();
-        if (friendName === '') {
-          $('#error-message').text('Please enter a friend\'s name.');
-        } else {
-          $('#error-message').text('');
-          $('#friendsList').append(`<li class="list-group-item">${friendName}</li>`);
-          $('#friendName').val('');
-          // Add the friend image to the compact sidebar
-          $('#friendsListCompact').append(`<img src="/images/cubic-w-nobg.png" alt="${friendName}" class="friend-img">`);
-        }
-      });
-    });
-    </script>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="/scripts/script.js"></script>
 </body>
 </html>

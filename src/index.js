@@ -40,9 +40,5 @@ app.get("/", (req, res) => {
     res.render("index");
 });
 
-app.get("/another", (req, res) => {
-    res.render("another-page");
-});
-
 //Express listener
 app.listen(port, () => console.log(`Server running on port ${port}.`));

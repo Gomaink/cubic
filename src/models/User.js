@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const Friendship = require('./Friendship');
 
 // User "table" (SQL User lmfao)
 const userSchema = new mongoose.Schema({
