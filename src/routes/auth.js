@@ -5,7 +5,7 @@ const User = require('../models/User');
 
 router.get('/login', (req, res) => {
     if (req.session.userId) {
-        return res.redirect("/");
+        return res.redirect("/chats");
     }
     res.render('login');
 });
@@ -36,7 +36,7 @@ router.post('/login', async (req, res) => {
 
 router.get('/register', (req, res) => {
     if (req.session.userId) {
-        return res.redirect("/");
+        return res.redirect("/chats");
     }
     res.render('register');
 });

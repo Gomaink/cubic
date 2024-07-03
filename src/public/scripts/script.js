@@ -71,7 +71,6 @@ $(document).ready(function () {
 });
 
 $(document).ready(function() {
-    // Atualizar posição do thumb do scrollbar quando a lista é rolada
     $('.friend-list-container').on('scroll', function() {
         var scrollPercentage = $(this).scrollTop() / ($(this).prop('scrollHeight') - $(this).height());
         var thumbTop = scrollPercentage * ($(this).height() - $('.custom-scrollbar-thumb').height());

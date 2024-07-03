@@ -170,13 +170,6 @@ body, html {
   object-fit: cover;
 }
 
-/*
- .friend-list-container {
-  max-height: 700px;
-  overflow-y: auto;
-} 
-*/
-
 .friend-list-container {
   max-height: 700px; /* Altura máxima para a lista de amigos */
   overflow-y: auto; /* Adiciona scroll vertical se necessário */
