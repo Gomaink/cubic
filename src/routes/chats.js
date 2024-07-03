@@ -49,6 +49,32 @@ router.post('/add-friend', async (req, res) => {
             return res.status(400).json({ error: 'Você não pode se adicionar como amigo.' });
         }
 
+        const reverseRequest = await FriendRequest.findOne({ requester: friend._id, recipient: currentUser._id, status: 'pending' });
+        if (reverseRequest) {
+            reverseRequest.status = 'accepted';
+            await reverseRequest.save();
+
+            let friendship = await Friendship.findOne({ user: currentUser._id });
+            if (!friendship) {
+                friendship = new Friendship({ user: currentUser._id, friends: [] });
+            }
+            if (!friendship.friends.includes(friend._id)) {
+                friendship.friends.push(friend._id);
+            }
+            await friendship.save();
+
+            let reverseFriendship = await Friendship.findOne({ user: friend._id });
+            if (!reverseFriendship) {
+                reverseFriendship = new Friendship({ user: friend._id, friends: [] });
+            }
+            if (!reverseFriendship.friends.includes(currentUser._id)) {
+                reverseFriendship.friends.push(currentUser._id);
+            }
+            await reverseFriendship.save();
+
+            return res.status(200).json({ success: true });
+        }
+
         const existingRequest = await FriendRequest.findOne({ requester: currentUser._id, recipient: friend._id, status: 'pending' });
         if (existingRequest) {
             return res.status(400).json({ error: 'Pedido de amizade já enviado.' });
@@ -126,5 +152,20 @@ router.get('/list', async (req, res) => {
     }
 });
 
+router.get('/check', async (req, res) => {
+    try {
+        const currentUser = await User.findById(req.session.userId);
+        if (!currentUser) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        const pendingRequests = await FriendRequest.countDocuments({ recipient: currentUser._id, status: 'pending' });
+        res.status(200).json({ pendingRequests });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Erro ao verificar solicitações de amizade. Tente novamente mais tarde.' });
+    }
+});
 
 module.exports = router;

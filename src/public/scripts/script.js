@@ -133,4 +133,24 @@ $(document).ready(function () {
             }
         });
     }
+
+    function checkFriendRequests() {
+        $.ajax({
+            url: '/chats/check', // Ajuste esta URL para corresponder à rota que verifica as solicitações de amizade pendentes
+            method: 'GET',
+            success: function (data) {
+                const notificationIcon = $('#friendRequestsNotification');
+                if (data.pendingRequests && data.pendingRequests > 0) {
+                    notificationIcon.show();
+                } else {
+                    notificationIcon.hide();
+                }
+            },
+            error: function (jqXHR) {
+                console.error('Erro ao verificar solicitações de amizade:', jqXHR);
+            }
+        });
+    }
+
+    setInterval(checkFriendRequests, 500);
 });
