@@ -214,3 +214,48 @@ body, html {
   background-color: #888; /* Cor do thumb */
   border-radius: 4px; /* Arredondamento das bordas */
 }
+
+.modal-content {
+  background-color: #0f1013;
+  color: #dad9d9;
+}
+
+.btn-modal {
+  border: 1px solid #198754; 
+  background-color: #198754;
+  color: #dad9d9;
+  font-size: 12px;
+  padding: 0.25rem 0.75rem;
+}
+
+.btn-modal:hover {
+  border: 1px solid #105535; 
+  background-color: #105535;
+  color: #dad9d9;
+}
+
+.modal-control {
+  color: #fff;
+  background-color: #2a3236;
+  border: 1px solid #2a3236;
+  border-radius: 0.5rem;
+  font-size: 12px;
+  padding: 0.25rem 0.5rem;
+  width: 300px; /* Ajuste a largura conforme necessário */
+}
+
+.modal-control:focus {
+  color: #fff;
+  background-color: #323d43;
+  border: 1px solid #323d43;
+}
+
+.modal-control::placeholder {
+  color: #fff; /* Cor do placeholder */
+  opacity: 1; /* Certifica-se de que a opacidade do placeholder é 100% */
+}
+
+.btn-close {
+  background-color: rgba(50, 61, 67, 0.7);
+  border: 1px solid rgba(50, 61, 67, 0.7);
+}

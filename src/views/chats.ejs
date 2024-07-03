@@ -44,9 +44,9 @@
                     gomaink
                 </button>
                 <ul class="dropdown-menu">
-                    <li><a class="dropdown-item" href="#"><i class="fa-solid fa-user" style="margin-right: 10px;"></i>Alterar nome</a></li>
-                    <li><a class="dropdown-item" href="#"><i class="fa-regular fa-user" style="margin-right: 10px;"></i>Alterar nick</a></li>
-                    <li><a class="dropdown-item" href="#"><i class="fa-solid fa-user-astronaut" style="margin-right: 10px;"></i>Alterar avatar</a></li>
+                    <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalAlterarNome"><i class="fas fa-user" style="margin-right: 10px;"></i>Alterar nome</a></li>
+                    <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalAlterarNick"><i class="far fa-user" style="margin-right: 10px;"></i>Alterar nick</a></li>
+                    <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalAlterarAvatar"><i class="fas fa-user-astronaut" style="margin-right: 10px;"></i>Alterar avatar</a></li>
                     <li><hr class="dropdown-divider" style="color: #fff; background-color: #fff;"></li>
                     <li><a class="dropdown-item" href="/auth/logout"><i class="fa-solid fa-right-from-bracket" style="margin-right: 10px;"></i>Desconectar</a></li>
                 </ul>
@@ -63,6 +63,73 @@
         </div>
     </div>
 </div>
+
+<!-- Modais -->
+    <!-- Modal Alterar Nome -->
+    <div class="modal fade" id="modalAlterarNome" tabindex="-1" aria-labelledby="modalAlterarNomeLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalAlterarNomeLabel">Alterar nome de usuário</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Formulário para alterar o nome -->
+                    <form>
+                        <div class="mb-3">
+                            <label for="newName" class="form-label">Qual será seu novo nome de usuário?</label>
+                            <input type="text" class="modal-control" id="newName" placeholder="Algum nome legal...">
+                        </div>
+                        <button type="submit" class="btn btn-modal">Salvar</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Alterar Nick -->
+    <div class="modal fade" id="modalAlterarNick" tabindex="-1" aria-labelledby="modalAlterarNickLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalAlterarNickLabel">Alterar nome de exibição</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Formulário para alterar o nick -->
+                    <form>
+                        <div class="mb-3">
+                            <label for="newNick" class="form-label">Qual será seu novo nome de exibição?</label>
+                            <input type="text" class="modal-control" id="newNick" placeholder="Algum nick legal...">
+                        </div>
+                        <button type="submit" class="btn btn-modal">Salvar</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Alterar Avatar -->
+    <div class="modal fade" id="modalAlterarAvatar" tabindex="-1" aria-labelledby="modalAlterarAvatarLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalAlterarAvatarLabel">Alterar Avatar</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Formulário para alterar o avatar -->
+                    <form>
+                        <div class="mb-3">
+                            <label for="newAvatar" class="form-label">Escolha uma imagem bem legal para o seu avatar!</label>
+                            <input type="file" class="modal-control" id="newAvatar" accept="image/png, image/jpeg, image/jpg" >
+                        </div>
+                        <button type="submit" class="btn btn-modal">Salvar</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
 
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
