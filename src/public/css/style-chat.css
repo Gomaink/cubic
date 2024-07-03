@@ -80,7 +80,7 @@ body, html {
 
 .list-group-item {
   padding-right: 10px;
-  padding-bottom: 10p;
+  padding-bottom: 10px;
   color: #fff;
   background-color: #0f1013;
   border: 1px solid #0f1013;
@@ -258,4 +258,18 @@ body, html {
 .btn-close {
   background-color: rgba(50, 61, 67, 0.7);
   border: 1px solid rgba(50, 61, 67, 0.7);
+}
+
+.error-message-modal {
+  margin-left: 12px;
+  font-size: 12px;
+}
+
+.friend-requests-buttons {
+  display: flex;
+  gap: 10px; /* Espaçamento entre os botões */
+}
+
+.requester-name {
+  margin-right: 10px;
 }

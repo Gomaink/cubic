@@ -41,13 +41,14 @@
             <div class="btn-group dropup">
                 <button type="button" class="btn dropdown-toggle btn-sm" data-bs-toggle="dropdown" aria-expanded="false">
                     <img src="/images/cubic-w-nobg.png" class="avatar-icon" alt="Avatar">
-                    gomaink
+                    <%= currentUser.username %>
                 </button>
                 <ul class="dropdown-menu">
                     <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalAlterarNome"><i class="fas fa-user" style="margin-right: 10px;"></i>Alterar nome</a></li>
                     <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalAlterarNick"><i class="far fa-user" style="margin-right: 10px;"></i>Alterar nick</a></li>
                     <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalAlterarAvatar"><i class="fas fa-user-astronaut" style="margin-right: 10px;"></i>Alterar avatar</a></li>
                     <li><hr class="dropdown-divider" style="color: #fff; background-color: #fff;"></li>
+                    <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalFriendRequests"><i class="fa-solid fa-user-group" style="margin-right: 10px;"></i>Solicitações</a></li>
                     <li><a class="dropdown-item" href="/auth/logout"><i class="fa-solid fa-right-from-bracket" style="margin-right: 10px;"></i>Desconectar</a></li>
                 </ul>
             </div>
@@ -59,12 +60,12 @@
     <div class="chat-area">
         <h4>Area de chat aqui bla bla</h4>
         <div id="chatContent">
-            <!-- Chat content will be here -->
+            
         </div>
     </div>
 </div>
 
-<!-- Modais -->
+    <!-- Modais -->
     <!-- Modal Alterar Nome -->
     <div class="modal fade" id="modalAlterarNome" tabindex="-1" aria-labelledby="modalAlterarNomeLabel" aria-hidden="true">
         <div class="modal-dialog">
@@ -74,7 +75,6 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <!-- Formulário para alterar o nome -->
                     <form>
                         <div class="mb-3">
                             <label for="newName" class="form-label">Qual será seu novo nome de usuário?</label>
@@ -96,7 +96,6 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <!-- Formulário para alterar o nick -->
                     <form>
                         <div class="mb-3">
                             <label for="newNick" class="form-label">Qual será seu novo nome de exibição?</label>
@@ -118,7 +117,6 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <!-- Formulário para alterar o avatar -->
                     <form>
                         <div class="mb-3">
                             <label for="newAvatar" class="form-label">Escolha uma imagem bem legal para o seu avatar!</label>
@@ -126,6 +124,23 @@
                         </div>
                         <button type="submit" class="btn btn-modal">Salvar</button>
                     </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Solicitações -->
+    <div class="modal fade" id="modalFriendRequests" tabindex="-1" aria-labelledby="modalFriendRequestsLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalFriendRequestsLabel">Pedidos de Amizade</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <ul id="friendRequestsList" class="list-group">
+                    </ul>
+                    <div id="error-message-modal" class="error-message-modal text-secondary"></div>
                 </div>
             </div>
         </div>

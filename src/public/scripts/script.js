@@ -30,6 +30,14 @@ document.addEventListener("DOMContentLoaded", function() {
     }
 });
 
+$(document).ready(function() {
+    $('.friend-list-container').on('scroll', function() {
+        var scrollPercentage = $(this).scrollTop() / ($(this).prop('scrollHeight') - $(this).height());
+        var thumbTop = scrollPercentage * ($(this).height() - $('.custom-scrollbar-thumb').height());
+        $('.custom-scrollbar-thumb').css('top', thumbTop);
+    });
+});
+
 $(document).ready(function () {
     $('#addFriendForm').on('submit', function (e) {
         e.preventDefault();
@@ -39,24 +47,15 @@ $(document).ready(function () {
         } else {
             $('#error-message').text('');
 
-            // Enviar requisição AJAX para adicionar amigo
             $.ajax({
                 url: '/chats/add-friend',
                 method: 'POST',
-                data: JSON.stringify({ friendName: friendName }), // Enviar dados como JSON
-                contentType: 'application/json', // Definir tipo de conteúdo como JSON
+                data: JSON.stringify({ friendName: friendName }),
+                contentType: 'application/json',
                 success: function (data) {
                     if (data.success) {
-                        const avatarUrl = `/path/to/avatars/${friendName}.png`; // Atualizar este caminho conforme necessário
-                        $('#friendsList').append(`
-                            <li class="list-group-item">
-                                <a href="#" class="d-flex align-items-center friend-item" data-friend-name="${friendName}">
-                                    <img src="/images/cubic-w-nobg.png" alt="${friendName}" class="friend-avatar me-2">
-                                    ${friendName}
-                                </a>
-                            </li>
-                        `);
                         $('#friendName').val('');
+                        $('#error-message').text('Pedido de amizade enviado.');
                     } else {
                         $('#error-message').text(data.error);
                     }
@@ -68,12 +67,70 @@ $(document).ready(function () {
             });
         }
     });
-});
+    function loadFriendRequests() {
+        $.ajax({
+            url: '/chats/list', // Ajuste esta URL para corresponder à rota que retorna a lista de pedidos de amizade
+            method: 'GET',
+            success: function (data) {
+                const friendRequestsList = $('#friendRequestsList');
+                friendRequestsList.empty();
 
-$(document).ready(function() {
-    $('.friend-list-container').on('scroll', function() {
-        var scrollPercentage = $(this).scrollTop() / ($(this).prop('scrollHeight') - $(this).height());
-        var thumbTop = scrollPercentage * ($(this).height() - $('.custom-scrollbar-thumb').height());
-        $('.custom-scrollbar-thumb').css('top', thumbTop);
+                if (data.friendRequests && data.friendRequests.length > 0) {
+                    data.friendRequests.forEach(request => {
+                        friendRequestsList.append(`
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span class="requester-name">${request.requester.username}</span>
+                                <div class="friend-requests-buttons">
+                                    <button class="btn btn-success btn-sm accept-friend-request" data-request-id="${request._id}">Aceitar</button>
+                                    <button class="btn btn-danger btn-sm decline-friend-request" data-request-id="${request._id}">Recusar</button>
+                                </div>
+                            </li>
+                        `);
+                    });
+                } else {
+                    friendRequestsList.append('<li class="list-group-item text-center">Nenhum pedido de amizade.</li>');
+                }
+            },
+            error: function (jqXHR) {
+                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao carregar pedidos de amizade. Tente novamente.';
+                alert(errorMessage);
+            }
+        });
+    }
+
+    $('#modalFriendRequests').on('show.bs.modal', function () {
+        loadFriendRequests();
     });
+
+    // Adicione event listeners aos botões de aceitar e recusar
+    $(document).on('click', '.accept-friend-request', function () {
+        const requestId = $(this).data('request-id');
+        respondToFriendRequest(requestId, 'accept');
+    });
+
+    $(document).on('click', '.decline-friend-request', function () {
+        const requestId = $(this).data('request-id');
+        respondToFriendRequest(requestId, 'decline');
+    });
+
+    function respondToFriendRequest(requestId, action) {
+        $.ajax({
+            url: '/chats/respond-friend-request',
+            method: 'POST',
+            data: JSON.stringify({ requestId: requestId, action: action }),
+            contentType: 'application/json',
+            success: function (data) {
+                if (data.success) {
+                    loadFriendRequests();
+                    $('#error-message-modal').text(`Pedido de amizade ${action === 'accept' ? 'aceito' : 'recusado'}!`);
+                } else {
+                    $('#error-message-modal').text(`Erro ao processar o pedido de amizade.`);
+                }
+            },
+            error: function (jqXHR) {
+                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao processar o pedido de amizade. Tente novamente.';
+                $('#error-message-modal').text(errorMessage);
+            }
+        });
+    }
 });

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const Friendship = require('../models/Friendship');
+const FriendRequest = require('../models/FriendRequest');
 
 router.get('/', async (req, res) => {
     try {
@@ -31,29 +32,30 @@ router.post('/add-friend', async (req, res) => {
     try {
         const friend = await User.findOne({ username: friendName });
         if (!friend) {
-            console.log('Não foi possível encontrar o usuário pelo nome de usuário', friendName);
             return res.status(404).json({ error: 'Usuário não encontrado.' });
         }
 
         const currentUser = await User.findById(req.session.userId);
         if (!currentUser) {
-            console.log('Não foi possível encontrar o usuário atual', req.session.userId);
             return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        const existingFriendship = await Friendship.findOne({ user: currentUser._id, friends: friend._id });
+        if (existingFriendship) {
+            return res.status(400).json({ error: `Você e ${friendName} já são amigos.` });
         }
 
         if (currentUser.username === friendName) {
             return res.status(400).json({ error: 'Você não pode se adicionar como amigo.' });
         }
 
-        let friendship = await Friendship.findOne({ user: currentUser._id });
-        if (!friendship) {
-            friendship = new Friendship({ user: currentUser._id, friends: [] });
+        const existingRequest = await FriendRequest.findOne({ requester: currentUser._id, recipient: friend._id, status: 'pending' });
+        if (existingRequest) {
+            return res.status(400).json({ error: 'Pedido de amizade já enviado.' });
         }
 
-        if (!friendship.friends.includes(friend._id)) {
-            friendship.friends.push(friend._id);
-            await friendship.save();
-        }
+        const friendRequest = new FriendRequest({ requester: currentUser._id, recipient: friend._id });
+        await friendRequest.save();
 
         res.status(200).json({ success: true });
 
@@ -62,5 +64,67 @@ router.post('/add-friend', async (req, res) => {
         res.status(500).json({ error: 'Erro ao adicionar amigo. Tente novamente mais tarde.' });
     }
 });
+
+router.post('/respond-friend-request', async (req, res) => {
+    const { requestId, action } = req.body;
+
+    try {
+        const friendRequest = await FriendRequest.findById(requestId);
+        if (!friendRequest) {
+            return res.status(404).json({ error: 'Pedido de amizade não encontrado.' });
+        }
+
+        if (friendRequest.recipient.toString() !== req.session.userId) {
+            return res.status(403).json({ error: 'Ação não autorizada.' });
+        }
+
+        if (action === 'accept') {
+            friendRequest.status = 'accepted';
+
+            let requesterFriendship = await Friendship.findOne({ user: friendRequest.requester });
+            if (!requesterFriendship) {
+                requesterFriendship = new Friendship({ user: friendRequest.requester, friends: [] });
+            }
+            requesterFriendship.friends.push(friendRequest.recipient);
+
+            let recipientFriendship = await Friendship.findOne({ user: friendRequest.recipient });
+            if (!recipientFriendship) {
+                recipientFriendship = new Friendship({ user: friendRequest.recipient, friends: [] });
+            }
+            recipientFriendship.friends.push(friendRequest.requester);
+
+            await requesterFriendship.save();
+            await recipientFriendship.save();
+        } else {
+            friendRequest.status = 'declined';
+        }
+
+        await friendRequest.save();
+        res.status(200).json({ success: true });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Erro ao responder ao pedido de amizade. Tente novamente mais tarde.' });
+    }
+});
+
+router.get('/list', async (req, res) => {
+    try {
+        const currentUser = await User.findById(req.session.userId);
+        if (!currentUser) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        const friendRequests = await FriendRequest.find({ recipient: currentUser._id, status: 'pending' })
+            .populate('requester', 'username');
+
+        res.status(200).json({ friendRequests: friendRequests });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Erro ao carregar pedidos de amizade. Tente novamente mais tarde.' });
+    }
+});
+
 
 module.exports = router;
