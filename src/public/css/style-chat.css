@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css?family=Poppins');
 
 body, html {
-  background: #0f1013;
+  background: #1a1d20;
   font-family: 'Poppins';
   height: 100%;
   margin: 0;
@@ -11,12 +11,13 @@ body, html {
   height: 100%;
   display: flex;
   color: #dad9d9;
+  padding-left: 0%;
 }
 
 .sidebar {
   width: 300px;
-  border-right: 1px solid #ddd;
   padding: 20px;
+  background-color: #181b1e;
 }
 
 .chat-area {
@@ -126,7 +127,7 @@ body, html {
 
 .dropup-container .btn-group {
   color: #fff;
-  background: #0f1013;
+  background: #181b1e;
   width: 80%;
 }
 
@@ -149,13 +150,13 @@ body, html {
 }
 
 .dropdown-menu {
-  background: rgba(50, 61, 67, 0.2);
+  background: rgba(26, 29, 32, 1);
 }
 
 .dropdown-item:hover {
   color: #fff;
-  background-color: rgba(58, 65, 68, 0.2);
-  border: 1px solid rgba(58, 65, 68, 0.2);
+  background-color: rgba(26, 29, 32, 0.2);
+  border: 1px solid rgba(26, 29, 32, 0.2);
 }
 
 .dropdown-divider {
@@ -169,7 +170,54 @@ body, html {
   object-fit: cover;
 }
 
+/*
+ .friend-list-container {
+  max-height: 700px;
+  overflow-y: auto;
+} 
+*/
+
 .friend-list-container {
   max-height: 700px; /* Altura máxima para a lista de amigos */
   overflow-y: auto; /* Adiciona scroll vertical se necessário */
+  position: relative; /* Necessário para posicionamento do scrollbar personalizado */
+  padding-right: 10px; /* Espaço para a largura do scrollbar personalizado */
+}
+
+/* Estilização para ocultar a scrollbar nativa e mostrar apenas a personalizada */
+.friend-list-container::-webkit-scrollbar {
+  width: 8px; /* Largura do scrollbar no Chrome/Safari */
+}
+
+.friend-list-container::-webkit-scrollbar-track {
+  background-color: transparent; /* Cor do fundo da track */
+}
+
+.friend-list-container::-webkit-scrollbar-thumb {
+  background-color: #888; /* Cor do thumb do scrollbar */
+  border-radius: 4px; /* Arredondamento das bordas */
+}
+
+.friend-list-container::-webkit-scrollbar-thumb:hover {
+  background-color: #555; /* Cor do thumb do scrollbar ao passar o mouse */
+}
+
+.custom-scrollbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 8px; /* Largura do scrollbar */
+  background-color: #f1f1f1; /* Cor de fundo do scrollbar */
+  opacity: 0; /* Ocultar inicialmente */
+  transition: opacity 0.3s ease; /* Transição suave para a visibilidade */
+}
+
+.friend-list-container:hover .custom-scrollbar {
+  opacity: 1; /* Mostrar scrollbar quando o mouse estiver sobre a lista */
+}
+
+.custom-scrollbar-thumb {
+  width: 100%;
+  background-color: #888; /* Cor do thumb */
+  border-radius: 4px; /* Arredondamento das bordas */
 }

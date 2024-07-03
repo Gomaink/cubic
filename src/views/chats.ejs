@@ -27,7 +27,11 @@
         
 
         <div class="friend-list-container">
-            <h5 class="friend-list-title mt-4">LISTA DE AMIGOS</h5>
+            <div class="custom-scrollbar">
+                <div class="custom-scrollbar-thumb"></div>
+            </div>
+        
+            <!-- Lista de amigos -->
             <ul class="list-group" id="friendsList">
                 <!-- Friends will be listed here -->
             </ul>
@@ -36,16 +40,16 @@
 
         <div class="dropup-container">
             <div class="btn-group dropup">
-                <button type="button" class="btn dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                <button type="button" class="btn dropdown-toggle btn-sm" data-bs-toggle="dropdown" aria-expanded="false">
                     <img src="/images/cubic-w-nobg.png" class="avatar-icon" alt="Avatar">
                     gomaink
                 </button>
                 <ul class="dropdown-menu">
-                    <li><a class="dropdown-item" href="#">Alterar username</a></li>
-                    <li><a class="dropdown-item" href="#">Alterar nickname</a></li>
-                    <li><a class="dropdown-item" href="#">Alterar avatar</a></li>
+                    <li><a class="dropdown-item" href="#"><i class="fa-solid fa-user" style="margin-right: 10px;"></i>Alterar nome</a></li>
+                    <li><a class="dropdown-item" href="#"><i class="fa-regular fa-user" style="margin-right: 10px;"></i>Alterar nick</a></li>
+                    <li><a class="dropdown-item" href="#"><i class="fa-solid fa-user-astronaut" style="margin-right: 10px;"></i>Alterar avatar</a></li>
                     <li><hr class="dropdown-divider" style="color: #fff; background-color: #fff;"></li>
-                    <li><a class="dropdown-item" href="/auth/logout">Desconectar</a></li>
+                    <li><a class="dropdown-item" href="/auth/logout"><i class="fa-solid fa-right-from-bracket" style="margin-right: 10px;"></i>Desconectar</a></li>
                 </ul>
             </div>
         </div>
