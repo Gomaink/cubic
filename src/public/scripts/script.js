@@ -51,7 +51,7 @@ $(document).ready(function () {
                         $('#friendsList').append(`
                             <li class="list-group-item">
                                 <a href="#" class="d-flex align-items-center friend-item" data-friend-name="${friendName}">
-                                    <img src="${avatarUrl}" alt="${friendName}" class="friend-avatar me-2">
+                                    <img src="/images/cubic-w-nobg.png" alt="${friendName}" class="friend-avatar me-2">
                                     ${friendName}
                                 </a>
                             </li>

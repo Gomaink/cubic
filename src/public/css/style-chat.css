@@ -1,118 +1,175 @@
 @import url('https://fonts.googleapis.com/css?family=Poppins');
 
-    body, html {
-      background: #0f1013;
-      font-family: 'Poppins';
-      height: 100%;
-      margin: 0;
-    }
+body, html {
+  background: #0f1013;
+  font-family: 'Poppins';
+  height: 100%;
+  margin: 0;
+}
 
-    .container-fluid {
-      height: 100%;
-      display: flex;
-      color: #dad9d9;
-    }
+.container-fluid {
+  height: 100%;
+  display: flex;
+  color: #dad9d9;
+}
 
-    .sidebar {
-      width: 300px;
-      border-right: 1px solid #ddd;
-      padding: 20px;
-    }
+.sidebar {
+  width: 300px;
+  border-right: 1px solid #ddd;
+  padding: 20px;
+}
 
-    .chat-area {
-      flex-grow: 1;
-      padding: 20px;
-    }
+.chat-area {
+  flex-grow: 1;
+  padding: 20px;
+}
 
-    .add-friend-title {
-      padding-top: 20px;
-      font-weight: 700;
-      font-size: 15px;
-    }
+.add-friend-title {
+  padding-top: 20px;
+  font-weight: 700;
+  font-size: 15px;
+}
 
-    .add-friend-message {
-      font-weight: 400;
-      font-size: 12px;
-      padding-right: 20px;
-    }
+.add-friend-message {
+  font-weight: 400;
+  font-size: 12px;
+  padding-right: 20px;
+}
 
-    .friend-list-title {
-      font-weight: 700;
-      font-size: 15px;
-    }
+.friend-list-title {
+  font-weight: 700;
+  font-size: 15px;
+}
 
-    .form-control {
-      color: #fff;
-      background-color: #2a3236;
-      border: 1px solid #2a3236;
-      font-size: 12px;
-      padding: 0.25rem 0.5rem;
-      width: 150px; /* Ajuste a largura conforme necessário */
-    }
+.form-control {
+  color: #fff;
+  background-color: #2a3236;
+  border: 1px solid #2a3236;
+  font-size: 12px;
+  padding: 0.25rem 0.5rem;
+  width: 150px; /* Ajuste a largura conforme necessário */
+}
 
-    .form-control:focus {
-      color: #fff;
-      background-color: #323d43;
-      border: 1px solid #323d43;
-    }
+.form-control:focus {
+  color: #fff;
+  background-color: #323d43;
+  border: 1px solid #323d43;
+}
 
-    .form-control::placeholder {
-      color: #fff; /* Cor do placeholder */
-      opacity: 1; /* Certifica-se de que a opacidade do placeholder é 100% */
-    }
+.form-control::placeholder {
+  color: #fff; /* Cor do placeholder */
+  opacity: 1; /* Certifica-se de que a opacidade do placeholder é 100% */
+}
 
-    .btn-add {
-      border: 2px solid #198754; 
-      background-color: #198754;
-      border-radius: 1.5rem;
-      color: #dad9d9;
-      font-size: 12px;
-      padding: 0.25rem 0.75rem;
-    }
+.btn-add {
+  border: 2px solid #198754; 
+  background-color: #198754;
+  border-radius: 1.5rem;
+  color: #dad9d9;
+  font-size: 12px;
+  padding: 0.25rem 0.75rem;
+}
 
-    .btn-add:hover {
-      border: 2px solid #105535; 
-      background-color: #105535;
-      border-radius: 1.5rem;
-      color: #dad9d9;
-    }
+.btn-add:hover {
+  border: 2px solid #105535; 
+  background-color: #105535;
+  border-radius: 1.5rem;
+  color: #dad9d9;
+}
 
-    .list-group-item {
-      padding-right: 10px;
-      padding-bottom: 10p;
-      color: #fff;
-      background-color: #0f1013;
-      border: 1px solid #0f1013;
-      font-size: 12px;
-      padding: 0.35rem 0.5rem;
-      width: 200px; /* Ajuste a largura conforme necessário */
-      text-decoration: none;
-    }
+.list-group-item {
+  padding-right: 10px;
+  padding-bottom: 10p;
+  color: #fff;
+  background-color: #0f1013;
+  border: 1px solid #0f1013;
+  font-size: 12px;
+  padding: 0.35rem 0.5rem;
+  width: 200px; /* Ajuste a largura conforme necessário */
+  text-decoration: none;
+}
 
-    .list-group-item a {
-      text-decoration: none;
-      color: #dad9d9;
-    }
+.list-group-item a {
+  text-decoration: none;
+  color: #dad9d9;
+}
 
-    .list-group-item:hover {
-        padding-right: 10px;
-        padding-bottom: 10p;
-        color: #fff;
-        background-color: rgba(50, 61, 67, 0.2);
-        border: 1px solid rgba(50, 61, 67, 0.2);
-        font-size: 12px;
-        padding: 0.35rem 0.5rem;
-        width: 200px; /* Ajuste a largura conforme necessário */
-        cursor: pointer;
-      }
+.list-group-item:hover {
+  padding-right: 10px;
+  padding-bottom: 10p;
+  color: #fff;
+  background-color: rgba(50, 61, 67, 0.2);
+  border: 1px solid rgba(50, 61, 67, 0.2);
+  font-size: 12px;
+  padding: 0.35rem 0.5rem;
+  width: 200px; /* Ajuste a largura conforme necessário */
+  cursor: pointer;
+}
 
-      .friend-avatar {
-        width: 30px;
-        height: 30px;
-        border-radius: 50%;
-        object-fit: cover;
-      }
+.friend-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  object-fit: cover;
+} 
 
-      .text-danger {
-        font-size: 12px;
-      }
+.text-danger {
+  font-size: 12px;
+}
+
+.dropup-container {
+  position: fixed;
+  bottom: 0;
+  width: inherit; /* Faz com que o dropup herde a largura do elemento pai (sidebar) */
+  padding: 20px;
+}
+
+.dropup-container .btn-group {
+  color: #fff;
+  background: #0f1013;
+  width: 80%;
+}
+
+.dropup-container .btn-group:hover {
+  background-color: rgba(50, 61, 67, 0.2);
+  border: 1px solid rgba(50, 61, 67, 0.2);
+}
+
+.dropdown-toggle {
+  color: #fff;
+}
+
+.dropup-container .btn-group .dropdown-toggle {
+  width: 100%;
+}
+
+.dropdown-item {
+  color: #fff;
+  font-weight: 100;
+}
+
+.dropdown-menu {
+  background: rgba(50, 61, 67, 0.2);
+}
+
+.dropdown-item:hover {
+  color: #fff;
+  background-color: rgba(58, 65, 68, 0.2);
+  border: 1px solid rgba(58, 65, 68, 0.2);
+}
+
+.dropdown-divider {
+  color: #fff;
+}
+
+.dropup img {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.friend-list-container {
+  max-height: 700px; /* Altura máxima para a lista de amigos */
+  overflow-y: auto; /* Adiciona scroll vertical se necessário */
+}

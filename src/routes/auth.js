@@ -83,4 +83,14 @@ router.post('/register', async (req, res) => {
     }
 });
 
+router.get('/logout', (req, res) => {
+    req.session.destroy(err => {
+        if (err) {
+            console.error('Erro ao fazer logout:', err);
+            return res.redirect('/');
+        }
+        res.redirect('/auth/login');
+    });
+});
+
 module.exports = router;
