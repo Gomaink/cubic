@@ -168,4 +168,29 @@ router.get('/check', async (req, res) => {
     }
 });
 
+router.get('/friends', async (req, res) => {
+    try {
+        const currentUser = await User.findById(req.session.userId);
+        if (!currentUser) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        const friendship = await Friendship.findOne({ user: currentUser._id }).populate('friends', 'username');
+        if (!friendship) {
+            return res.status(200).json({ friends: [] });
+        }
+
+        const friends = friendship.friends.map(friend => ({
+            username: friend.username,
+            avatarUrl: `/images/cubic-w-nobg.png`
+        }));
+
+        res.status(200).json({ friends });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Erro ao obter a lista de amigos. Tente novamente mais tarde.' });
+    }
+});
+
 module.exports = router;
