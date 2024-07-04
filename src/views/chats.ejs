@@ -18,7 +18,7 @@
 
         <form id="addFriendForm">
             <div class="input-group mb-3">
-                <input type="text" class="form-control" placeholder="Nome de usuário" id="friendName">
+                <input type="text" class="friendAddUsername form-control" placeholder="Nome de usuário" id="friendName">
                 <button type="submit" class="btn btn-add">Add</button>
             </div>
             <div id="error-message" class="text-warning"></div>
@@ -58,9 +58,32 @@
     
 
     <div class="chat-area">
-        <h4>Area de chat aqui bla bla</h4>
+        <h4 class="p-3">limaggz</h4>
         <div id="chatContent">
-            
+            <div class="message">
+                <img src="/images/cubic-w-nobg.png" alt="Usuário 1">
+                <div>
+                    <span class="user">Usuário 1:</span>
+                    <span class="text">Olá, tudo bem?</span>
+                </div>
+            </div>
+            <div class="message">
+                <img src="/images/cubic-w-nobg.png" alt="Usuário 2">
+                <div>
+                    <span class="user">Usuário 2:</span>
+                    <span class="text">Oi! Tudo ótimo, e você?</span>
+                </div>
+            </div>
+            <div class="message">
+                <img src="/images/cubic-w-nobg.png" alt="Usuário 1">
+                <div>
+                    <span class="user">Usuário 1:</span>
+                    <span class="text">Estou bem também, obrigado!</span>
+                </div>
+            </div>
+        </div>
+        <div class="message-input p-3">
+            <input type="text" class="form-control" placeholder="Digite sua mensagem...">
         </div>
     </div>
 </div>

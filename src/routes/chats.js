@@ -3,6 +3,7 @@ const router = express.Router();
 const User = require('../models/User');
 const Friendship = require('../models/Friendship');
 const FriendRequest = require('../models/FriendRequest');
+const Message = require('../models/Message');
 
 router.get('/', async (req, res) => {
     try {
