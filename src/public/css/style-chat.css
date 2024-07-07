@@ -317,3 +317,32 @@ body, html {
   display: block;
   font-size: 13px;
 }
+
+.send-message {
+  color: #fff;
+  background-color: #1e2125;
+  font-size: 12px;
+  padding: 10px;
+}
+
+.send-message:hover {
+  color: #fff;
+  background-color: #1e2125;
+}
+
+.send-message:text {
+  color: #fff;
+  background-color: #1e2125;
+}
+
+
+.send-message:focus {
+  color: #fff;
+  background-color: #1e2125;
+}
+
+.send-message::placeholder {
+  color: #fff; 
+  opacity: 1; 
+  font-size: 12px;
+}

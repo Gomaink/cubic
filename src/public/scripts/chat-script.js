@@ -7,6 +7,8 @@ $(document).ready(function() {
 });
 
 $(document).ready(function () {
+    const socket = io();
+
     $('#addFriendForm').on('submit', function (e) {
         e.preventDefault();
         const friendName = $('#friendName').val();
@@ -35,6 +37,28 @@ $(document).ready(function () {
             });
         }
     });
+
+    $('#messageInput').on('keypress', function(e) {
+        if (e.which === 13 && $(this).val().trim() !== '') {
+            const message = $(this).val().trim();
+            socket.emit('sendMessage', { user: 'currentUser.username', message });
+            $(this).val('');
+        }
+    });
+
+    socket.on('receiveMessage', function(data) {
+        const { user, message } = data;
+        $('#chatContent').append(`
+            <div class="message">
+                <img src="/images/cubic-w-nobg.png" alt="${user}">
+                <div>
+                    <span class="user">${user}:</span>
+                    <span class="text">${message}</span>
+                </div>
+            </div>
+        `);
+    });
+    
     function loadFriendRequests() {
         $.ajax({
             url: '/chats/list', // Ajuste esta URL para corresponder à rota que retorna a lista de pedidos de amizade

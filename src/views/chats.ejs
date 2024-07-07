@@ -60,30 +60,10 @@
     <div class="chat-area">
         <h4 class="p-3">limaggz</h4>
         <div id="chatContent">
-            <div class="message">
-                <img src="/images/cubic-w-nobg.png" alt="Usuário 1">
-                <div>
-                    <span class="user">Usuário 1:</span>
-                    <span class="text">Olá, tudo bem?</span>
-                </div>
-            </div>
-            <div class="message">
-                <img src="/images/cubic-w-nobg.png" alt="Usuário 2">
-                <div>
-                    <span class="user">Usuário 2:</span>
-                    <span class="text">Oi! Tudo ótimo, e você?</span>
-                </div>
-            </div>
-            <div class="message">
-                <img src="/images/cubic-w-nobg.png" alt="Usuário 1">
-                <div>
-                    <span class="user">Usuário 1:</span>
-                    <span class="text">Estou bem também, obrigado!</span>
-                </div>
-            </div>
+            
         </div>
         <div class="message-input p-3">
-            <input type="text" class="form-control" placeholder="Digite sua mensagem...">
+            <input type="text" class="send-message form-control" id="messageInput" placeholder="Mensagem...">
         </div>
     </div>
 </div>
@@ -171,6 +151,8 @@
 
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+
+<script src="/socket.io/socket.io.js"></script>
 <script src="/scripts/chat-script.js"></script>
 </body>
 </html>
