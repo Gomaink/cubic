@@ -50,15 +50,20 @@ app.get("/", (req, res) => {
 // WebSockets logic
 io.on('connection', (socket) => {
     console.log('New client connected');
-    
+
+    socket.on('joinRoom', (room) => {
+        socket.join(room);
+        console.log(`User joined room: ${room}`);
+    });
+
+    socket.on('sendMessage', ({ user, userAvatar, room, message }) => {
+        io.to(room).emit('receiveMessage', { user, userAvatar, message });
+    });
+
     socket.on('disconnect', () => {
-      console.log('Client disconnected');
+        console.log('Client disconnected');
     });
-  
-    socket.on('sendMessage', (message) => {
-      io.emit('receiveMessage', message);
-    });
-  });
+});
 
 //Express listener
 //app.listen(port, () => console.log(`Server running on port ${port}.`));

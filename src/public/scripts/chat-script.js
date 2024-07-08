@@ -1,14 +1,49 @@
-$(document).ready(function() {
-    $('.friend-list-container').on('scroll', function() {
-        var scrollPercentage = $(this).scrollTop() / ($(this).prop('scrollHeight') - $(this).height());
-        var thumbTop = scrollPercentage * ($(this).height() - $('.custom-scrollbar-thumb').height());
-        $('.custom-scrollbar-thumb').css('top', thumbTop);
-    });
-});
+const socket = io();
+
+const UserId = currentUserId;
+const User = currentUsername;
+const Avatar = avatarUrl;
+
+let currentFriendId = '';
+let currentRoom = '';
+
+// Função para entrar em uma sala específica
+function joinRoom(friendUsername, friendId) {
+    currentFriendId = friendId;
+    currentRoom = [UserId, currentFriendId].sort().join('_');
+    socket.emit('joinRoom', currentRoom);
+    $('#chatContent').empty(); 
+    document.title = `Cubic | ${friendUsername}`;
+    const chatTitle = document.getElementById('chatTitle');
+    chatTitle.innerText = friendUsername;
+}
 
 $(document).ready(function () {
-    const socket = io();
 
+    // Enviar mensagem
+    $('#messageInput').on('keypress', function (e) {
+        if (e.which === 13 && $(this).val().trim() !== '') {
+            const message = $(this).val().trim();
+            socket.emit('sendMessage', { user: User, userAvatar: Avatar, room: currentRoom, message });
+            $(this).val('');
+        }
+    });
+
+    // Receber mensagem
+    socket.on('receiveMessage', function (data) {
+        const { user, userAvatar, message } = data;
+        $('#chatContent').append(`
+            <div class="message">
+                <img src="${userAvatar}" alt="${user}">
+                <div>
+                    <span class="user">${user}</span>
+                    <span class="text">${message}</span>
+                </div>
+            </div>
+        `);
+    });
+
+    // Resto do código para adicionar amigos, aceitar/rejeitar pedidos de amizade, etc.
     $('#addFriendForm').on('submit', function (e) {
         e.preventDefault();
         const friendName = $('#friendName').val();
@@ -38,30 +73,9 @@ $(document).ready(function () {
         }
     });
 
-    $('#messageInput').on('keypress', function(e) {
-        if (e.which === 13 && $(this).val().trim() !== '') {
-            const message = $(this).val().trim();
-            socket.emit('sendMessage', { user: 'currentUser.username', message });
-            $(this).val('');
-        }
-    });
-
-    socket.on('receiveMessage', function(data) {
-        const { user, message } = data;
-        $('#chatContent').append(`
-            <div class="message">
-                <img src="/images/cubic-w-nobg.png" alt="${user}">
-                <div>
-                    <span class="user">${user}:</span>
-                    <span class="text">${message}</span>
-                </div>
-            </div>
-        `);
-    });
-    
     function loadFriendRequests() {
         $.ajax({
-            url: '/chats/list', // Ajuste esta URL para corresponder à rota que retorna a lista de pedidos de amizade
+            url: '/chats/list',
             method: 'GET',
             success: function (data) {
                 const friendRequestsList = $('#friendRequestsList');
@@ -94,7 +108,6 @@ $(document).ready(function () {
         loadFriendRequests();
     });
 
-    // Adicione event listeners aos botões de aceitar e recusar
     $(document).on('click', '.accept-friend-request', function () {
         const requestId = $(this).data('request-id');
         respondToFriendRequest(requestId, 'accept');
@@ -129,7 +142,7 @@ $(document).ready(function () {
 
     function checkFriendRequests() {
         $.ajax({
-            url: '/chats/check', // Ajuste esta URL para corresponder à rota que verifica as solicitações de amizade pendentes
+            url: '/chats/check',
             method: 'GET',
             success: function (data) {
                 const notificationIcon = $('#friendRequestsNotification');
@@ -144,6 +157,117 @@ $(document).ready(function () {
             }
         });
     }
+
+    function updateUsername(userId, newUsername) {
+        $.ajax({
+            url: '/chats/update-username',
+            method: 'POST',
+            data: JSON.stringify({ userId: userId, newUsername: newUsername }),
+            contentType: 'application/json',
+            success: function (data) {
+                if (data.success) {
+                    $('#modalAlterarNome').modal('hide'); // Esconde o modal após sucesso
+                    // Aqui você pode atualizar o nome de usuário exibido na página, se necessário
+                    $('#error-message-modal-username').text('Nome de usuário atualizado com sucesso!');
+                } else {
+                    $('#error-message-modal-username').text(data.error);
+                }
+            },
+            error: function (jqXHR) {
+                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao atualizar nome de usuário. Tente novamente.';
+                $('#error-message-modal-username').text(errorMessage);
+            }
+        });
+    }
+    
+    // Função para atualizar o nome de exibição (nickname)
+    function updateNickname(userId, newNickname) {
+        $.ajax({
+            url: '/chats/update-nickname',
+            method: 'POST',
+            data: JSON.stringify({ userId: userId, newNickname: newNickname }),
+            contentType: 'application/json',
+            success: function (data) {
+                if (data.success) {
+                    $('#modalAlterarNick').modal('hide'); // Esconde o modal após sucesso
+                    // Aqui você pode atualizar o nickname exibido na página, se necessário
+                    $('#error-message-modal-nickname').text('Nome de exibição atualizado com sucesso!');
+                } else {
+                    $('#error-message-modal-nickname').text(data.error);
+                }
+            },
+            error: function (jqXHR) {
+                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao atualizar nome de exibição. Tente novamente.';
+                $('#error-message-modal-nickname').text(errorMessage);
+            }
+        });
+    }
+
+    $('#modalAlterarAvatar form').on('submit', function(e) {
+        e.preventDefault();
+
+        const fileInput = document.getElementById('newAvatar');
+        const file = fileInput.files[0];
+
+        if (!file) {
+            console.error('Nenhum arquivo selecionado.');
+            return;
+        }
+
+        if (file.size > 8 * 1024 * 1024) {
+            console.error('A imagem deve ter no máximo 8MB.');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('avatar', file);
+
+        $.ajax({
+            url: '/chats/upload-avatar',
+            method: 'POST',
+            data: formData,
+            contentType: false,
+            processData: false,
+            success: function(data) {
+                if (data.success) {
+                    $('#modalAlterarAvatar').modal('hide');
+                    // Atualizar a visualização do avatar na página, se necessário
+                } else {
+                    console.error('Erro ao atualizar avatar:', data.error);
+                }
+            },
+            error: function(jqXHR) {
+                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao enviar requisição para atualizar avatar.';
+                console.error('Erro AJAX:', errorMessage);
+            }
+        });
+    });
+    
+    // Evento para submissão do formulário de alterar nome de usuário
+    $('#modalAlterarNome form').on('submit', function (e) {
+        e.preventDefault();
+        const newUsername = $('#newName').val().trim(); // Obtém o novo nome de usuário
+        const userId = currentUserId; // Substitua pelo ID do usuário atual
+    
+        if (newUsername === '') {
+            return;
+        }
+    
+        updateUsername(userId, newUsername); // Chama a função para atualizar o nome de usuário
+    });
+    
+    // Evento para submissão do formulário de alterar nickname
+    $('#modalAlterarNick form').on('submit', function (e) {
+        e.preventDefault();
+        const newNickname = $('#newNick').val().trim(); // Obtém o novo nickname
+        const userId = currentUserId; // Substitua pelo ID do usuário atual
+    
+        if (newNickname === '') {
+            return;
+        }
+    
+        updateNickname(userId, newNickname); // Chama a função para atualizar o nickname
+    });
 
     function loadFriends() {
         $.ajax({
@@ -167,7 +291,7 @@ $(document).ready(function () {
                         if (!currentFriends[friend.username]) {
                             friendsList.append(`
                                 <li class="list-group-item">
-                                    <a href="#" class="d-flex align-items-center friend-item" data-friend-name="${friend.username}">
+                                    <a onclick="joinRoom('${friend.username}', '${friend._id}');" class="d-flex align-items-center friend-item" data-friend-name="${friend.username}">
                                         <img src="${friend.avatarUrl}" alt="${friend.username}" class="friend-avatar me-2">
                                         ${friend.username}
                                     </a>

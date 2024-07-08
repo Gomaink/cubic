@@ -168,6 +168,7 @@ body, html {
   height: 30px;
   border-radius: 50%;
   object-fit: cover;
+  margin-right: 5px;
 }
 
 .friend-list-container {
@@ -234,7 +235,9 @@ body, html {
   color: #dad9d9;
 }
 
-.modal-control {
+
+
+.update-modals {
   color: #fff;
   background-color: #2a3236;
   border: 1px solid #2a3236;
@@ -244,13 +247,13 @@ body, html {
   width: 300px; /* Ajuste a largura conforme necessário */
 }
 
-.modal-control:focus {
+.update-modals:focus {
   color: #fff;
   background-color: #323d43;
   border: 1px solid #323d43;
 }
 
-.modal-control::placeholder {
+.update-modals::placeholder {
   color: #fff; /* Cor do placeholder */
   opacity: 1; /* Certifica-se de que a opacidade do placeholder é 100% */
 }
@@ -309,13 +312,15 @@ body, html {
   margin-right: 10px;
 }
 .message .user {
-  font-weight: bold;
+  color: #e7e9ea;
+  font-weight: 500;
   margin-right: 5px;
   font-size: 13px;
 }
 .message .text {
   display: block;
   font-size: 13px;
+  color: #d4d9dd;
 }
 
 .send-message {
@@ -346,3 +351,4 @@ body, html {
   opacity: 1; 
   font-size: 12px;
 }
+

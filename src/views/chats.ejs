@@ -18,7 +18,7 @@
 
         <form id="addFriendForm">
             <div class="input-group mb-3">
-                <input type="text" class="friendAddUsername form-control" placeholder="Nome de usuário" id="friendName">
+                <input type="text" class="friendAddUsername form-control" placeholder="Nome de usuário" id="friendName" autocomplete="off">
                 <button type="submit" class="btn btn-add">Add</button>
             </div>
             <div id="error-message" class="text-warning"></div>
@@ -40,7 +40,7 @@
         <div class="dropup-container">
             <div class="btn-group dropup">
                 <button type="button" class="btn dropdown-toggle btn-sm" data-bs-toggle="dropdown" aria-expanded="false">
-                    <img src="/images/cubic-w-nobg.png" class="avatar-icon" alt="Avatar">
+                    <img id="avatarImg" src="<%= currentUser.avatarUrl || '/images/cubic-w-nobg.png' %>" class="avatar-icon" alt="Avatar">
                     <%= currentUser.username %> <i id="friendRequestsNotification" class="fa-regular fa-bell" style="display: none; margin-left: 5px;"></i>
                 </button>
                 <ul class="dropdown-menu">
@@ -58,12 +58,12 @@
     
 
     <div class="chat-area">
-        <h4 class="p-3">limaggz</h4>
+        <h4 class="p-3" id="chatTitle">username</h4>
         <div id="chatContent">
             
         </div>
         <div class="message-input p-3">
-            <input type="text" class="send-message form-control" id="messageInput" placeholder="Mensagem...">
+            <input type="text" class="send-message form-control" id="messageInput" placeholder="Mensagem..." autocomplete="off">
         </div>
     </div>
 </div>
@@ -81,8 +81,9 @@
                     <form>
                         <div class="mb-3">
                             <label for="newName" class="form-label">Qual será seu novo nome de usuário?</label>
-                            <input type="text" class="modal-control" id="newName" placeholder="Algum nome legal...">
+                            <input type="text" class="update-modals modal-control" id="newName" placeholder="Algum nome legal..." autocomplete="off">
                         </div>
+                        <div id="error-message-modal-username" class="error-message-modal text-secondary"></div>
                         <button type="submit" class="btn btn-modal">Salvar</button>
                     </form>
                 </div>
@@ -102,8 +103,9 @@
                     <form>
                         <div class="mb-3">
                             <label for="newNick" class="form-label">Qual será seu novo nome de exibição?</label>
-                            <input type="text" class="modal-control" id="newNick" placeholder="Algum nick legal...">
+                            <input type="text" class="update-modals modal-control" id="newNick" placeholder="Algum nick legal..." autocomplete="off">
                         </div>
+                        <div id="error-message-modal-nickname" class="error-message-modal text-secondary"></div>
                         <button type="submit" class="btn btn-modal">Salvar</button>
                     </form>
                 </div>
@@ -123,8 +125,9 @@
                     <form>
                         <div class="mb-3">
                             <label for="newAvatar" class="form-label">Escolha uma imagem bem legal para o seu avatar!</label>
-                            <input type="file" class="modal-control" id="newAvatar" accept="image/png, image/jpeg, image/jpg" >
+                            <input type="file" class="update-modals modal-control" id="newAvatar" accept="image/png, image/jpeg, image/jpg" >
                         </div>
+                        <div id="error-message-modal-avatar" class="error-message-modal text-secondary"></div>
                         <button type="submit" class="btn btn-modal">Salvar</button>
                     </form>
                 </div>
@@ -153,6 +156,12 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 
 <script src="/socket.io/socket.io.js"></script>
+<script>
+    const currentUserId = '<%= currentUser._id %>';
+    const currentUsername = '<%= currentUser.username %>';
+    const avatar = document.getElementById('avatarImg');
+    const avatarUrl = avatar.src;
+</script>
 <script src="/scripts/chat-script.js"></script>
 </body>
 </html>
