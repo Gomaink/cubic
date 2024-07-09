@@ -60,16 +60,14 @@ $(document).ready(function () {
     $('#messageInput').on('keypress', function (e) {
         if (e.which === 13 && $(this).val().trim() !== '') {
             const message = $(this).val().trim();
-            socket.emit('sendMessage', { user: User, userAvatar: Avatar, room: currentRoom, message });
-
             if (message.length > 2000) {
-                console.error('A mensagem deve ter no máximo 2000 caracteres.');
                 const toastElement = document.getElementById('characterLimitToast');
                 const toast = new bootstrap.Toast(toastElement);
                 toast.show();
                 return;
             }
 
+            socket.emit('sendMessage', { user: User, userAvatar: Avatar, room: currentRoom, message });
             $.ajax({
                 url: '/chats/send-message',
                 method: 'POST',
