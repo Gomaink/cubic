@@ -6,9 +6,10 @@ const Avatar = avatarUrl;
 
 let currentFriendId = '';
 let currentRoom = '';
+let currentFriendAvatar = '';
 
 // Função para entrar em uma sala específica
-function joinRoom(friendUsername, friendId) {
+function joinRoom(friendUsername, friendId, friendAvatarUrl) {
     currentFriendId = friendId;
     currentRoom = [UserId, currentFriendId].sort().join('_');
     socket.emit('joinRoom', currentRoom);
@@ -16,6 +17,39 @@ function joinRoom(friendUsername, friendId) {
     document.title = `Cubic | ${friendUsername}`;
     const chatTitle = document.getElementById('chatTitle');
     chatTitle.innerText = friendUsername;
+    loadMessages(friendId, friendUsername, friendAvatarUrl);
+}
+
+function loadMessages(friendId, friendUsername, friendAvatar) {
+    $.ajax({
+        url: `/chats/messages/${currentUserId}/${friendId}`,
+        method: 'GET',
+        success: function (data) {
+            const chatContent = $('#chatContent');
+            chatContent.empty();
+
+            if (data.messages && data.messages.length > 0) {
+                data.messages.forEach(message => {
+                    const senderAvatar = message.sender === currentUserId ? avatarUrl : friendAvatar.replace(/\\/g, '/');
+                    chatContent.append(`
+                        <div class="message">
+                            <img src="${senderAvatar}" alt="${message.sender === currentUserId ? currentUsername : friendUsername}">
+                            <div>
+                                <span class="user">${message.sender === currentUserId ? currentUsername : friendUsername}</span>
+                                <span class="text">${message.message}</span>
+                            </div>
+                        </div>
+                    `);
+                });
+            } else {
+                chatContent.append('<p class="text-center">Não há nada por aqui até o momento...</p>');
+            }
+        },
+        error: function (jqXHR) {
+            const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao carregar as mensagens. Tente novamente.';
+            console.error('Erro AJAX:', errorMessage);
+        }
+    });
 }
 
 $(document).ready(function () {
@@ -25,6 +59,34 @@ $(document).ready(function () {
         if (e.which === 13 && $(this).val().trim() !== '') {
             const message = $(this).val().trim();
             socket.emit('sendMessage', { user: User, userAvatar: Avatar, room: currentRoom, message });
+
+            $.ajax({
+                url: '/chats/send-message',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ senderId: UserId, receiverId: currentFriendId, message }),
+                success: function (data) {
+                    if (data.success) {
+                        console.log('Mensagem enviada com sucesso!');
+                        /*$('#chatContent').append(`
+                            <div class="message">
+                                <img src="${avatarUrl}" alt="${currentUsername}">
+                                <div>
+                                    <span class="user">${currentUsername}</span>
+                                    <span class="text">${message}</span>
+                                </div>
+                            </div>
+                        `);*/
+                    } else {
+                        console.error('Erro ao enviar a mensagem:', data.error);
+                    }
+                },
+                error: function (jqXHR) {
+                    const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao enviar a mensagem. Tente novamente.';
+                    console.error('Erro AJAX:', errorMessage);
+                }
+            });
+
             $(this).val('');
         }
     });
@@ -289,9 +351,10 @@ $(document).ready(function () {
                     data.friends.forEach(friend => {
                         newFriends[friend.username] = true;
                         if (!currentFriends[friend.username]) {
+                            const formattedAvatarUrl = friend.avatarUrl.replace(/\\/g, '/');
                             friendsList.append(`
                                 <li class="list-group-item">
-                                    <a onclick="joinRoom('${friend.username}', '${friend._id}');" class="d-flex align-items-center friend-item" data-friend-name="${friend.username}">
+                                    <a onclick="joinRoom('${friend.username}', '${friend._id}', '${formattedAvatarUrl}');" class="d-flex align-items-center friend-item" data-friend-name="${friend.username}">
                                         <img src="${friend.avatarUrl}" alt="${friend.username}" class="friend-avatar me-2">
                                         ${friend.username}
                                     </a>
