@@ -32,6 +32,7 @@ function loadMessages(friendId, friendUsername, friendAvatar) {
                 data.messages.forEach(message => {
                     const senderAvatar = message.sender === currentUserId ? avatarUrl : friendAvatar.replace(/\\/g, '/');
                     chatContent.append(`
+                    <div class="message-container">
                         <div class="message">
                             <img src="${senderAvatar}" alt="${message.sender === currentUserId ? currentUsername : friendUsername}">
                             <div>
@@ -39,6 +40,7 @@ function loadMessages(friendId, friendUsername, friendAvatar) {
                                 <span class="text">${message.message}</span>
                             </div>
                         </div>
+                    </div>
                     `);
                 });
             } else {
@@ -59,6 +61,14 @@ $(document).ready(function () {
         if (e.which === 13 && $(this).val().trim() !== '') {
             const message = $(this).val().trim();
             socket.emit('sendMessage', { user: User, userAvatar: Avatar, room: currentRoom, message });
+
+            if (message.length > 2000) {
+                console.error('A mensagem deve ter no máximo 2000 caracteres.');
+                const toastElement = document.getElementById('characterLimitToast');
+                const toast = new bootstrap.Toast(toastElement);
+                toast.show();
+                return;
+            }
 
             $.ajax({
                 url: '/chats/send-message',
@@ -95,6 +105,7 @@ $(document).ready(function () {
     socket.on('receiveMessage', function (data) {
         const { user, userAvatar, message } = data;
         $('#chatContent').append(`
+        <div class="message-container">
             <div class="message">
                 <img src="${userAvatar}" alt="${user}">
                 <div>
@@ -102,6 +113,7 @@ $(document).ready(function () {
                     <span class="text">${message}</span>
                 </div>
             </div>
+        </div>
         `);
     });
 
