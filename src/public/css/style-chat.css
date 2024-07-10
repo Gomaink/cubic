@@ -88,7 +88,7 @@ body, html {
   border: 1px solid #181b1e;
   font-size: 12px;
   padding: 0.35rem 0.5rem;
-  width: 200px; 
+  width: 250px; 
   text-decoration: none;
 }
 
@@ -329,6 +329,21 @@ body, html {
   color: #d4d9dd;
 }
 
+.message .message-time {
+  display: none;
+}
+
+.message:hover .message-time {
+  display: inline;
+}
+
+.message-time {
+  text-decoration: none;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.2); 
+
+}
+
 .send-message {
   color: #fff;
   background-color: #1e2125;
@@ -359,3 +374,19 @@ body, html {
   font-size: 12px;
 }
 
+.list-group-item .remove-friend {
+  display: none;
+}
+
+.list-group-item:hover .remove-friend {
+  display: flex;
+  color: #c0c0c0; 
+}
+
+#confirmationToast {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1050; /* Certifique-se de que o toast esteja acima de outros elementos */
+}

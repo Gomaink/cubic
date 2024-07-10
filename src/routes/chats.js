@@ -333,4 +333,24 @@ router.get('/messages/:userId/:friendId', async (req, res) => {
     }
 });
 
+router.delete('/friends/remove/:friendId', async (req, res) => {
+    try {
+        const currentUser = await User.findById(req.session.userId);
+        if (!currentUser) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        const friendId = req.params.friendId;
+        await Friendship.updateOne(
+            { user: currentUser._id },
+            { $pull: { friends: friendId } }
+        );
+
+        res.status(200).json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Erro ao remover amigo. Tente novamente mais tarde.' });
+    }
+});
+
 module.exports = router;

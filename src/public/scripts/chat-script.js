@@ -8,7 +8,35 @@ let currentFriendId = '';
 let currentRoom = '';
 let currentFriendAvatar = '';
 
+const confirmationToast = new bootstrap.Toast(document.getElementById('confirmationToast'));
+let friendToRemove = null;
+
 // Função para entrar em uma sala específica
+function formatTimestamp(timestamp) {
+    const now = new Date();
+    const date = new Date(timestamp);
+
+    const isToday = now.toDateString() === date.toDateString();
+    const isYesterday = new Date(now.setDate(now.getDate() - 1)).toDateString() === date.toDateString();
+
+    let hours = date.getHours();
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const period = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12; // Converte 0 horas para 12 e mantém o formato de 12 horas
+    const time = `${hours.toString().padStart(2, '0')}:${minutes} ${period}`;
+
+    if (isToday) {
+        return `Hoje às ${time}`;
+    } else if (isYesterday) {
+        return `Ontem às ${time}`;
+    } else {
+        const day = date.getDate().toString().padStart(2, '0');
+        const month = (date.getMonth() + 1).toString().padStart(2, '0'); // Janeiro é 0!
+        const year = date.getFullYear();
+        return `${day}/${month}/${year} às ${time}`;
+    }
+}
+
 function joinRoom(friendUsername, friendId, friendAvatarUrl) {
     currentFriendId = friendId;
     currentRoom = [UserId, currentFriendId].sort().join('_');
@@ -27,16 +55,18 @@ function loadMessages(friendId, friendUsername, friendAvatar) {
         success: function (data) {
             const chatContent = $('#chatContent');
             chatContent.empty();
+            
 
             if (data.messages && data.messages.length > 0) {
                 data.messages.forEach(message => {
                     const senderAvatar = message.sender === currentUserId ? avatarUrl : friendAvatar.replace(/\\/g, '/');
+                    const formattedTimestamp = formatTimestamp(message.timestamp);
                     chatContent.append(`
                     <div class="message-container">
                         <div class="message">
                             <img src="${senderAvatar}" alt="${message.sender === currentUserId ? currentUsername : friendUsername}">
                             <div>
-                                <span class="user">${message.sender === currentUserId ? currentUsername : friendUsername}</span>
+                                <span class="user">${message.sender === currentUserId ? currentUsername : friendUsername}</span> <a class="message-time">${formattedTimestamp}</a>
                                 <span class="text">${message.message}</span>
                             </div>
                         </div>
@@ -53,6 +83,37 @@ function loadMessages(friendId, friendUsername, friendAvatar) {
         }
     });
 }
+
+//Remover amigo
+function RemoveFriend(friendId) {
+    friendToRemove = friendId;
+    console.log("clickou");
+    confirmationToast.show();
+}
+
+document.getElementById('confirmRemove').addEventListener('click', function() {
+    if (friendToRemove) {
+        // Faz uma solicitação AJAX para remover o amigo
+        $.ajax({
+            url: `/friends/remove/${friendToRemove}`,
+            method: 'DELETE',
+            success: function(data) {
+                if (data.success) {
+                    // Remove o amigo da lista
+                    document.querySelector(`li[data-friend-id="${friendToRemove}"]`).remove();
+                    // Esconde o toast
+                    confirmationToast.hide();
+                } else {
+                    console.error('Erro ao remover amigo:', data.error);
+                }
+            },
+            error: function(jqXHR) {
+                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao remover amigo. Tente novamente.';
+                console.error('Erro AJAX:', errorMessage);
+            }
+        });
+    }
+});
 
 $(document).ready(function () {
 
@@ -363,11 +424,12 @@ $(document).ready(function () {
                         if (!currentFriends[friend.username]) {
                             const formattedAvatarUrl = friend.avatarUrl.replace(/\\/g, '/');
                             friendsList.append(`
-                                <li class="list-group-item">
+                                <li class="list-group-item d-flex justify-content-between align-items-center" data-friend-id="${friend._id}">
                                     <a onclick="joinRoom('${friend.username}', '${friend._id}', '${formattedAvatarUrl}');" class="d-flex align-items-center friend-item" data-friend-name="${friend.username}">
                                         <img src="${friend.avatarUrl}" alt="${friend.username}" class="friend-avatar me-2">
                                         ${friend.username}
                                     </a>
+                                    <a onclick="RemoveFriend('${friend._id}');" class="remove-friend"><i class="fa-solid fa-xmark"></i></a>
                                 </li>
                             `);
                         }
