@@ -56,6 +56,11 @@ app.get("/", (req, res) => {
     res.render("index");
 });
 
+app.get("/error", (req, res) => {
+    const { error, errorMessage } = req.query;
+    res.render("error", { error, errorMessage });
+});
+
 // WebSockets logic
 io.on('connection', (socket) => {
     console.log('New client connected');

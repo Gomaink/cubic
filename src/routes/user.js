@@ -37,15 +37,16 @@ router.post('/update-username', async (req, res) => {
     const { userId, newUsername } = req.body;
 
     try {
+        const existingUsername = await User.findOne({ username });
+        
+        if (existingUsername) {
+            return res.render('register', { error: 'Este nome de usuário já está em uso.' });
+        }
+
         const user = await User.findByIdAndUpdate(userId, { username: newUsername }, { new: true });
 
         if (!user) {
             return res.status(404).json({ error: 'Usuário não encontrado.' });
-        }
-
-        const existingUsername = await User.findOne({ username });
-        if (existingUsername) {
-            return res.render('register', { error: 'Este nome de usuário já está em uso.' });
         }
 
         res.status(200).json({ success: true, message: 'Nome de usuário atualizado com sucesso.' });
