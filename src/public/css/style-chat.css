@@ -233,6 +233,16 @@ body, html {
   color: #dad9d9;
 }
 
+.btn-dangerr {
+  border: 1px solid #FF6347; 
+  background-color: #FF6347;
+  color: #fff;
+}
+
+.text-dangerr {
+  color: #FF6347;
+  font-size: 12px;
+}
 
 
 .update-modals {
@@ -383,10 +393,12 @@ body, html {
   color: #c0c0c0; 
 }
 
-#confirmationToast {
+.confirmationToast {
   position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 1050; /* Certifique-se de que o toast esteja acima de outros elementos */
+  background-color: #1a1d20;
+  color: #fff;
 }

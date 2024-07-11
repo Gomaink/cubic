@@ -21,7 +21,7 @@
                     <input type="text" class="friendAddUsername form-control" placeholder="Nome de usuário" id="friendName" autocomplete="off">
                     <button type="submit" class="btn btn-add">Add</button>
                 </div>
-                <div id="error-message" class="text-warning"></div>
+                <div id="error-message" class="text-dangerr"></div>
                 <hr style="color: #1a1d20;">
             </form>
     
@@ -70,15 +70,11 @@
         </div>
     </div>
     
-    <div id="confirmationToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="false">
-        <div class="toast-header">
-            <strong class="me-auto">Confirmação</strong>
-            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
-        </div>
+    <div id="confirmationToast" class="confirmationToast toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="false">
         <div class="toast-body">
             <p>Você realmente deseja remover este amigo?</p>
-            <button id="confirmRemove" class="btn btn-danger">Remover</button>
-            <button class="btn btn-secondary" data-bs-dismiss="toast">Cancelar</button>
+            <button id="confirmRemove" class="btn btn-dangerr btn-sm">Remover</button>
+            <button class="btn btn-secondary btn-sm" data-bs-dismiss="toast">Cancelar</button>
         </div>
     </div>
     
