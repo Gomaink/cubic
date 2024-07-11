@@ -42,6 +42,15 @@ app.use("/auth", authenticationRouter);
 const chatsRouter = require('./routes/chats');
 app.use("/chats", chatsRouter);
 
+const friendsRouter = require('./routes/friends');
+app.use("/friends", friendsRouter);
+
+const messagesRouter = require('./routes/messages');
+app.use("/messages", messagesRouter);
+
+const userRouter = require('./routes/user');
+app.use("/user", userRouter);
+
 // Routes
 app.get("/", (req, res) => {
     res.render("index");

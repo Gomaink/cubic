@@ -1,17 +1,15 @@
 const socket = io();
-
 const UserId = currentUserId;
 const User = currentUsername;
 const Avatar = avatarUrl;
+const confirmationToast = new bootstrap.Toast(document.getElementById('confirmationToast'));
 
 let currentFriendId = '';
 let currentRoom = '';
 let currentFriendAvatar = '';
-
-const confirmationToast = new bootstrap.Toast(document.getElementById('confirmationToast'));
 let friendToRemove = null;
 
-// Função para entrar em uma sala específica
+
 function formatTimestamp(timestamp) {
     const now = new Date();
     const date = new Date(timestamp);
@@ -37,6 +35,7 @@ function formatTimestamp(timestamp) {
     }
 }
 
+// Função para entrar em uma sala específica
 function joinRoom(friendUsername, friendId, friendAvatarUrl) {
     currentFriendId = friendId;
     currentRoom = [UserId, currentFriendId].sort().join('_');
@@ -50,7 +49,7 @@ function joinRoom(friendUsername, friendId, friendAvatarUrl) {
 
 function loadMessages(friendId, friendUsername, friendAvatar) {
     $.ajax({
-        url: `/chats/messages/${currentUserId}/${friendId}`,
+        url: `/messages/${currentUserId}/${friendId}`,
         method: 'GET',
         success: function (data) {
             const chatContent = $('#chatContent');
@@ -130,7 +129,7 @@ $(document).ready(function () {
 
             socket.emit('sendMessage', { user: User, userAvatar: Avatar, room: currentRoom, message });
             $.ajax({
-                url: '/chats/send-message',
+                url: '/messages/send-message',
                 method: 'POST',
                 contentType: 'application/json',
                 data: JSON.stringify({ senderId: UserId, receiverId: currentFriendId, message }),
@@ -176,124 +175,9 @@ $(document).ready(function () {
         `);
     });
 
-    // Resto do código para adicionar amigos, aceitar/rejeitar pedidos de amizade, etc.
-    $('#addFriendForm').on('submit', function (e) {
-        e.preventDefault();
-        const friendName = $('#friendName').val();
-        if (friendName === '') {
-            $('#error-message').text('Usuário não encontrado.');
-        } else {
-            $('#error-message').text('');
-
-            $.ajax({
-                url: '/chats/add-friend',
-                method: 'POST',
-                data: JSON.stringify({ friendName: friendName }),
-                contentType: 'application/json',
-                success: function (data) {
-                    if (data.success) {
-                        $('#friendName').val('');
-                        $('#error-message').text('Pedido de amizade enviado.');
-                    } else {
-                        $('#error-message').text(data.error);
-                    }
-                },
-                error: function (jqXHR) {
-                    const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao adicionar amigo. Tente novamente.';
-                    $('#error-message').text(errorMessage);
-                }
-            });
-        }
-    });
-
-    function loadFriendRequests() {
-        $.ajax({
-            url: '/chats/list',
-            method: 'GET',
-            success: function (data) {
-                const friendRequestsList = $('#friendRequestsList');
-                friendRequestsList.empty();
-
-                if (data.friendRequests && data.friendRequests.length > 0) {
-                    data.friendRequests.forEach(request => {
-                        friendRequestsList.append(`
-                            <li class="list-group-item d-flex justify-content-between align-items-center">
-                                <span class="requester-name">${request.requester.username}</span>
-                                <div class="friend-requests-buttons">
-                                    <button class="btn btn-success btn-sm accept-friend-request" data-request-id="${request._id}">Aceitar</button>
-                                    <button class="btn btn-danger btn-sm decline-friend-request" data-request-id="${request._id}">Recusar</button>
-                                </div>
-                            </li>
-                        `);
-                    });
-                } else {
-                    friendRequestsList.append('<li class="list-group-item text-center">Nenhum pedido de amizade.</li>');
-                }
-            },
-            error: function (jqXHR) {
-                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao carregar pedidos de amizade. Tente novamente.';
-                alert(errorMessage);
-            }
-        });
-    }
-
-    $('#modalFriendRequests').on('show.bs.modal', function () {
-        loadFriendRequests();
-    });
-
-    $(document).on('click', '.accept-friend-request', function () {
-        const requestId = $(this).data('request-id');
-        respondToFriendRequest(requestId, 'accept');
-    });
-
-    $(document).on('click', '.decline-friend-request', function () {
-        const requestId = $(this).data('request-id');
-        respondToFriendRequest(requestId, 'decline');
-    });
-
-    function respondToFriendRequest(requestId, action) {
-        $.ajax({
-            url: '/chats/respond-friend-request',
-            method: 'POST',
-            data: JSON.stringify({ requestId: requestId, action: action }),
-            contentType: 'application/json',
-            success: function (data) {
-                if (data.success) {
-                    loadFriendRequests();
-                    loadFriends();
-                    $('#error-message-modal').text(`Pedido de amizade ${action === 'accept' ? 'aceito' : 'recusado'}!`);
-                } else {
-                    $('#error-message-modal').text(`Erro ao processar o pedido de amizade.`);
-                }
-            },
-            error: function (jqXHR) {
-                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao processar o pedido de amizade. Tente novamente.';
-                $('#error-message-modal').text(errorMessage);
-            }
-        });
-    }
-
-    function checkFriendRequests() {
-        $.ajax({
-            url: '/chats/check',
-            method: 'GET',
-            success: function (data) {
-                const notificationIcon = $('#friendRequestsNotification');
-                if (data.pendingRequests && data.pendingRequests > 0) {
-                    notificationIcon.show();
-                } else {
-                    notificationIcon.hide();
-                }
-            },
-            error: function (jqXHR) {
-                console.error('Erro ao verificar solicitações de amizade:', jqXHR);
-            }
-        });
-    }
-
     function updateUsername(userId, newUsername) {
         $.ajax({
-            url: '/chats/update-username',
+            url: '/user/update-username',
             method: 'POST',
             data: JSON.stringify({ userId: userId, newUsername: newUsername }),
             contentType: 'application/json',
@@ -316,7 +200,7 @@ $(document).ready(function () {
     // Função para atualizar o nome de exibição (nickname)
     function updateNickname(userId, newNickname) {
         $.ajax({
-            url: '/chats/update-nickname',
+            url: '/user/update-nickname',
             method: 'POST',
             data: JSON.stringify({ userId: userId, newNickname: newNickname }),
             contentType: 'application/json',
@@ -356,7 +240,7 @@ $(document).ready(function () {
         formData.append('avatar', file);
 
         $.ajax({
-            url: '/chats/upload-avatar',
+            url: '/user/upload-avatar',
             method: 'POST',
             data: formData,
             contentType: false,
@@ -402,9 +286,124 @@ $(document).ready(function () {
         updateNickname(userId, newNickname); // Chama a função para atualizar o nickname
     });
 
+    // Resto do código para adicionar amigos, aceitar/rejeitar pedidos de amizade, etc.
+    $('#addFriendForm').on('submit', function (e) {
+        e.preventDefault();
+        const friendName = $('#friendName').val();
+        if (friendName === '') {
+            $('#error-message').text('Usuário não encontrado.');
+        } else {
+            $('#error-message').text('');
+
+            $.ajax({
+                url: '/friends/add-friend',
+                method: 'POST',
+                data: JSON.stringify({ friendName: friendName }),
+                contentType: 'application/json',
+                success: function (data) {
+                    if (data.success) {
+                        $('#friendName').val('');
+                        $('#error-message').text('Pedido de amizade enviado.');
+                    } else {
+                        $('#error-message').text(data.error);
+                    }
+                },
+                error: function (jqXHR) {
+                    const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao adicionar amigo. Tente novamente.';
+                    $('#error-message').text(errorMessage);
+                }
+            });
+        }
+    });
+
+    function loadFriendRequests() {
+        $.ajax({
+            url: '/friends/friend-list',
+            method: 'GET',
+            success: function (data) {
+                const friendRequestsList = $('#friendRequestsList');
+                friendRequestsList.empty();
+
+                if (data.friendRequests && data.friendRequests.length > 0) {
+                    data.friendRequests.forEach(request => {
+                        friendRequestsList.append(`
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span class="requester-name">${request.requester.username}</span>
+                                <div class="friend-requests-buttons">
+                                    <button class="btn btn-success btn-sm accept-friend-request" data-request-id="${request._id}">Aceitar</button>
+                                    <button class="btn btn-danger btn-sm decline-friend-request" data-request-id="${request._id}">Recusar</button>
+                                </div>
+                            </li>
+                        `);
+                    });
+                } else {
+                    friendRequestsList.append('<li class="list-group-item text-center">Nenhum pedido de amizade.</li>');
+                }
+            },
+            error: function (jqXHR) {
+                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao carregar pedidos de amizade. Tente novamente.';
+                alert(errorMessage);
+            }
+        });
+    }
+
+    $('#modalFriendRequests').on('show.bs.modal', function () {
+        loadFriendRequests();
+    });
+
+    $(document).on('click', '.accept-friend-request', function () {
+        const requestId = $(this).data('request-id');
+        respondToFriendRequest(requestId, 'accept');
+    });
+
+    $(document).on('click', '.decline-friend-request', function () {
+        const requestId = $(this).data('request-id');
+        respondToFriendRequest(requestId, 'decline');
+    });
+
+    function respondToFriendRequest(requestId, action) {
+        $.ajax({
+            url: '/friends/respond-friend-request',
+            method: 'POST',
+            data: JSON.stringify({ requestId: requestId, action: action }),
+            contentType: 'application/json',
+            success: function (data) {
+                if (data.success) {
+                    loadFriendRequests();
+                    loadFriends();
+                    $('#error-message-modal').text(`Pedido de amizade ${action === 'accept' ? 'aceito' : 'recusado'}!`);
+                } else {
+                    $('#error-message-modal').text(`Erro ao processar o pedido de amizade.`);
+                }
+            },
+            error: function (jqXHR) {
+                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao processar o pedido de amizade. Tente novamente.';
+                $('#error-message-modal').text(errorMessage);
+            }
+        });
+    }
+
+    function checkFriendRequests() {
+        $.ajax({
+            url: '/friends/friend-check-notification',
+            method: 'GET',
+            success: function (data) {
+                const notificationIcon = $('#friendRequestsNotification');
+                if (data.pendingRequests && data.pendingRequests > 0) {
+                    notificationIcon.show();
+                } else {
+                    notificationIcon.hide();
+                }
+            },
+            error: function (jqXHR) {
+                console.error('Erro ao verificar solicitações de amizade:', jqXHR);
+            }
+        });
+    }
+
     function loadFriends() {
         $.ajax({
-            url: '/chats/friends', // Rota para obter a lista de amigos
+            url: '/friends', // Rota para obter a lista de amigos
             method: 'GET',
             success: function (data) {
                 const friendsList = $('#friendsList');
