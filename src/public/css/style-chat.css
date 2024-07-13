@@ -22,11 +22,6 @@ body, html {
   flex-shrink: 0;
 }
 
-.chat-area {
-  flex-grow: 1;
-  padding: 20px;
-}
-
 .add-friend-title {
   padding-top: 20px;
   font-weight: 700;
@@ -138,6 +133,10 @@ body, html {
   color: #fff;
 }
 
+.btn {
+  color: #fff;
+}
+
 .dropup-container .btn-group .dropdown-toggle {
   width: 100%;
 }
@@ -161,12 +160,30 @@ body, html {
   color: #fff;
 }
 
+
 .dropup img {
-  width: 30px;
-  height: 30px;
+  width: 35px;
+  height: 35px;
   border-radius: 50%;
   object-fit: cover;
   margin-right: 5px;
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.nickname {
+  font-size: 1em;
+  font-weight: bold;
+}
+
+.username {
+  font-size: 0.8em;
+  font-weight: normal;
+  color: #6c757d; /* Adjust this color to make the font look weaker */
 }
 
 .friend-list-container {
@@ -289,6 +306,7 @@ body, html {
   height: 100%; 
   display: flex;
   flex-direction: column;
+  flex-grow: 1;
 }
 
 #chatContent {
@@ -297,6 +315,29 @@ body, html {
   overflow-y: auto;
   overflow-x: hidden; /* Esconde o overflow horizontal */
   max-width: 100%; /* Garante que o contêiner não exceda a largura da tela */
+}
+
+.chat-nav {
+  background: #181b1e;
+  width: 100%; /* Faz com que o elemento se estenda horizontalmente */
+  padding: 10px 20px; /* Adiciona padding interno para melhorar o espaçamento */
+}
+
+.chat-area img {
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  object-fit: cover;
+  margin-right: 5px;
+}
+
+.chatTitle {
+  text-decoration: none !important;
+}
+
+#chatTitle {
+  color: #fff;
+  font-size: 12px;
 }
 
 .message-input {

@@ -71,12 +71,69 @@
                         <p class="small" style="color: #ec4042;"><%= error %></p>
                     </div>
                 <% } %>
+                <div id="age-error" class="text-left mt-3">
+                    <p class="small" style="color: #ec4042;"></p>
+                </div>
             </form>
         </div>
     </div>
 
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script>
+        // Função para calcular a idade
+        function calculateAge(day, month, year) {
+            const today = new Date();
+            const birthDate = new Date(year, month - 1, day); 
+            let age = today.getFullYear() - birthDate.getFullYear();
+            const monthDifference = today.getMonth() - birthDate.getMonth();
+            if (monthDifference < 0 || (monthDifference === 0 && today.getDate() < birthDate.getDate())) {
+                age--;
+            }
+            return age;
+        }
+
+        document.querySelector('form').addEventListener('submit', function(event) {
+            const day = parseInt(document.getElementById('daySelect').value);
+            const month = parseInt(document.getElementById('monthSelect').value);
+            const year = parseInt(document.getElementById('yearSelect').value);
+
+            const age = calculateAge(day, month, year);
+            if (age < 13) {
+                event.preventDefault();
+                document.getElementById('age-error').querySelector('p').innerText = 'Você deve ter pelo menos 13 anos para usar o Cubic.';
+            }
+        });
+
+        // Função para preencher os selects
+        window.onload = function() {
+            const daySelect = document.getElementById('daySelect');
+            const monthSelect = document.getElementById('monthSelect');
+            const yearSelect = document.getElementById('yearSelect');
+
+            for (let i = 1; i <= 31; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.text = i;
+                daySelect.add(option);
+            }
+
+            const months = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+            for (let i = 1; i <= 12; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.text = months[i - 1];
+                monthSelect.add(option);
+            }
+
+            const currentYear = new Date().getFullYear();
+            for (let i = currentYear; i >= 1900; i--) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.text = i;
+                yearSelect.add(option);
+            }
+        }
+
         document.addEventListener("DOMContentLoaded", function() {
         var daySelect = document.getElementById("daySelect");
         for (var day = 1; day <= 31; day++) {

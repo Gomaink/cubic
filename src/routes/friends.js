@@ -18,7 +18,7 @@ router.get('/', async (req, res) => {
         }
 
         // Busca detalhes completos de cada amigo, incluindo avatarUrl, usando o modelo User
-        const friends = await User.find({ _id: { $in: friendship.friends } }).select('_id username avatarUrl');
+        const friends = await User.find({ _id: { $in: friendship.friends } }).select('_id username avatarUrl nickname');
 
         // Preenche avatarUrl com a imagem padrão se for undefined
         friends.forEach(friend => {

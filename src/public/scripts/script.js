@@ -36,18 +36,21 @@ function formatTimestamp(timestamp) {
 }
 
 // Função para entrar em uma sala específica
-function joinRoom(friendUsername, friendId, friendAvatarUrl) {
+function joinRoom(friendUsername, friendNickname, friendId, friendAvatarUrl) {
     currentFriendId = friendId;
     currentRoom = [UserId, currentFriendId].sort().join('_');
     socket.emit('joinRoom', currentRoom);
     $('#chatContent').empty(); 
-    document.title = `Cubic | ${friendUsername}`;
-    const chatTitle = document.getElementById('chatTitle');
-    chatTitle.innerText = friendUsername;
-    loadMessages(friendId, friendUsername, friendAvatarUrl);
+    document.title = `Cubic | ${friendNickname}`;
+    const chatLink = document.querySelector('.chatTitle');
+    const chatAvatar = chatLink.querySelector('#chatAvatar');
+    const chatTitle = chatLink.querySelector('#chatTitle');
+    chatTitle.innerText = `${friendUsername} AKA ${friendNickname}`;
+    chatAvatar.src = friendAvatarUrl;
+    loadMessages(friendId, friendUsername, friendNickname, friendAvatarUrl);
 }
 
-function loadMessages(friendId, friendUsername, friendAvatar) {
+function loadMessages(friendId, friendUsername, friendNickname, friendAvatar) {
     $.ajax({
         url: `/messages/${currentUserId}/${friendId}`,
         method: 'GET',
@@ -65,7 +68,7 @@ function loadMessages(friendId, friendUsername, friendAvatar) {
                         <div class="message">
                             <img src="${senderAvatar}" alt="${message.sender === currentUserId ? currentUsername : friendUsername}">
                             <div>
-                                <span class="user">${message.sender === currentUserId ? currentUsername : friendUsername}</span> <a class="message-time">${formattedTimestamp}</a>
+                                <span class="user">${message.sender === currentUserId ? currentNickname : friendNickname}</span> <a class="message-time">${formattedTimestamp}</a>
                                 <span class="text">${message.message}</span>
                             </div>
                         </div>
@@ -86,7 +89,6 @@ function loadMessages(friendId, friendUsername, friendAvatar) {
 //Remover amigo
 function RemoveFriend(friendId) {
     friendToRemove = friendId;
-    console.log("clickou");
     confirmationToast.show();
 }
 
@@ -424,9 +426,9 @@ $(document).ready(function () {
                             const formattedAvatarUrl = friend.avatarUrl.replace(/\\/g, '/');
                             friendsList.append(`
                                 <li class="list-group-item d-flex justify-content-between align-items-center" data-friend-id="${friend._id}">
-                                    <a onclick="joinRoom('${friend.username}', '${friend._id}', '${formattedAvatarUrl}');" class="d-flex align-items-center friend-item" data-friend-name="${friend.username}">
+                                    <a onclick="joinRoom('${friend.username}', '${friend.nickname}', '${friend._id}', '${formattedAvatarUrl}');" class="d-flex align-items-center friend-item" data-friend-name="${friend.username}">
                                         <img src="${friend.avatarUrl}" alt="${friend.username}" class="friend-avatar me-2">
-                                        ${friend.username}
+                                        ${friend.nickname}
                                     </a>
                                     <a onclick="RemoveFriend('${friend._id}');" class="remove-friend"><i class="fa-solid fa-xmark"></i></a>
                                 </li>
