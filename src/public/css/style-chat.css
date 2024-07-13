@@ -396,6 +396,57 @@ body, html {
 
 }
 
+/*mensagem concatenada*/
+.message-conc {
+  margin-bottom: 6px;
+  display: flex;
+  align-items: flex-start;
+  padding: 5px 0;
+  border: 1px solid rgba(50, 61, 67, 0.0);
+  max-width: 100%;
+  word-break: break-word; /* Quebra palavras longas */
+  padding-left: 50px;
+}
+.message-conc:hover {
+  background-color: rgba(50, 61, 67, 0.2);
+  border: 1px solid rgba(50, 61, 67, 0.2);
+  border-radius: 1px;
+}
+
+.message-conc img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  margin-right: 10px;
+}
+.message-conc .user {
+  color: #e7e9ea;
+  font-weight: 500;
+  margin-right: 5px;
+  font-size: 13px;
+}
+.message-conc .text {
+  display: block;
+  font-size: 13px;
+  color: #d4d9dd;
+}
+
+.message-conc .message-conc-time {
+  display: none;
+}
+
+.message-conc:hover .message-conc-time {
+  display: inline;
+}
+
+.message-conc-time {
+  text-decoration: none;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.2); 
+
+}
+
 .send-message {
   color: #fff;
   background-color: #1e2125;

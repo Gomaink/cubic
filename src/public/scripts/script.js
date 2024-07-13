@@ -62,21 +62,54 @@ function loadMessages(friendId, friendUsername, friendNickname, friendAvatar) {
             chatContent.empty();
 
             if (data.messages && data.messages.length > 0) {
-                data.messages.forEach(message => {
+                let previousSenderId = null;
+                let consecutiveMessagesCount = 0;
+
+                data.messages.forEach((message, index) => {
                     const senderAvatar = message.sender === currentUserId ? avatarUrl : friendAvatar.replace(/\\/g, '/');
                     const formattedTimestamp = formatTimestamp(message.timestamp);
-                    chatContent.append(`
-                        <div class="message-container">
-                            <div class="message">
-                                <img src="${senderAvatar}" alt="${message.sender === currentUserId ? currentUsername : friendUsername}">
-                                <div>
-                                    <span class="user">${message.sender === currentUserId ? currentNickname : friendNickname}</span> <a class="message-time">${formattedTimestamp}</a>
-                                    <span class="text">${message.message}</span>
-                                </div>
+
+                    // Check if the current message sender is the same as the previous message sender
+                    let sameSenderAsPrevious = message.sender === previousSenderId;
+
+                    // Check if we need to transition to a new message group
+                    if (!sameSenderAsPrevious || consecutiveMessagesCount >= 15) {
+                        // If we had a previous sender and reached max consecutive messages, end the previous group
+                        if (previousSenderId !== null && consecutiveMessagesCount >= 15) {
+                            chatContent.append('</div>'); // Close the previous group
+                        }
+
+                        // Start a new message group
+                        chatContent.append('<div class="message-container">');
+                        consecutiveMessagesCount = 0;
+                        sameSenderAsPrevious = null;
+                    }
+
+                    // Prepare the message HTML
+                    let messageHtml = `
+                        <div class="${!sameSenderAsPrevious ? 'message' : 'message-conc'}">
+                            ${!sameSenderAsPrevious ? `<img src="${senderAvatar}" alt="${message.sender === currentUserId ? currentUsername : friendUsername}">` : ''}
+                            <div>
+                                ${!sameSenderAsPrevious ? `<span class="user">${message.sender === currentUserId ? currentNickname : friendNickname}</span> <a class="message-time">${formattedTimestamp}</a>` : ''}
+                                <span class="text">${message.message}</span>
                             </div>
                         </div>
-                    `);
+                    `;
+
+                    // Append the message HTML
+                    chatContent.append(messageHtml);
+
+                    // Increment consecutive messages count
+                    consecutiveMessagesCount++;
+
+                    // Update previousSenderId for the next iteration
+                    previousSenderId = message.sender;
                 });
+
+                // Close the final message group if needed
+                if (previousSenderId !== null && consecutiveMessagesCount >= 15) {
+                    chatContent.append('</div>'); // Close the final group
+                }
             } else {
                 chatContent.append('<p class="text-center">Não há nada por aqui até o momento...</p>');
             }
@@ -183,19 +216,55 @@ $(document).ready(function () {
     //Receber mensagem
     socket.on('receiveMessage', function (data) {
         const { user, userAvatar, message } = data;
+        const chatContent = $('#chatContent');
         const shouldScrollToBottom = isChatScrolledToBottom();
-        $('#chatContent').append(`
-        <div class="message-container">
-            <div class="message">
-                <img src="${userAvatar}" alt="${user}">
-                <div>
-                    <span class="user">${user}</span>
-                    <span class="text">${message}</span>
+        let lastMessageContainer = chatContent.children('.message-container').last();
+    
+        // Check if there is already a message container
+        if (lastMessageContainer.length > 0) {
+            const lastMessage = lastMessageContainer.find('.message').last();
+            const lastSender = lastMessage.find('.user').text();
+    
+            // Check if the last message sender is the same as the current message sender and it's not the initial load
+            if (lastSender === user && !lastMessageContainer.hasClass('initial-load')) {
+                // Append to the last message container
+                lastMessageContainer.append(`
+                    <div class="message-conc">
+                        <div>
+                            <span class="text">${message}</span>
+                        </div>
+                    </div>
+                `);
+            } else {
+                // Start a new message container
+                chatContent.append(`
+                    <div class="message-container">
+                        <div class="message">
+                            <img src="${userAvatar}" alt="${user}">
+                            <div>
+                                <span class="user">${user}</span>
+                                <span class="text">${message}</span>
+                            </div>
+                        </div>
+                    </div>
+                `);
+            }
+        } else {
+            // No existing message containers, create a new one
+            chatContent.append(`
+                <div class="message-container initial-load">
+                    <div class="message">
+                        <img src="${userAvatar}" alt="${user}">
+                        <div>
+                            <span class="user">${user}</span>
+                            <span class="text">${message}</span>
+                        </div>
+                    </div>
                 </div>
-            </div>
-        </div>
-        `);
-
+            `);
+        }
+    
+        // Scroll to bottom if chat was scrolled to bottom before receiving the message
         if (shouldScrollToBottom) {
             scrollToBottom();
         }
