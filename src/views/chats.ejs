@@ -13,18 +13,6 @@
 
     <div class="container-fluid">
         <div class="sidebar d-none d-md-block">
-            <p class="add-friend-title">ADICIONAR AMIGO</p>
-            <p class="add-friend-message">Aqui você pode adicionar amigos buscando pelo nome de usuário.</p>
-    
-            <form id="addFriendForm">
-                <div class="input-group mb-3">
-                    <input type="text" class="friendAddUsername form-control" placeholder="Nome de usuário" id="friendName" autocomplete="off">
-                    <button type="submit" class="btn btn-add">Add</button>
-                </div>
-                <div id="error-message" class="text-dangerr"></div>
-                <hr style="color: #1a1d20;">
-            </form>
-    
             <div class="friend-list-container">
                 <div class="custom-scrollbar">
                     <div class="custom-scrollbar-thumb"></div>
@@ -35,7 +23,7 @@
             <div class="dropup-container">
                 <div class="btn-group dropup">
                     <button type="button" class="btn btn-sm d-flex align-items-center" data-bs-toggle="dropdown" aria-expanded="false">
-                        <img id="avatarImg" src="<%= currentUser.avatarUrl || '/images/cubic-w-nobg.png' %>" class="avatar-icon" alt="Avatar">
+                        <img id="avatarImg" src="<%= currentUser.avatarUrl || '/images/cubic-w.jpeg' %>" class="avatar-icon" alt="Avatar">
                         <div class="user-info ms-2">
                             <div class="nickname"><%= currentUser.nickname %></div>
                             <div class="username"><%= currentUser.username %></div>
@@ -47,7 +35,9 @@
                         <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalAlterarNick"><i class="far fa-user" style="margin-right: 10px;"></i>Alterar nick</a></li>
                         <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalAlterarAvatar"><i class="fas fa-user-astronaut" style="margin-right: 10px;"></i>Alterar avatar</a></li>
                         <li><hr class="dropdown-divider" style="color: #fff; background-color: #fff;"></li>
+                        <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalFriendAdd"><i class="fa-solid fa-user-plus" style="margin-right: 10px;"></i>Adicionar amigo</a></li>
                         <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalFriendRequests"><i class="fa-solid fa-user-group" style="margin-right: 10px;"></i>Solicitações</a></li>
+                        <li><hr class="dropdown-divider" style="color: #fff; background-color: #fff;"></li>
                         <li><a class="dropdown-item" href="/auth/logout"><i class="fa-solid fa-right-from-bracket" style="margin-right: 10px;"></i>Desconectar</a></li>
                     </ul>
                 </div>
@@ -57,7 +47,7 @@
         <div class="chat-area">
             <div class="chat-nav">
                 <a class="chatTitle d-flex align-items-center friend-item">
-                    <img class="friend-avatar me-2" src="/images/cubic-w-nobg.png" id="chatAvatar" alt="Avatar"> 
+                    <img class="friend-avatar me-2" src="/images/cubic-w.jpeg" id="chatAvatar" alt="Avatar"> 
                     <span id="chatTitle">username</span>
                 </a>
             </div>
@@ -125,7 +115,7 @@
                             <input type="text" class="update-modals modal-control" id="newNick" placeholder="Algum nick legal..." autocomplete="off">
                         </div>
                         <div id="error-message-modal-nickname" class="error-message-modal text-secondary"></div>
-                        <button type="submit" class="btn btn-modal">Salvar</button>
+                        <button type="submit" class="btn btn-modal" style="margin-top: 1px;">Salvar</button>
                     </form>
                 </div>
             </div>
@@ -148,6 +138,28 @@
                         </div>
                         <div id="error-message-modal-avatar" class="error-message-modal text-secondary"></div>
                         <button type="submit" class="btn btn-modal">Salvar</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Adicionar amigo -->
+    <div class="modal fade" id="modalFriendAdd" tabindex="-1" aria-labelledby="modalFriendAddLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalFriendAddLabel">Adicionar um amigo</h5>
+                    <button type="button" class="modal-btn btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form>
+                        <div class="mb-3">
+                            <label for="newName" class="form-label">Qual o nome de usuário do seu novo amigo?</label>
+                            <input type="text" class="update-modals modal-control" id="newFriend" placeholder="Nome de usuário..." autocomplete="off">
+                        </div>
+                        <div id="error-message-modal-addfriend" class="error-message-modal text-secondary"></div>
+                        <button type="submit" class="btn btn-modal">Adicionar</button>
                     </form>
                 </div>
             </div>

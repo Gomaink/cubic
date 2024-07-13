@@ -22,7 +22,7 @@ router.get('/', async (req, res) => {
 
         // Preenche avatarUrl com a imagem padrão se for undefined
         friends.forEach(friend => {
-            friend.avatarUrl = friend.avatarUrl || '/images/cubic-w-nobg.png';
+            friend.avatarUrl = friend.avatarUrl || '/images/cubic-w.jpeg';
         });
 
         res.status(200).json({ friends });
@@ -108,9 +108,17 @@ router.delete('/remove/:friendId', async (req, res) => {
         }
 
         const friendId = req.params.friendId;
+
+        // Remove friendId from currentUser's friends list
         await Friendship.updateOne(
             { user: currentUser._id },
             { $pull: { friends: friendId } }
+        );
+
+        // Remove currentUser from friendId's friends list
+        await Friendship.updateOne(
+            { user: friendId },
+            { $pull: { friends: currentUser._id } }
         );
 
         res.status(200).json({ success: true });

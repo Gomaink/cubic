@@ -185,8 +185,7 @@ $(document).ready(function () {
             contentType: 'application/json',
             success: function (data) {
                 if (data.success) {
-                    $('#modalAlterarNome').modal('hide'); // Esconde o modal após sucesso
-                    // Aqui você pode atualizar o nome de usuário exibido na página, se necessário
+                    $('#newName').val('');
                     $('#error-message-modal-username').text('Nome de usuário atualizado com sucesso!');
                 } else {
                     $('#error-message-modal-username').text(data.error);
@@ -208,8 +207,7 @@ $(document).ready(function () {
             contentType: 'application/json',
             success: function (data) {
                 if (data.success) {
-                    $('#modalAlterarNick').modal('hide'); // Esconde o modal após sucesso
-                    // Aqui você pode atualizar o nickname exibido na página, se necessário
+                    $('#newNick').val('');
                     $('#error-message-modal-nickname').text('Nome de exibição atualizado com sucesso!');
                 } else {
                     $('#error-message-modal-nickname').text(data.error);
@@ -249,8 +247,8 @@ $(document).ready(function () {
             processData: false,
             success: function(data) {
                 if (data.success) {
-                    $('#modalAlterarAvatar').modal('hide');
-                    // Atualizar a visualização do avatar na página, se necessário
+                    $('#newAvatar').val('');
+                    $('#error-message-modal-avatar').text('Avatar atualizado com sucesso!');
                 } else {
                     console.error('Erro ao atualizar avatar:', data.error);
                 }
@@ -289,14 +287,14 @@ $(document).ready(function () {
     });
 
     // Resto do código para adicionar amigos, aceitar/rejeitar pedidos de amizade, etc.
-    $('#addFriendForm').on('submit', function (e) {
+    $('#modalFriendAdd form').on('submit', function (e) {
         e.preventDefault();
-        const friendName = $('#friendName').val();
+        const friendName = $('#newFriend').val();
         if (friendName === '') {
-            $('#error-message').text('Usuário não encontrado.');
+            $('#error-message-modal-username').text('Usuário não encontrado.');
         } else {
-            $('#error-message').text('');
-
+            $('#error-message-modal-username').text('');
+    
             $.ajax({
                 url: '/friends/add-friend',
                 method: 'POST',
@@ -304,15 +302,15 @@ $(document).ready(function () {
                 contentType: 'application/json',
                 success: function (data) {
                     if (data.success) {
-                        $('#friendName').val('');
-                        $('#error-message').text('Pedido de amizade enviado.');
+                        $('#newFriend').val('');
+                        $('#error-message-modal-addfriend').text('Pedido de amizade enviado.');
                     } else {
-                        $('#error-message').text(data.error);
+                        $('#error-message-modal-username').text(data.error);
                     }
                 },
                 error: function (jqXHR) {
                     const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao adicionar amigo. Tente novamente.';
-                    $('#error-message').text(errorMessage);
+                    $('#error-message-modal-username').text(errorMessage);
                 }
             });
         }
