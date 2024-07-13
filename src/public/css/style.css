@@ -35,10 +35,10 @@ body {
 }
 
 .btn-login:hover {
-  border: 2px solid #fff;
-  background-color: #fff;
+  border: 2px solid #e2e2e2;
+  background-color: #e2e2e2;
   border-radius: 1.5rem;
-  color: #a058f2;
+  color: #000;
 }
 
 

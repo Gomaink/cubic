@@ -161,8 +161,8 @@ $(document).ready(function () {
             $(this).val('');
         }
     });
-
-    // Receber mensagem
+    
+    //Receber mensagem
     socket.on('receiveMessage', function (data) {
         const { user, userAvatar, message } = data;
         $('#chatContent').append(`
@@ -343,7 +343,7 @@ $(document).ready(function () {
             },
             error: function (jqXHR) {
                 const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao carregar pedidos de amizade. Tente novamente.';
-                alert(errorMessage);
+                console.error(errorMessage);
             }
         });
     }
@@ -449,7 +449,7 @@ $(document).ready(function () {
             },
             error: function (jqXHR) {
                 const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao carregar a lista de amigos. Tente novamente.';
-                alert(errorMessage);
+                console.error(errorMessage);
             }
         });
     }
