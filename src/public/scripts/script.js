@@ -47,6 +47,7 @@ function joinRoom(friendUsername, friendNickname, friendId, friendAvatarUrl) {
     const chatTitle = chatLink.querySelector('#chatTitle');
     chatTitle.innerText = `${friendUsername} AKA ${friendNickname}`;
     chatAvatar.src = friendAvatarUrl;
+    document.getElementById('chatTitle').style.display = 'flex';
     loadMessages(friendId, friendUsername, friendNickname, friendAvatarUrl);
 }
 

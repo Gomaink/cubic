@@ -321,6 +321,7 @@ body, html {
   background: #181b1e;
   width: 100%; /* Faz com que o elemento se estenda horizontalmente */
   padding: 10px 20px; /* Adiciona padding interno para melhorar o espaçamento */
+  height: 45px;
 }
 
 .chat-area img {
