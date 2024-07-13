@@ -57,27 +57,33 @@ function loadMessages(friendId, friendUsername, friendNickname, friendAvatar) {
         method: 'GET',
         success: function (data) {
             const chatContent = $('#chatContent');
+            const shouldScrollToBottom = isChatScrolledToBottom(); // Check if the chat is scrolled to bottom
+
             chatContent.empty();
-            
 
             if (data.messages && data.messages.length > 0) {
                 data.messages.forEach(message => {
                     const senderAvatar = message.sender === currentUserId ? avatarUrl : friendAvatar.replace(/\\/g, '/');
                     const formattedTimestamp = formatTimestamp(message.timestamp);
                     chatContent.append(`
-                    <div class="message-container">
-                        <div class="message">
-                            <img src="${senderAvatar}" alt="${message.sender === currentUserId ? currentUsername : friendUsername}">
-                            <div>
-                                <span class="user">${message.sender === currentUserId ? currentNickname : friendNickname}</span> <a class="message-time">${formattedTimestamp}</a>
-                                <span class="text">${message.message}</span>
+                        <div class="message-container">
+                            <div class="message">
+                                <img src="${senderAvatar}" alt="${message.sender === currentUserId ? currentUsername : friendUsername}">
+                                <div>
+                                    <span class="user">${message.sender === currentUserId ? currentNickname : friendNickname}</span> <a class="message-time">${formattedTimestamp}</a>
+                                    <span class="text">${message.message}</span>
+                                </div>
                             </div>
                         </div>
-                    </div>
                     `);
                 });
             } else {
                 chatContent.append('<p class="text-center">Não há nada por aqui até o momento...</p>');
+            }
+
+            // Scroll to bottom if chat was scrolled to bottom before loading messages
+            if (shouldScrollToBottom) {
+                scrollToBottom();
             }
         },
         error: function (jqXHR) {
@@ -85,6 +91,18 @@ function loadMessages(friendId, friendUsername, friendNickname, friendAvatar) {
             console.error('Erro AJAX:', errorMessage);
         }
     });
+}
+
+// Function to check if chat is scrolled to bottom
+function isChatScrolledToBottom() {
+    const chatContent = $('#chatContent');
+    return chatContent.prop('scrollHeight') - chatContent.scrollTop() === chatContent.outerHeight();
+}
+
+// Function to scroll chat content to bottom
+function scrollToBottom() {
+    const chatContent = $('#chatContent');
+    chatContent.scrollTop(chatContent.prop('scrollHeight'));
 }
 
 //Remover amigo
@@ -165,6 +183,7 @@ $(document).ready(function () {
     //Receber mensagem
     socket.on('receiveMessage', function (data) {
         const { user, userAvatar, message } = data;
+        const shouldScrollToBottom = isChatScrolledToBottom();
         $('#chatContent').append(`
         <div class="message-container">
             <div class="message">
@@ -176,6 +195,10 @@ $(document).ready(function () {
             </div>
         </div>
         `);
+
+        if (shouldScrollToBottom) {
+            scrollToBottom();
+        }
     });
 
     function updateUsername(userId, newUsername) {
