@@ -47,11 +47,19 @@
         </div>
     
         <div class="chat-area">
-            <div class="chat-nav">
+            <div class="chat-nav d-flex justify-content-between align-items-center">
                 <a class="chatTitle align-items-center friend-item" id="chatTitle" style="display: none;">
                     <img class="friend-avatar me-2" src="/images/cubic-w.jpeg" id="chatAvatar" alt="Avatar"> 
-                    <span id="chatTitle">username</span>
+                    <span id="chatUsername">username</span>
                 </a>
+                <div class="call-buttons" id="callButtons" style="display: none;">
+                    <button class="btn btn-call btn-sm me-2" id="videoCallButton" title="Video Call">
+                        <i class="fa-solid fa-camera"></i>
+                    </button>
+                    <button class="btn btn-call btn-sm" id="audioCallButton" title="Audio Call">
+                        <i class="fa-solid fa-phone"></i>
+                    </button>
+                </div>
             </div>
             <div id="chatContent"></div>
             <div class="message-input p-3">

@@ -35,6 +35,19 @@ function formatTimestamp(timestamp) {
     }
 }
 
+function showChatTitle(friendUsername, friendAvatar) {
+    const chatTitle = document.getElementById('chatTitle');
+    const chatAvatar = document.getElementById('chatAvatar');
+    const chatUsername = document.getElementById('chatUsername');
+    const callButtons = document.getElementById('callButtons');
+
+    chatAvatar.src = friendAvatar;
+    chatUsername.textContent = friendUsername;
+
+    chatTitle.style.display = 'flex';
+    callButtons.style.display = 'flex';
+}
+
 // Função para entrar em uma sala específica
 function joinRoom(friendUsername, friendNickname, friendId, friendAvatarUrl) {
     currentFriendId = friendId;
@@ -42,12 +55,7 @@ function joinRoom(friendUsername, friendNickname, friendId, friendAvatarUrl) {
     socket.emit('joinRoom', currentRoom);
     $('#chatContent').empty(); 
     document.title = `Cubic | ${friendNickname}`;
-    const chatLink = document.querySelector('.chatTitle');
-    const chatAvatar = chatLink.querySelector('#chatAvatar');
-    const chatTitle = chatLink.querySelector('#chatTitle');
-    chatTitle.innerText = `${friendUsername} AKA ${friendNickname}`;
-    chatAvatar.src = friendAvatarUrl;
-    document.getElementById('chatTitle').style.display = 'flex';
+    showChatTitle(friendUsername, friendAvatarUrl);
     loadMessages(friendId, friendUsername, friendNickname, friendAvatarUrl);
 }
 
