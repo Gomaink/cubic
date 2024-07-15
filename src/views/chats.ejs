@@ -59,6 +59,7 @@
                     <button class="btn btn-call btn-sm" id="audioCallButton" title="Audio Call">
                         <i class="fa-solid fa-phone"></i>
                     </button>
+                    <audio id="remoteAudio" controls autoplay></audio>
                 </div>
             </div>
             <div id="chatContent"></div>
@@ -192,9 +193,28 @@
         </div>
     </div>
 
+    <!-- Modal de notificação para chamadas recebidas -->
+    <div class="modal fade" id="incomingCallModal" tabindex="-1" aria-labelledby="incomingCallLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="incomingCallLabel">Chamada Recebida</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    Você está recebendo uma chamada. Deseja atender?
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-success" id="acceptCallButton">Atender</button>
+                    <button type="button" class="btn btn-danger" data-bs-dismiss="modal">Recusar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
-
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
     const currentUserId = '<%= currentUser._id %>';
@@ -202,6 +222,50 @@
     const currentNickname = '<%= currentUser.nickname %>';
     const avatar = document.getElementById('avatarImg');
     const avatarUrl = avatar.src;
+
+    const socket = io();
+    var peer = new Peer();
+
+    peer.on('open', function(id) {
+        console.log('My peer ID is: ' + id);
+    });
+
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+        let currentCall = null;
+
+        // Atender a chamada e fornecer a MediaStream
+        peer.on('call', function(call) {
+            currentCall = call;
+            $('#incomingCallModal').modal('show');
+
+            document.getElementById('acceptCallButton').onclick = function() {
+                $('#incomingCallModal').modal('hide');
+                call.answer(stream);
+                call.on('stream', function(remoteStream) {
+                    // Adicionar o stream remoto ao elemento de áudio
+                    var audioElement = document.getElementById('remoteAudio');
+                    audioElement.srcObject = remoteStream;
+                    audioElement.play();
+                });
+            };
+        });
+
+        // Realizar a chamada ao clicar no botão
+        document.getElementById('audioCallButton').addEventListener('click', function() {
+            var remotePeerId = findOtherPeerIdInRoom(currentRoom, MyPeerId);
+            console.log(`${currentRoom}, ${MyPeerId}, ${remotePeerId}`);
+            console.log('Calling peer ID: ' + remotePeerId);
+            var call = peer.call(remotePeerId, stream);
+            call.on('stream', function(remoteStream) {
+                // Adicionar o stream remoto ao elemento de áudio
+                var audioElement = document.getElementById('remoteAudio');
+                audioElement.srcObject = remoteStream;
+                audioElement.play();
+            });
+        });
+    }).catch(function(err) {
+        console.error('Failed to get local stream', err);
+    });
 </script>
 <script src="/scripts/script.js"></script>
 </body>

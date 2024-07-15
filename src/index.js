@@ -6,7 +6,6 @@ const mongoose = require('mongoose');
 const { createServer } = require('node:http');
 const { Server } = require('socket.io');
 
-
 require('dotenv').config();
 
 //Express instance

@@ -1,4 +1,3 @@
-const socket = io();
 const UserId = currentUserId;
 const User = currentUsername;
 const Avatar = avatarUrl;
@@ -9,6 +8,7 @@ let currentRoom = '';
 let currentFriendAvatar = '';
 let friendToRemove = null;
 
+let currentRoomPeerIds = '';
 
 function formatTimestamp(timestamp) {
     const now = new Date();
