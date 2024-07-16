@@ -100,13 +100,6 @@ body, html {
   cursor: pointer;
 }
 
-.friend-avatar {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  object-fit: cover;
-} 
-
 .text-danger {
   font-size: 12px;
 }
@@ -160,13 +153,45 @@ body, html {
   color: #fff;
 }
 
+.c-avatar {
+  position:relative;
+  display:inline-block;
+}
 
-.dropup img {
+.c-avatar_image {
   width: 35px;
   height: 35px;
-  border-radius: 50%;
+  border-radius: 100%;
   object-fit: cover;
   margin-right: 5px;
+}
+
+.c-avatar_status {
+  width:14px;
+  height:14px;
+  background:#198754;
+  border:2px solid #181b1e;
+  position:absolute;
+  bottom:-3%;
+  right:5%;
+  border-radius:100%;
+}
+
+.c-friend_avatar_image {
+  width: 30px;
+  height: 30px;
+  border-radius: 100%;
+  object-fit: cover;
+} 
+
+.c-friend_avatar_status {
+  width:12px;
+  height:12px;
+  border:2px solid #181b1e;
+  position:absolute;
+  bottom:-8%;
+  right:10%;
+  border-radius:100%;
 }
 
 .user-info {

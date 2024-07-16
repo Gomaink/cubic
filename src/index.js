@@ -62,17 +62,29 @@ app.get("/error", (req, res) => {
     res.render("error", { error, errorMessage });
 });
 
+let usersOnline = {};
+
 // WebSockets logic
 io.on('connection', (socket) => {
     const userId = socket.handshake.query.currentUserId;
-
-    User.findByIdAndUpdate(userId, { online: true }, { new: true })
-        .then(user => {
-            if (user) {
-                console.log(`User ${user.username} is now online`);
-            }
-        })
-        .catch(err => console.error(err));
+    
+    if (userId) {
+        usersOnline[userId] = socket.id;
+        
+        User.findByIdAndUpdate(userId, { online: true }, { new: true })
+            .then(user => {
+                if (user) {
+                    console.log(`User ${user.username} is now online`);
+                    io.emit('userStatusChanged', { userId, online: true });
+                }
+            })
+            .catch(err => console.error(err));
+    }
+    
+    socket.on('userConnected', (userId) => {
+        usersOnline[userId] = true;
+        io.emit('userStatusChanged', { userId, online: true });
+    });
 
     socket.on('joinRoom', (room) => {
         socket.join(room);
@@ -83,11 +95,20 @@ io.on('connection', (socket) => {
         io.to(room).emit('receiveMessage', { user, userAvatar, message });
     });
 
+
     socket.on('disconnect', () => {
         User.findByIdAndUpdate(userId, { online: false }, { new: true })
             .then(user => {
                 if (user) {
                     console.log(`User ${user.username} is now offline`);
+                    for (let userId in usersOnline) {
+                        console.log(usersOnline[userId]);
+                        if (usersOnline[userId] === socket.id) {
+                            delete usersOnline[userId];
+                            io.emit('userStatusChanged', { userId, online: false });
+                            break;
+                        }
+                    }
                 }
             })
             .catch(err => console.error(err));

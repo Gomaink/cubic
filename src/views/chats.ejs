@@ -25,7 +25,10 @@
             <div class="dropup-container">
                 <div class="btn-group dropup">
                     <button type="button" class="btn btn-sm d-flex align-items-center" data-bs-toggle="dropdown" aria-expanded="false">
-                        <img id="avatarImg" src="<%= currentUser.avatarUrl || '/images/cubic-w.jpeg' %>" class="avatar-icon" alt="Avatar">
+                        <div class='c-avatar'>
+                            <img id="avatarImg" src="<%= currentUser.avatarUrl || '/images/cubic-w.jpeg' %>" class="c-avatar_image" alt="Avatar">
+                            <span class='c-avatar_status'></span>
+                        </div>
                         <div class="user-info ms-2">
                             <div class="nickname"><%= currentUser.nickname %></div>
                             <div class="username"><%= currentUser.username %></div>
@@ -224,6 +227,13 @@
     const avatarUrl = avatar.src;
 
     const socket = io({ query: { currentUserId } });
+
+    socket.on('userStatusChanged', (data) => {
+        const { userId, online } = data;
+        const color = online ? '#198754' : '#c93c3e';
+        $(`#friend-${userId}`).css('background', color);
+    });
+
     var peer = new Peer();
 
     peer.on('open', function(id) {

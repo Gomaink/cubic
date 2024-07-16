@@ -523,15 +523,34 @@ $(document).ready(function () {
                         newFriends[friend.username] = true;
                         if (!currentFriends[friend.username]) {
                             const formattedAvatarUrl = friend.avatarUrl.replace(/\\/g, '/');
-                            friendsList.append(`
-                                <li class="list-group-item d-flex justify-content-between align-items-center" data-friend-id="${friend._id}">
-                                    <a onclick="joinRoom('${friend.username}', '${friend.nickname}', '${friend._id}', '${formattedAvatarUrl}');" class="d-flex align-items-center friend-item" data-friend-name="${friend.username}">
-                                        <img src="${friend.avatarUrl}" alt="${friend.username}" class="friend-avatar me-2">
-                                        ${friend.nickname}
-                                    </a>
-                                    <a onclick="RemoveFriend('${friend._id}');" class="remove-friend"><i class="fa-solid fa-xmark"></i></a>
-                                </li>
-                            `);
+                            if(friend.online){
+                                friendsList.append(`
+                                    <li class="list-group-item d-flex justify-content-between align-items-center" data-friend-id="${friend._id}">
+                                        <a onclick="joinRoom('${friend.username}', '${friend.nickname}', '${friend._id}', '${formattedAvatarUrl}');" class="d-flex align-items-center friend-item" data-friend-name="${friend.username}">
+                                            <div class='c-avatar'>
+                                                <img src="${friend.avatarUrl}" alt="${friend.username}" class="c-friend_avatar_image me-2">
+                                                <span id="friend-${friend._id}" class='c-friend_avatar_status' style='background: #198754'></span>
+                                            </div>
+                                            ${friend.nickname}
+                                        </a>
+                                        <a onclick="RemoveFriend('${friend._id}');" class="remove-friend"><i class="fa-solid fa-xmark"></i></a>
+                                    </li>
+                                `);
+                            }
+                            else{
+                                friendsList.append(`
+                                    <li class="list-group-item d-flex justify-content-between align-items-center" data-friend-id="${friend._id}">
+                                        <a onclick="joinRoom('${friend.username}', '${friend.nickname}', '${friend._id}', '${formattedAvatarUrl}');" class="d-flex align-items-center friend-item" data-friend-name="${friend.username}">
+                                            <div class='c-avatar'>
+                                                <img src="${friend.avatarUrl}" alt="${friend.username}" class="c-friend_avatar_image me-2">
+                                                <span id="friend-${friend._id}" class='c-friend_avatar_status' style='background: #c93c3e;'></span>
+                                            </div>
+                                            ${friend.nickname}
+                                        </a>
+                                        <a onclick="RemoveFriend('${friend._id}');" class="remove-friend"><i class="fa-solid fa-xmark"></i></a>
+                                    </li>
+                                `);
+                            }
                         }
                     });
 
