@@ -30,8 +30,8 @@
                             <span class='c-avatar_status'></span>
                         </div>
                         <div class="user-info ms-2">
-                            <div class="nickname"><%= currentUser.nickname %></div>
-                            <div class="username"><%= currentUser.username %></div>
+                            <div id="user-nickname" class="nickname"><%= currentUser.nickname %></div>
+                            <div id="user-username" class="username"><%= currentUser.username %></div>
                         </div>
                         <i id="friendRequestsNotification" class="fa-regular fa-bell" style="display: none; margin-left: 5px;"></i>
                     </button>
@@ -229,10 +229,26 @@
     const socket = io({ query: { currentUserId } });
 
     socket.on('userStatusChanged', (data) => {
-        const { userId, online } = data;
+        const { userId, online, nickname, avatar } = data;
         const color = online ? '#198754' : '#c93c3e';
-        $(`#friend-${userId}`).css('background', color);
+        
+        console.log("debug");
+        console.log(nickname);
+
+        // Verificações opcionais
+        if (userId) {
+            $(`#friend-${userId}`).css('background', color);
+        }
+
+        if (nickname) {
+            $(`#friend-nickname-${userId}`).text(nickname);
+        }
+
+        if (avatar) {
+            $(`#friend-avatar-${userId}`).attr('src', avatar);
+        }
     });
+
 
     var peer = new Peer();
 

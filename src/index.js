@@ -66,6 +66,7 @@ let usersOnline = {};
 
 // WebSockets logic
 io.on('connection', (socket) => {
+    
     const userId = socket.handshake.query.currentUserId;
     
     if (userId) {
@@ -80,10 +81,9 @@ io.on('connection', (socket) => {
             })
             .catch(err => console.error(err));
     }
-    
-    socket.on('userConnected', (userId) => {
-        usersOnline[userId] = true;
-        io.emit('userStatusChanged', { userId, online: true });
+
+    socket.on('userChanges', (userId, nickname, avatar) => {
+        io.emit('userStatusChanged', { userId, online: true, nickname, avatar });
     });
 
     socket.on('joinRoom', (room) => {

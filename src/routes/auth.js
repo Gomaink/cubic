@@ -19,6 +19,14 @@ const transporter = nodemailer.createTransport({
     }
 });
 
+router.get('/check-auth', (req, res) => {
+    if (req.session && req.session.userId) {
+        res.json({ authenticated: true, userId: req.session.userId });
+    } else {
+        res.json({ authenticated: false });
+    }
+});
+
 router.get('/login', (req, res) => {
     if (req.session.userId) {
         return res.redirect("/chats");

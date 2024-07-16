@@ -287,6 +287,7 @@ $(document).ready(function () {
             success: function (data) {
                 if (data.success) {
                     $('#newName').val('');
+                    $('#user-username').text(newUsername);
                     $('#error-message-modal-username').text('Nome de usuário atualizado com sucesso!');
                 } else {
                     $('#error-message-modal-username').text(data.error);
@@ -309,7 +310,9 @@ $(document).ready(function () {
             success: function (data) {
                 if (data.success) {
                     $('#newNick').val('');
+                    $('#user-nickname').text(newNickname);
                     $('#error-message-modal-nickname').text('Nome de exibição atualizado com sucesso!');
+                    socket.emit('userChanges', userId, newNickname, null);
                 } else {
                     $('#error-message-modal-nickname').text(data.error);
                 }
@@ -350,6 +353,10 @@ $(document).ready(function () {
                 if (data.success) {
                     $('#newAvatar').val('');
                     $('#error-message-modal-avatar').text('Avatar atualizado com sucesso!');
+
+                    const newAvatarUrl = data.avatarUrl;
+                    $('#avatarImg').attr('src', newAvatarUrl);
+                    socket.emit('userChanges', currentUserId, null, newAvatarUrl);
                 } else {
                     console.error('Erro ao atualizar avatar:', data.error);
                 }
@@ -370,7 +377,7 @@ $(document).ready(function () {
         if (newUsername === '') {
             return;
         }
-    
+        
         updateUsername(userId, newUsername); // Chama a função para atualizar o nome de usuário
     });
     
@@ -528,10 +535,10 @@ $(document).ready(function () {
                                     <li class="list-group-item d-flex justify-content-between align-items-center" data-friend-id="${friend._id}">
                                         <a onclick="joinRoom('${friend.username}', '${friend.nickname}', '${friend._id}', '${formattedAvatarUrl}');" class="d-flex align-items-center friend-item" data-friend-name="${friend.username}">
                                             <div class='c-avatar'>
-                                                <img src="${friend.avatarUrl}" alt="${friend.username}" class="c-friend_avatar_image me-2">
+                                                <img id="friend-avatar-${friend._id}" src="${friend.avatarUrl}" alt="${friend.username}" class="c-friend_avatar_image me-2">
                                                 <span id="friend-${friend._id}" class='c-friend_avatar_status' style='background: #198754'></span>
                                             </div>
-                                            ${friend.nickname}
+                                            <span id="friend-nickname-${friend._id}">${friend.nickname}</span>
                                         </a>
                                         <a onclick="RemoveFriend('${friend._id}');" class="remove-friend"><i class="fa-solid fa-xmark"></i></a>
                                     </li>
@@ -540,9 +547,9 @@ $(document).ready(function () {
                             else{
                                 friendsList.append(`
                                     <li class="list-group-item d-flex justify-content-between align-items-center" data-friend-id="${friend._id}">
-                                        <a onclick="joinRoom('${friend.username}', '${friend.nickname}', '${friend._id}', '${formattedAvatarUrl}');" class="d-flex align-items-center friend-item" data-friend-name="${friend.username}">
+                                        <a id="friend-nickname-${friend._id}" onclick="joinRoom('${friend.username}', '${friend.nickname}', '${friend._id}', '${formattedAvatarUrl}');" class="d-flex align-items-center friend-item" data-friend-name="${friend.username}">
                                             <div class='c-avatar'>
-                                                <img src="${friend.avatarUrl}" alt="${friend.username}" class="c-friend_avatar_image me-2">
+                                                <img id="friend-avatar-${friend._id}" src="${friend.avatarUrl}" alt="${friend.username}" class="c-friend_avatar_image me-2">
                                                 <span id="friend-${friend._id}" class='c-friend_avatar_status' style='background: #c93c3e;'></span>
                                             </div>
                                             ${friend.nickname}
@@ -573,8 +580,23 @@ $(document).ready(function () {
         });
     }
 
-    loadFriends();
-
-    setInterval(checkFriendRequests, 500);
-    setInterval(loadFriends, 500);
+    // Verifica periodicamente se o usuário está logado
+    setInterval(() => {
+        $.ajax({
+            url: '/auth/check-auth', // Endpoint para verificar autenticação
+            method: 'GET',
+            success: function(data) {
+                if (!data.authenticated) {
+                    // Se não estiver autenticado, redireciona para o loginaa
+                    window.location.href = '/auth/login';
+                    console.log("teste");
+                }
+            },
+            error: function(jqXHR) {
+                console.error('Erro ao verificar autenticação:', jqXHR.responseText);
+            }
+        });
+        checkFriendRequests();
+        loadFriends();
+    }, 1000); // Verifica a cada minuto (ajuste conforme necessário)a
 });

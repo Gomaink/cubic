@@ -37,7 +37,7 @@ router.post('/update-username', async (req, res) => {
     const { userId, newUsername } = req.body;
 
     try {
-        const existingUsername = await User.findOne({ username });
+        const existingUsername = await User.findOne({ username: newUsername });
         
         if (existingUsername) {
             return res.render('register', { error: 'Este nome de usuário já está em uso.' });
@@ -55,6 +55,7 @@ router.post('/update-username', async (req, res) => {
         res.status(500).json({ error: 'Erro ao atualizar nome de usuário. Tente novamente.' });
     }
 });
+
 
 // Update a user nickname
 router.post('/update-nickname', async (req, res) => {
@@ -83,23 +84,25 @@ router.post('/upload-avatar', upload.single('avatar'), async (req, res, next) =>
             return res.status(404).json({ error: 'Usuário não encontrado.' });
         }
 
-        const avatarPath = req.file.path.replace('public\\', '');
+        // Obtém o caminho absoluto do avatar no sistema de arquivos
+        const avatarPath = req.file.path;
 
         // Excluir o avatar anterior se existir
         if (currentUser.avatarUrl) {
-            const oldAvatarPath = path.join(__dirname, '..', currentUser.avatarUrl);
+            const oldAvatarPath = path.join(__dirname, '..', 'public', currentUser.avatarUrl);
             fs.unlinkSync(oldAvatarPath); // Exclui o arquivo do sistema de arquivos
         }
 
         // Atualize o campo do caminho do avatar no documento do usuário
-        currentUser.avatarUrl = avatarPath;
+        currentUser.avatarUrl = avatarPath.replace('public\\', ''); // Salva o caminho sem o prefixo 'public/'
         await currentUser.save();
 
-        res.json({ success: true, avatarUrl: avatarPath });
+        res.json({ success: true, avatarUrl: currentUser.avatarUrl });
     } catch (err) {
         console.error('Erro ao atualizar o avatar:', err);
         res.status(500).json({ error: 'Erro ao salvar o avatar.' });
     }
 });
+
 
 module.exports = router;
