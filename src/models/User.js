@@ -12,7 +12,8 @@ const userSchema = new mongoose.Schema({
         month: { type: Number, required: true },
         year: { type: Number, required: true }
     },
-    avatarUrl: { type: String, required: true }
+    avatarUrl: { type: String, required: true },
+    online: { type: Boolean, default: false }
 });
 
 // Bcrypt hash

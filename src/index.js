@@ -2,6 +2,7 @@ const express = require('express');
 const session = require('express-session');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
+const User = require('./models/User');
 
 const { createServer } = require('node:http');
 const { Server } = require('socket.io');
@@ -63,7 +64,15 @@ app.get("/error", (req, res) => {
 
 // WebSockets logic
 io.on('connection', (socket) => {
-    console.log('New client connected');
+    const userId = socket.handshake.query.currentUserId;
+
+    User.findByIdAndUpdate(userId, { online: true }, { new: true })
+        .then(user => {
+            if (user) {
+                console.log(`User ${user.username} is now online`);
+            }
+        })
+        .catch(err => console.error(err));
 
     socket.on('joinRoom', (room) => {
         socket.join(room);
@@ -75,10 +84,15 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => {
-        console.log('Client disconnected');
+        User.findByIdAndUpdate(userId, { online: false }, { new: true })
+            .then(user => {
+                if (user) {
+                    console.log(`User ${user.username} is now offline`);
+                }
+            })
+            .catch(err => console.error(err));
     });
 });
 
 //Express listener
-//app.listen(port, () => console.log(`Server running on port ${port}.`));
 server.listen(port, () => console.log(`Server running on port ${port}.`));

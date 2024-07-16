@@ -223,7 +223,7 @@
     const avatar = document.getElementById('avatarImg');
     const avatarUrl = avatar.src;
 
-    const socket = io();
+    const socket = io({ query: { currentUserId } });
     var peer = new Peer();
 
     peer.on('open', function(id) {
