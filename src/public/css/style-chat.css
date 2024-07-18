@@ -75,6 +75,11 @@ body, html {
   color: #dad9d9;
 }
 
+.btn-mute {
+  padding-left: 15px;
+  padding-right: 15px;
+}
+
 .list-group-item {
   padding-right: 10px;
   padding-bottom: 10px;
@@ -519,4 +524,9 @@ body, html {
   z-index: 1050; /* Certifique-se de que o toast esteja acima de outros elementos */
   background-color: #1a1d20;
   color: #fff;
+}
+
+.range {
+  width: 100px;
+  height: 1.9rem;
 }

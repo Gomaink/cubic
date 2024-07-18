@@ -62,7 +62,10 @@
                     <button class="btn btn-call btn-sm" id="audioCallButton" title="Audio Call">
                         <i class="fa-solid fa-phone"></i>
                     </button>
-                    <audio id="remoteAudio" controls autoplay></audio>
+                    <button class="btn btn-mute btn-sm" id="muteButton" title="Mute voice">
+                        <i class="fa-solid fa-microphone"></i>
+                    </button>
+                    <input type="range" class="form-range range" id="volumeSlider" min="0" max="1" step="0.1" value="1">
                 </div>
             </div>
             <div id="chatContent"></div>
@@ -256,42 +259,46 @@
         console.log('My peer ID is: ' + id);
     });
 
-    navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
-        let currentCall = null;
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+            let currentCall = null;
 
-        // Atender a chamada e fornecer a MediaStream
-        peer.on('call', function(call) {
-            currentCall = call;
-            $('#incomingCallModal').modal('show');
+            // Atender a chamada e fornecer a MediaStream
+            peer.on('call', function(call) {
+                currentCall = call;
+                $('#incomingCallModal').modal('show');
 
-            document.getElementById('acceptCallButton').onclick = function() {
-                $('#incomingCallModal').modal('hide');
-                call.answer(stream);
+                document.getElementById('acceptCallButton').onclick = function() {
+                    $('#incomingCallModal').modal('hide');
+                    call.answer(stream);
+                    call.on('stream', function(remoteStream) {
+                        // Adicionar o stream remoto ao elemento de áudio
+                        var audioElement = document.getElementById('remoteAudio');
+                        audioElement.srcObject = remoteStream;
+                        audioElement.play();
+                    });
+                };
+            });
+
+            // Realizar a chamada ao clicar no botão
+            document.getElementById('audioCallButton').addEventListener('click', function() {
+                var remotePeerId = prompt('Enter the ID of the peer you want to call:');
+                console.log('Calling peer ID: ' + remotePeerId);
+                var call = peer.call(remotePeerId, stream);
                 call.on('stream', function(remoteStream) {
                     // Adicionar o stream remoto ao elemento de áudio
                     var audioElement = document.getElementById('remoteAudio');
                     audioElement.srcObject = remoteStream;
                     audioElement.play();
                 });
-            };
-        });
-
-        // Realizar a chamada ao clicar no botão
-        document.getElementById('audioCallButton').addEventListener('click', function() {
-            var remotePeerId = findOtherPeerIdInRoom(currentRoom, MyPeerId);
-            console.log(`${currentRoom}, ${MyPeerId}, ${remotePeerId}`);
-            console.log('Calling peer ID: ' + remotePeerId);
-            var call = peer.call(remotePeerId, stream);
-            call.on('stream', function(remoteStream) {
-                // Adicionar o stream remoto ao elemento de áudio
-                var audioElement = document.getElementById('remoteAudio');
-                audioElement.srcObject = remoteStream;
-                audioElement.play();
             });
+        }).catch(function(err) {
+            console.error('Failed to get local stream', err);
         });
-    }).catch(function(err) {
-        console.error('Failed to get local stream', err);
-    });
+    } 
+    else {
+        alert('Your browser does not support the getUserMedia API.');
+    }
 </script>
 <script src="/scripts/script.js"></script>
 </body>
