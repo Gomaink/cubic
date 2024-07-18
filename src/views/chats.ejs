@@ -234,9 +234,6 @@
     socket.on('userStatusChanged', (data) => {
         const { userId, online, nickname, avatar } = data;
         const color = online ? '#198754' : '#c93c3e';
-        
-        console.log("debug");
-        console.log(nickname);
 
         // Verificações opcionais
         if (userId) {
@@ -262,6 +259,7 @@
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
             let currentCall = null;
+            let remoteAudioStream = null;
 
             // Atender a chamada e fornecer a MediaStream
             peer.on('call', function(call) {
@@ -272,8 +270,8 @@
                     $('#incomingCallModal').modal('hide');
                     call.answer(stream);
                     call.on('stream', function(remoteStream) {
-                        // Adicionar o stream remoto ao elemento de áudio
-                        var audioElement = document.getElementById('remoteAudio');
+                        remoteAudioStream = remoteStream;
+                        var audioElement = new Audio();
                         audioElement.srcObject = remoteStream;
                         audioElement.play();
                     });
@@ -286,11 +284,32 @@
                 console.log('Calling peer ID: ' + remotePeerId);
                 var call = peer.call(remotePeerId, stream);
                 call.on('stream', function(remoteStream) {
-                    // Adicionar o stream remoto ao elemento de áudio
-                    var audioElement = document.getElementById('remoteAudio');
+                    remoteAudioStream = remoteStream;
+                    var audioElement = new Audio();
                     audioElement.srcObject = remoteStream;
                     audioElement.play();
                 });
+            });
+
+            // Controlar volume e mute
+            var muteButton = document.getElementById('muteButton');
+            var volumeSlider = document.getElementById('volumeSlider');
+            var audioElement = new Audio();
+
+            muteButton.addEventListener('click', function() {
+                if (audioElement.muted) {
+                    audioElement.muted = false;
+                    muteButton.querySelector('i').classList.remove('fa-microphone-slash');
+                    muteButton.querySelector('i').classList.add('fa-microphone');
+                } else {
+                    audioElement.muted = true;
+                    muteButton.querySelector('i').classList.remove('fa-microphone');
+                    muteButton.querySelector('i').classList.add('fa-microphone-slash');
+                }
+            });
+
+            volumeSlider.addEventListener('input', function() {
+                audioElement.volume = volumeSlider.value;
             });
         }).catch(function(err) {
             console.error('Failed to get local stream', err);
