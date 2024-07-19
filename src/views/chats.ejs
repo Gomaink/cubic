@@ -93,6 +93,14 @@
             <button class="btn btn-secondary btn-sm" data-bs-dismiss="toast">Cancelar</button>
         </div>
     </div>
+
+    <div id="incommingCallToast" class="incommingCallToast toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="false">
+        <div class="toast-body">
+            <p>Você está recebendo uma chamada de <a id="callerUsername" style="outline: none; color: #fff;"></a>, deseja atender?</p>
+            <button id="confirmRemove" class="btn btn-success btn-sm" id="acceptCallButton">Atender</button>
+            <button class="btn btn-secondary btn-sm" data-bs-dismiss="toast">Ignorar</button>
+        </div>
+    </div>
     
     <!-- Modais -->
     <!-- Modal Alterar Nome -->
@@ -199,24 +207,6 @@
         </div>
     </div>
 
-    <!-- Modal de notificação para chamadas recebidas -->
-    <div class="modal fade" id="incomingCallModal" tabindex="-1" aria-labelledby="incomingCallLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="incomingCallLabel">Chamada Recebida</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    Você está recebendo uma chamada. Deseja atender?
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-success" id="acceptCallButton">Atender</button>
-                    <button type="button" class="btn btn-danger" data-bs-dismiss="modal">Recusar</button>
-                </div>
-            </div>
-        </div>
-    </div>
 
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
@@ -229,6 +219,7 @@
     const avatar = document.getElementById('avatarImg');
     const avatarUrl = avatar.src;
     let currentFriendPeerId = '';
+    const incommingCallToast = new bootstrap.Toast(document.getElementById('incommingCallToast'));
 
     const socket = io({ query: { currentUserId } });
 
@@ -283,10 +274,12 @@
             // Atender a chamada e fornecer a MediaStream
             peer.on('call', function(call) {
                 currentCall = call;
-                $('#incomingCallModal').modal('show');
+
+                document.getElementById('callerUsername').innerText = call.metadata.callerUsername;
+                incommingCallToast.show();
 
                 document.getElementById('acceptCallButton').onclick = function() {
-                    $('#incomingCallModal').modal('hide');
+                    incommingCallToast.hide();
                     call.answer(stream);
                     call.on('stream', function(remoteStream) {
                         remoteAudioStream = remoteStream;
@@ -310,7 +303,11 @@
                                 return console.log("O seu amigo está offline, portanto não pode receber chamadas.");
 
                             console.log('Calling peer ID: ' + friend.peerid);
-                            var call = peer.call(friend.peerid, stream);
+
+                            var call = peer.call(friend.peerid, stream, {
+                                metadata: { callerUsername: currentUsername }
+                            });
+
                             call.on('stream', function(remoteStream) {
                                 remoteAudioStream = remoteStream;
                                 var audioElement = new Audio();
