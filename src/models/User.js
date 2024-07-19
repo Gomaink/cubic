@@ -13,7 +13,8 @@ const userSchema = new mongoose.Schema({
         year: { type: Number, required: true }
     },
     avatarUrl: { type: String, required: true },
-    online: { type: Boolean, default: false }
+    online: { type: Boolean, default: false },
+    peerid: { type: String, default: false }
 });
 
 // Bcrypt hash

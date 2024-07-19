@@ -104,5 +104,23 @@ router.post('/upload-avatar', upload.single('avatar'), async (req, res, next) =>
     }
 });
 
+//Update a PeerID
+router.post('/update-peerid', async (req, res) => {
+    const { userId, peerid } = req.body;
+
+    try {
+        const user = await User.findByIdAndUpdate(userId, { peerid: peerid }, { new: true });
+
+        if (!user) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        res.status(200).json({ success: true, message: 'PeerID atualizado com sucesso.' });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ error: 'Erro ao atualizar PeerID. Tente novamente.' });
+    }
+});
+
 
 module.exports = router;

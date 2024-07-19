@@ -228,6 +228,7 @@
     const currentNickname = '<%= currentUser.nickname %>';
     const avatar = document.getElementById('avatarImg');
     const avatarUrl = avatar.src;
+    let currentFriendPeerId = '';
 
     const socket = io({ query: { currentUserId } });
 
@@ -254,6 +255,24 @@
 
     peer.on('open', function(id) {
         console.log('My peer ID is: ' + id);
+
+        $.ajax({
+            url: '/user/update-peerid',
+            method: 'POST',
+            data: JSON.stringify({ userId: currentUserId, peerid: id }),
+            contentType: 'application/json',
+            success: function (data) {
+                if (data.success) {
+                    console.log("PeerId atualizado!");
+                } else {
+                    console.log("Ocorreu um erro ao atualizar o PeerId atualizado!" + data.error);
+                }
+            },
+            error: function (jqXHR) {
+                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao atualizar o PeerID. Tente novamente.';
+                console.log(errorMessage);
+            }
+        });
     });
 
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -280,14 +299,33 @@
 
             // Realizar a chamada ao clicar no botão
             document.getElementById('audioCallButton').addEventListener('click', function() {
-                var remotePeerId = prompt('Enter the ID of the peer you want to call:');
-                console.log('Calling peer ID: ' + remotePeerId);
-                var call = peer.call(remotePeerId, stream);
-                call.on('stream', function(remoteStream) {
-                    remoteAudioStream = remoteStream;
-                    var audioElement = new Audio();
-                    audioElement.srcObject = remoteStream;
-                    audioElement.play();
+                $.ajax({
+                    url: `/friends/${currentFriendId}`,
+                    method: 'GET',
+                    success: function (data) {
+                        if (data.friend) {
+                            const friend = data.friend;
+
+                            if(!friend.online)
+                                return console.log("O seu amigo está offline, portanto não pode receber chamadas.");
+
+                            console.log('Calling peer ID: ' + friend.peerid);
+                            var call = peer.call(friend.peerid, stream);
+                            call.on('stream', function(remoteStream) {
+                                remoteAudioStream = remoteStream;
+                                var audioElement = new Audio();
+                                audioElement.srcObject = remoteStream;
+                                audioElement.play();
+                            });
+
+                        } else {
+                            console.log('Dados do amigo não encontrados.');
+                        }
+                    },
+                    error: function (jqXHR) {
+                        const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Dados do amigo não encontrados.';
+                        console.log(errorMessage);
+                    }
                 });
             });
 

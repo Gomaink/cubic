@@ -18,7 +18,7 @@ router.get('/', async (req, res) => {
         }
 
         // Busca detalhes completos de cada amigo, incluindo avatarUrl, usando o modelo User
-        const friends = await User.find({ _id: { $in: friendship.friends } }).select('_id username avatarUrl nickname online');
+        const friends = await User.find({ _id: { $in: friendship.friends } }).select('_id username avatarUrl nickname online peerid');
 
         // Preenche avatarUrl com a imagem padrão se for undefined
         friends.forEach(friend => {
@@ -30,6 +30,40 @@ router.get('/', async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Erro ao obter a lista de amigos. Tente novamente mais tarde.' });
+    }
+});
+
+//Get a friend data
+router.get('/:friendId', async (req, res) => {
+    try {
+        const currentUser = await User.findById(req.session.userId);
+        if (!currentUser) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        const friendId = req.params.friendId;
+
+        const friendship = await Friendship.findOne({ user: currentUser._id });
+        if (!friendship) {
+            return res.status(404).json({ error: 'Amizade não encontrada.' });
+        }
+
+        // Verificar se o friendId faz parte da lista de amigos do usuário
+        if (!friendship.friends.includes(friendId)) {
+            return res.status(404).json({ error: 'Amigo não encontrado.' });
+        }
+
+        // Buscar os detalhes completos do amigo, incluindo avatarUrl
+        const friend = await User.findById(friendId).select('_id username avatarUrl nickname online peerid');
+
+        // Preencher avatarUrl com a imagem padrão se for undefined
+        friend.avatarUrl = friend.avatarUrl || '/images/cubic-w.jpeg';
+
+        res.status(200).json({ friend });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Erro ao obter as informações do amigo. Tente novamente mais tarde.' });
     }
 });
 
