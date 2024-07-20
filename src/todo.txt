@@ -6,6 +6,9 @@ adicionar a possibilidade de adicionar qualquer tipo de arquivo as mensagens (ma
 
 adicionar login com o google
 
+criar uma area abaixo do dropup com a barra de volume, botão de mutar, botão de surdar e o botao de sair da call caso esteja em uma.
+- salvar se o usuario esta com o mic mutado, a barra de volume, se esta surdo
+
 criar um simbolo de notificacao com a quantidade de mensagens que um amigo te enviou do lado do nome dele, sendo mais de 10 um simbolo 10+ e
 - sendo menos, os números respectivos.
 
