@@ -10,6 +10,21 @@ let friendToRemove = null;
 
 let currentRoomPeerIds = '';
 
+function showErrorToast(messageError) {
+    // Define the toast element and its body
+    const toastElement = document.getElementById('errorToast');
+    const toastBody = toastElement.querySelector('.toast-body');
+    
+    // Set the error message
+    toastBody.textContent = messageError;
+    
+    // Create a Bootstrap toast instance
+    const toast = new bootstrap.Toast(toastElement);
+    
+    // Show the toast
+    toast.show();
+}
+
 function formatTimestamp(timestamp) {
     const now = new Date();
     const date = new Date(timestamp);

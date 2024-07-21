@@ -33,7 +33,7 @@
                         <button class="btn btn-mute btn-sm" id="muteButton" title="Mute voice">
                             <i class="fa-solid fa-microphone"></i>
                         </button>
-                        <button class="btn btn-call btn-sm" id="disconnectCallButton" title="Disconnect Call" style="display: none;">
+                        <button class="btn btn-call btn-sm" id="endCallButton" title="Disconnect Call" style="display: none;">
                             <i class="fa-solid fa-phone-slash"></i>
                         </button>
                     </div>
@@ -99,6 +99,15 @@
             </div>
         </div>
     </div>
+
+    <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1100;">
+        <div id="errorToast" class="toast align-items-center" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="d-flex">
+                <div class="toast-body"></div>
+                <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+        </div>
+    </div>
     
     <div id="confirmationToast" class="confirmationToast toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="false">
         <div class="toast-body">
@@ -108,11 +117,18 @@
         </div>
     </div>
 
-    <div id="incommingCallToast" class="incommingCallToast toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="false">
+    <div id="incommingCallToast" class="incommingCallToast toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="false" data-bs-delay="90000">
         <div class="toast-body">
             <p>Você está recebendo uma chamada de <a id="callerUsername" style="outline: none; color: #fff;"></a>, deseja atender?</p>
-            <button id="confirmRemove" class="btn btn-success btn-sm" id="acceptCallButton">Atender</button>
-            <button class="btn btn-secondary btn-sm" data-bs-dismiss="toast">Ignorar</button>
+            <button class="btn btn-success btn-sm" id="acceptCallButton">Atender</button>
+            <button class="btn btn-secondary btn-sm" data-bs-dismiss="toast" id="rejectCallButton">Ignorar</button>
+        </div>
+    </div>
+
+    <div id="callingToast" class="callingToast toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="false" data-bs-delay="90000">
+        <div class="toast-body">
+            <p>Você está tentando ligar para <a id="calleeUsername" style="outline: none; color: #fff;"></a>.</p>
+            <button class="btn btn-secondary btn-sm" data-bs-dismiss="toast" id="rejectCallButton">Desligar</button>
         </div>
     </div>
     
@@ -234,6 +250,7 @@
     const avatarUrl = avatar.src;
     let currentFriendPeerId = '';
     const incommingCallToast = new bootstrap.Toast(document.getElementById('incommingCallToast'));
+    const callingToast = new bootstrap.Toast(document.getElementById('callingToast'));
 
     const socket = io({ query: { currentUserId } });
 
@@ -288,9 +305,9 @@
             // Atender a chamada e fornecer a MediaStream
             peer.on('call', function(call) {
                 currentCall = call;
-
-                document.getElementById('callerUsername').innerText = call.metadata.callerUsername;
+                
                 incommingCallToast.show();
+                document.getElementById('callerUsername').innerText = call.metadata.callerUsername;
 
                 document.getElementById('acceptCallButton').onclick = function() {
                     incommingCallToast.hide();
@@ -300,7 +317,18 @@
                         var audioElement = new Audio();
                         audioElement.srcObject = remoteStream;
                         audioElement.play();
+                        document.getElementById('endCallButton').style.display = 'flex';
                     });
+
+                    call.on('close', function(remoteStream) {
+                        incommingCallToast.hide();
+                        showErrorToast('Chamada encerrada.');
+                    });
+                };
+
+                document.getElementById('rejectCallButton').onclick = function() {
+                    incommingCallToast.hide();
+                    call.close();
                 };
             });
 
@@ -314,7 +342,10 @@
                             const friend = data.friend;
 
                             if(!friend.online)
-                                return console.log("O seu amigo está offline, portanto não pode receber chamadas.");
+                                return showErrorToast("O seu amigo está offline, portanto não pode receber chamadas.");
+
+                            document.getElementById('calleeUsername').innerText = friend.username;
+                            callingToast.show();
 
                             console.log('Calling peer ID: ' + friend.peerid);
 
@@ -329,16 +360,41 @@
                                 audioElement.play();
                             });
 
+
+                            document.getElementById('rejectCallButton').onclick = function() {
+                                callingToast.hide();
+                                call.close();
+                            };
+
+                            call.on('close', function(remoteStream) {
+                                callingToast.hide();
+                                showErrorToast('Chamada encerrada.');
+                            });
+
                         } else {
-                            console.log('Dados do amigo não encontrados.');
+                            showErrorToast('Dados do amigo não encontrado.');
                         }
                     },
                     error: function (jqXHR) {
                         const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Dados do amigo não encontrados.';
-                        console.log(errorMessage);
+                        showErrorToast(errorMessage);
                     }
                 });
             });
+
+            document.getElementById('endCallButton').onclick = function() {
+                callingToast.hide();
+
+                if (currentCall) {
+                    currentCall.close();
+                    currentCall = null;
+                    document.getElementById('endCallButton').style.display = 'none';
+                    showErrorToast('Chamada encerrada.');
+                } else {
+                    document.getElementById('endCallButton').style.display = 'none';
+                    showErrorToast('Nenhuma chamada ativa para encerrar.');
+                }
+            };
 
             // Controlar volume e mute
             var muteButton = document.getElementById('muteButton');
@@ -382,11 +438,11 @@
                 audioElement.volume = volumeSlider.value;
             });
         }).catch(function(err) {
-            console.error('Failed to get local stream', err);
+            showErrorToast('Failed to get local stream', err);
         });
     } 
     else {
-        alert('Your browser does not support the getUserMedia API.');
+        showErrorToast('Seu navegador não suporta a API getUserMedia.');
     }
 </script>
 <script src="/scripts/script.js"></script>
