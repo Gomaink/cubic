@@ -1,3 +1,4 @@
+//=========================[VARIABLES]=========================//
 const UserId = currentUserId;
 const User = currentUsername;
 const Avatar = avatarUrl;
@@ -10,6 +11,7 @@ let friendToRemove = null;
 
 let currentRoomPeerIds = '';
 
+//=========================[GENERAL FUNCTIONS]=========================//
 function showErrorToast(messageError) {
     // Define the toast element and its body
     const toastElement = document.getElementById('errorToast');
@@ -63,7 +65,126 @@ function showChatTitle(friendUsername, friendAvatar) {
     callButtons.style.display = 'flex';
 }
 
-// Função para entrar em uma sala específica
+//=========================[USER FUNCTIONS]=========================//
+
+function updateUsername(userId, newUsername) {
+    $.ajax({
+        url: '/user/update-username',
+        method: 'POST',
+        data: JSON.stringify({ userId: userId, newUsername: newUsername }),
+        contentType: 'application/json',
+        success: function (data) {
+            if (data.success) {
+                $('#newName').val('');
+                $('#user-username').text(newUsername);
+                $('#error-message-modal-username').text('Nome de usuário atualizado com sucesso!');
+            } else {
+                $('#error-message-modal-username').text(data.error);
+            }
+        },
+        error: function (jqXHR) {
+            const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao atualizar nome de usuário. Tente novamente.';
+            $('#error-message-modal-username').text(errorMessage);
+        }
+    });
+}
+
+// Função para atualizar o nome de exibição (nickname)
+function updateNickname(userId, newNickname) {
+    $.ajax({
+        url: '/user/update-nickname',
+        method: 'POST',
+        data: JSON.stringify({ userId: userId, newNickname: newNickname }),
+        contentType: 'application/json',
+        success: function (data) {
+            if (data.success) {
+                $('#newNick').val('');
+                $('#user-nickname').text(newNickname);
+                $('#error-message-modal-nickname').text('Nome de exibição atualizado com sucesso!');
+                socket.emit('userChanges', userId, newNickname, null);
+            } else {
+                $('#error-message-modal-nickname').text(data.error);
+            }
+        },
+        error: function (jqXHR) {
+            const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao atualizar nome de exibição. Tente novamente.';
+            $('#error-message-modal-nickname').text(errorMessage);
+        }
+    });
+}
+
+$('#modalAlterarAvatar form').on('submit', function(e) {
+    e.preventDefault();
+
+    const fileInput = document.getElementById('newAvatar');
+    const file = fileInput.files[0];
+
+    if (!file) {
+        console.error('Nenhum arquivo selecionado.');
+        return;
+    }
+
+    if (file.size > 8 * 1024 * 1024) {
+        console.error('A imagem deve ter no máximo 8MB.');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('avatar', file);
+
+    $.ajax({
+        url: '/user/upload-avatar',
+        method: 'POST',
+        data: formData,
+        contentType: false,
+        processData: false,
+        success: function(data) {
+            if (data.success) {
+                $('#newAvatar').val('');
+                $('#error-message-modal-avatar').text('Avatar atualizado com sucesso!');
+
+                const newAvatarUrl = data.avatarUrl;
+                $('#avatarImg').attr('src', newAvatarUrl);
+                socket.emit('userChanges', currentUserId, null, newAvatarUrl);
+            } else {
+                console.error('Erro ao atualizar avatar:', data.error);
+            }
+        },
+        error: function(jqXHR) {
+            const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao enviar requisição para atualizar avatar.';
+            console.error('Erro AJAX:', errorMessage);
+        }
+    });
+});
+
+// Evento para submissão do formulário de alterar nome de usuário
+$('#modalAlterarNome form').on('submit', function (e) {
+    e.preventDefault();
+    const newUsername = $('#newName').val().trim(); // Obtém o novo nome de usuário
+    const userId = currentUserId; // Substitua pelo ID do usuário atual
+
+    if (newUsername === '') {
+        return;
+    }
+    
+    updateUsername(userId, newUsername); // Chama a função para atualizar o nome de usuário
+});
+
+// Evento para submissão do formulário de alterar nickname
+$('#modalAlterarNick form').on('submit', function (e) {
+    e.preventDefault();
+    const newNickname = $('#newNick').val().trim(); // Obtém o novo nickname
+    const userId = currentUserId; // Substitua pelo ID do usuário atual
+
+    if (newNickname === '') {
+        return;
+    }
+
+    updateNickname(userId, newNickname); // Chama a função para atualizar o nickname
+});
+
+//=========================[MESSAGE FUNCTIONS]=========================//
+
 function joinRoom(friendUsername, friendNickname, friendId, friendPeerId, friendAvatarUrl) {
     currentFriendId = friendId;
     currentFriendPeerId = friendPeerId;
@@ -162,7 +283,107 @@ function scrollToBottom() {
     chatContent.scrollTop(chatContent.prop('scrollHeight'));
 }
 
-//Remover amigo
+$('#messageInput').on('keypress', function (e) {
+    if (e.which === 13 && $(this).val().trim() !== '') {
+        const message = $(this).val().trim();
+        if (message.length > 2000) {
+            const toastElement = document.getElementById('characterLimitToast');
+            const toast = new bootstrap.Toast(toastElement);
+            toast.show();
+            return;
+        }
+
+        socket.emit('sendMessage', { user: User, userAvatar: Avatar, room: currentRoom, message });
+        $.ajax({
+            url: '/messages/send-message',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ senderId: UserId, receiverId: currentFriendId, message }),
+            success: function (data) {
+                if (data.success) {
+                    console.log('Mensagem enviada com sucesso!');
+                    /*$('#chatContent').append(`
+                        <div class="message">
+                            <img src="${avatarUrl}" alt="${currentUsername}">
+                            <div>
+                                <span class="user">${currentUsername}</span>
+                                <span class="text">${message}</span>
+                            </div>
+                        </div>
+                    `);*/
+                } else {
+                    console.error('Erro ao enviar a mensagem:', data.error);
+                }
+            },
+            error: function (jqXHR) {
+                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao enviar a mensagem. Tente novamente.';
+                console.error('Erro AJAX:', errorMessage);
+            }
+        });
+
+        $(this).val('');
+    }
+});
+
+//Receber mensagem
+socket.on('receiveMessage', function (data) {
+    const { user, userAvatar, message } = data;
+    const chatContent = $('#chatContent');
+    const shouldScrollToBottom = isChatScrolledToBottom();
+    let lastMessageContainer = chatContent.children('.message-container').last();
+
+    // Check if there is already a message container
+    if (lastMessageContainer.length > 0) {
+        const lastMessage = lastMessageContainer.find('.message').last();
+        const lastSender = lastMessage.find('.user').text();
+
+        // Check if the last message sender is the same as the current message sender and it's not the initial load
+        if (lastSender === user && !lastMessageContainer.hasClass('initial-load')) {
+            // Append to the last message container
+            lastMessageContainer.append(`
+                <div class="message-conc">
+                    <div>
+                        <span class="text">${message}</span>
+                    </div>
+                </div>
+            `);
+        } else {
+            // Start a new message container
+            chatContent.append(`
+                <div class="message-container">
+                    <div class="message">
+                        <img src="${userAvatar}" alt="${user}">
+                        <div>
+                            <span class="user">${user}</span>
+                            <span class="text">${message}</span>
+                        </div>
+                    </div>
+                </div>
+            `);
+        }
+    } else {
+        // No existing message containers, create a new one
+        chatContent.append(`
+            <div class="message-container initial-load">
+                <div class="message">
+                    <img src="${userAvatar}" alt="${user}">
+                    <div>
+                        <span class="user">${user}</span>
+                        <span class="text">${message}</span>
+                    </div>
+                </div>
+            </div>
+        `);
+    }
+
+    // Scroll to bottom if chat was scrolled to bottom before receiving the message
+    if (shouldScrollToBottom) {
+        scrollToBottom();
+    }
+});
+
+//=========================[FRIENDS FUNCTIONS]=========================//
+
 function RemoveFriend(friendId) {
     friendToRemove = friendId;
     confirmationToast.show();
@@ -192,394 +413,179 @@ document.getElementById('confirmRemove').addEventListener('click', function() {
     }
 });
 
-$(document).ready(function () {
+$('#modalFriendAdd form').on('submit', function (e) {
+    e.preventDefault();
+    const friendName = $('#newFriend').val();
+    if (friendName === '') {
+        $('#error-message-modal-username').text('Usuário não encontrado.');
+    } else {
+        $('#error-message-modal-username').text('');
 
-    // Enviar mensagem
-    $('#messageInput').on('keypress', function (e) {
-        if (e.which === 13 && $(this).val().trim() !== '') {
-            const message = $(this).val().trim();
-            if (message.length > 2000) {
-                const toastElement = document.getElementById('characterLimitToast');
-                const toast = new bootstrap.Toast(toastElement);
-                toast.show();
-                return;
-            }
-
-            socket.emit('sendMessage', { user: User, userAvatar: Avatar, room: currentRoom, message });
-            $.ajax({
-                url: '/messages/send-message',
-                method: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify({ senderId: UserId, receiverId: currentFriendId, message }),
-                success: function (data) {
-                    if (data.success) {
-                        console.log('Mensagem enviada com sucesso!');
-                        /*$('#chatContent').append(`
-                            <div class="message">
-                                <img src="${avatarUrl}" alt="${currentUsername}">
-                                <div>
-                                    <span class="user">${currentUsername}</span>
-                                    <span class="text">${message}</span>
-                                </div>
-                            </div>
-                        `);*/
-                    } else {
-                        console.error('Erro ao enviar a mensagem:', data.error);
-                    }
-                },
-                error: function (jqXHR) {
-                    const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao enviar a mensagem. Tente novamente.';
-                    console.error('Erro AJAX:', errorMessage);
-                }
-            });
-
-            $(this).val('');
-        }
-    });
-    
-    //Receber mensagem
-    socket.on('receiveMessage', function (data) {
-        const { user, userAvatar, message } = data;
-        const chatContent = $('#chatContent');
-        const shouldScrollToBottom = isChatScrolledToBottom();
-        let lastMessageContainer = chatContent.children('.message-container').last();
-    
-        // Check if there is already a message container
-        if (lastMessageContainer.length > 0) {
-            const lastMessage = lastMessageContainer.find('.message').last();
-            const lastSender = lastMessage.find('.user').text();
-    
-            // Check if the last message sender is the same as the current message sender and it's not the initial load
-            if (lastSender === user && !lastMessageContainer.hasClass('initial-load')) {
-                // Append to the last message container
-                lastMessageContainer.append(`
-                    <div class="message-conc">
-                        <div>
-                            <span class="text">${message}</span>
-                        </div>
-                    </div>
-                `);
-            } else {
-                // Start a new message container
-                chatContent.append(`
-                    <div class="message-container">
-                        <div class="message">
-                            <img src="${userAvatar}" alt="${user}">
-                            <div>
-                                <span class="user">${user}</span>
-                                <span class="text">${message}</span>
-                            </div>
-                        </div>
-                    </div>
-                `);
-            }
-        } else {
-            // No existing message containers, create a new one
-            chatContent.append(`
-                <div class="message-container initial-load">
-                    <div class="message">
-                        <img src="${userAvatar}" alt="${user}">
-                        <div>
-                            <span class="user">${user}</span>
-                            <span class="text">${message}</span>
-                        </div>
-                    </div>
-                </div>
-            `);
-        }
-    
-        // Scroll to bottom if chat was scrolled to bottom before receiving the message
-        if (shouldScrollToBottom) {
-            scrollToBottom();
-        }
-    });
-
-    function updateUsername(userId, newUsername) {
         $.ajax({
-            url: '/user/update-username',
+            url: '/friends/add-friend',
             method: 'POST',
-            data: JSON.stringify({ userId: userId, newUsername: newUsername }),
+            data: JSON.stringify({ friendName: friendName }),
             contentType: 'application/json',
             success: function (data) {
                 if (data.success) {
-                    $('#newName').val('');
-                    $('#user-username').text(newUsername);
-                    $('#error-message-modal-username').text('Nome de usuário atualizado com sucesso!');
+                    $('#newFriend').val('');
+                    $('#error-message-modal-addfriend').text('Pedido de amizade enviado.');
                 } else {
                     $('#error-message-modal-username').text(data.error);
                 }
             },
             error: function (jqXHR) {
-                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao atualizar nome de usuário. Tente novamente.';
+                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao adicionar amigo. Tente novamente.';
                 $('#error-message-modal-username').text(errorMessage);
             }
         });
     }
-    
-    // Função para atualizar o nome de exibição (nickname)
-    function updateNickname(userId, newNickname) {
-        $.ajax({
-            url: '/user/update-nickname',
-            method: 'POST',
-            data: JSON.stringify({ userId: userId, newNickname: newNickname }),
-            contentType: 'application/json',
-            success: function (data) {
-                if (data.success) {
-                    $('#newNick').val('');
-                    $('#user-nickname').text(newNickname);
-                    $('#error-message-modal-nickname').text('Nome de exibição atualizado com sucesso!');
-                    socket.emit('userChanges', userId, newNickname, null);
-                } else {
-                    $('#error-message-modal-nickname').text(data.error);
-                }
-            },
-            error: function (jqXHR) {
-                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao atualizar nome de exibição. Tente novamente.';
-                $('#error-message-modal-nickname').text(errorMessage);
+});
+
+function loadFriendRequests() {
+    $.ajax({
+        url: '/friends/friend-list',
+        method: 'GET',
+        success: function (data) {
+            const friendRequestsList = $('#friendRequestsList');
+            friendRequestsList.empty();
+
+            if (data.friendRequests && data.friendRequests.length > 0) {
+                data.friendRequests.forEach(request => {
+                    friendRequestsList.append(`
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <span class="requester-name">${request.requester.username}</span>
+                            <div class="friend-requests-buttons">
+                                <button class="btn btn-success btn-sm accept-friend-request" data-request-id="${request._id}">Aceitar</button>
+                                <button class="btn btn-danger btn-sm decline-friend-request" data-request-id="${request._id}">Recusar</button>
+                            </div>
+                        </li>
+                    `);
+                });
+            } else {
+                friendRequestsList.append('<li class="list-group-item text-center">Nenhum pedido de amizade.</li>');
             }
-        });
-    }
-
-    $('#modalAlterarAvatar form').on('submit', function(e) {
-        e.preventDefault();
-
-        const fileInput = document.getElementById('newAvatar');
-        const file = fileInput.files[0];
-
-        if (!file) {
-            console.error('Nenhum arquivo selecionado.');
-            return;
+        },
+        error: function (jqXHR) {
+            const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao carregar pedidos de amizade. Tente novamente.';
+            console.error(errorMessage);
         }
+    });
+}
 
-        if (file.size > 8 * 1024 * 1024) {
-            console.error('A imagem deve ter no máximo 8MB.');
-            return;
-        }
+$('#modalFriendRequests').on('show.bs.modal', function () {
+    loadFriendRequests();
+});
 
-        const formData = new FormData();
-        formData.append('avatar', file);
+$(document).on('click', '.accept-friend-request', function () {
+    const requestId = $(this).data('request-id');
+    respondToFriendRequest(requestId, 'accept');
+});
 
-        $.ajax({
-            url: '/user/upload-avatar',
-            method: 'POST',
-            data: formData,
-            contentType: false,
-            processData: false,
-            success: function(data) {
-                if (data.success) {
-                    $('#newAvatar').val('');
-                    $('#error-message-modal-avatar').text('Avatar atualizado com sucesso!');
+$(document).on('click', '.decline-friend-request', function () {
+    const requestId = $(this).data('request-id');
+    respondToFriendRequest(requestId, 'decline');
+});
 
-                    const newAvatarUrl = data.avatarUrl;
-                    $('#avatarImg').attr('src', newAvatarUrl);
-                    socket.emit('userChanges', currentUserId, null, newAvatarUrl);
-                } else {
-                    console.error('Erro ao atualizar avatar:', data.error);
-                }
-            },
-            error: function(jqXHR) {
-                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao enviar requisição para atualizar avatar.';
-                console.error('Erro AJAX:', errorMessage);
+function respondToFriendRequest(requestId, action) {
+    $.ajax({
+        url: '/friends/respond-friend-request',
+        method: 'POST',
+        data: JSON.stringify({ requestId: requestId, action: action }),
+        contentType: 'application/json',
+        success: function (data) {
+            if (data.success) {
+                loadFriendRequests();
+                loadFriends();
+                $('#error-message-modal').text(`Pedido de amizade ${action === 'accept' ? 'aceito' : 'recusado'}!`);
+            } else {
+                $('#error-message-modal').text(`Erro ao processar o pedido de amizade.`);
             }
-        });
-    });
-    
-    // Evento para submissão do formulário de alterar nome de usuário
-    $('#modalAlterarNome form').on('submit', function (e) {
-        e.preventDefault();
-        const newUsername = $('#newName').val().trim(); // Obtém o novo nome de usuário
-        const userId = currentUserId; // Substitua pelo ID do usuário atual
-    
-        if (newUsername === '') {
-            return;
+        },
+        error: function (jqXHR) {
+            const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao processar o pedido de amizade. Tente novamente.';
+            $('#error-message-modal').text(errorMessage);
         }
-        
-        updateUsername(userId, newUsername); // Chama a função para atualizar o nome de usuário
     });
-    
-    // Evento para submissão do formulário de alterar nickname
-    $('#modalAlterarNick form').on('submit', function (e) {
-        e.preventDefault();
-        const newNickname = $('#newNick').val().trim(); // Obtém o novo nickname
-        const userId = currentUserId; // Substitua pelo ID do usuário atual
-    
-        if (newNickname === '') {
-            return;
-        }
-    
-        updateNickname(userId, newNickname); // Chama a função para atualizar o nickname
-    });
+}
 
-    // Resto do código para adicionar amigos, aceitar/rejeitar pedidos de amizade, etc.
-    $('#modalFriendAdd form').on('submit', function (e) {
-        e.preventDefault();
-        const friendName = $('#newFriend').val();
-        if (friendName === '') {
-            $('#error-message-modal-username').text('Usuário não encontrado.');
-        } else {
-            $('#error-message-modal-username').text('');
-    
-            $.ajax({
-                url: '/friends/add-friend',
-                method: 'POST',
-                data: JSON.stringify({ friendName: friendName }),
-                contentType: 'application/json',
-                success: function (data) {
-                    if (data.success) {
-                        $('#newFriend').val('');
-                        $('#error-message-modal-addfriend').text('Pedido de amizade enviado.');
-                    } else {
-                        $('#error-message-modal-username').text(data.error);
-                    }
-                },
-                error: function (jqXHR) {
-                    const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao adicionar amigo. Tente novamente.';
-                    $('#error-message-modal-username').text(errorMessage);
-                }
+function checkFriendRequests() {
+    $.ajax({
+        url: '/friends/friend-check-notification',
+        method: 'GET',
+        success: function (data) {
+            const notificationIcon = $('#friendRequestsNotification');
+            if (data.pendingRequests && data.pendingRequests > 0) {
+                notificationIcon.show();
+            } else {
+                notificationIcon.hide();
+            }
+        },
+        error: function (jqXHR) {
+            console.error('Erro ao verificar solicitações de amizade:', jqXHR);
+        }
+    });
+}
+
+function loadFriends() {
+    $.ajax({
+        url: '/friends', // Rota para obter a lista de amigos
+        method: 'GET',
+        success: function (data) {
+            const friendsList = $('#friendsList');
+            const currentFriends = {};
+
+            // Obter os amigos atualmente renderizados
+            friendsList.children('li').each(function () {
+                const friendName = $(this).find('a').data('friend-name');
+                currentFriends[friendName] = $(this);
             });
-        }
-    });
 
-    function loadFriendRequests() {
-        $.ajax({
-            url: '/friends/friend-list',
-            method: 'GET',
-            success: function (data) {
-                const friendRequestsList = $('#friendRequestsList');
-                friendRequestsList.empty();
-
-                if (data.friendRequests && data.friendRequests.length > 0) {
-                    data.friendRequests.forEach(request => {
-                        friendRequestsList.append(`
-                            <li class="list-group-item d-flex justify-content-between align-items-center">
-                                <span class="requester-name">${request.requester.username}</span>
-                                <div class="friend-requests-buttons">
-                                    <button class="btn btn-success btn-sm accept-friend-request" data-request-id="${request._id}">Aceitar</button>
-                                    <button class="btn btn-danger btn-sm decline-friend-request" data-request-id="${request._id}">Recusar</button>
-                                </div>
+            // Verificar e adicionar novos amigos
+            if (data.friends && data.friends.length > 0) {
+                const newFriends = {};
+                data.friends.forEach(friend => {
+                    newFriends[friend.username] = true;
+                    if (!currentFriends[friend.username]) {
+                        const formattedAvatarUrl = friend.avatarUrl.replace(/\\/g, '/');
+                        const backgroundColor = friend.online ? "#198754" : "#c93c3e";
+                        friendsList.append(`
+                            <li class="list-group-item d-flex justify-content-between align-items-center" data-friend-id="${friend._id}" data-friend-peerid="${friend.peerid}">
+                                <a onclick="joinRoom('${friend.username}', '${friend.nickname}', '${friend._id}', '${friend.peerid}', '${formattedAvatarUrl}');" class="d-flex align-items-center friend-item" data-friend-name="${friend.username}">
+                                    <div class='c-avatar'>
+                                        <img id="friend-avatar-${friend._id}" src="${friend.avatarUrl}" alt="${friend.username}" class="c-friend_avatar_image me-2">
+                                        <span id="friend-${friend._id}" class='c-friend_avatar_status' style='background: ${backgroundColor};'></span>
+                                    </div>
+                                    <span id="friend-nickname-${friend._id}">${friend.nickname}</span>
+                                </a>
+                                <a onclick="RemoveFriend('${friend._id}');" class="remove-friend"><i class="fa-solid fa-xmark"></i></a>
                             </li>
                         `);
-                    });
-                } else {
-                    friendRequestsList.append('<li class="list-group-item text-center">Nenhum pedido de amizade.</li>');
-                }
-            },
-            error: function (jqXHR) {
-                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao carregar pedidos de amizade. Tente novamente.';
-                console.error(errorMessage);
-            }
-        });
-    }
-
-    $('#modalFriendRequests').on('show.bs.modal', function () {
-        loadFriendRequests();
-    });
-
-    $(document).on('click', '.accept-friend-request', function () {
-        const requestId = $(this).data('request-id');
-        respondToFriendRequest(requestId, 'accept');
-    });
-
-    $(document).on('click', '.decline-friend-request', function () {
-        const requestId = $(this).data('request-id');
-        respondToFriendRequest(requestId, 'decline');
-    });
-
-    function respondToFriendRequest(requestId, action) {
-        $.ajax({
-            url: '/friends/respond-friend-request',
-            method: 'POST',
-            data: JSON.stringify({ requestId: requestId, action: action }),
-            contentType: 'application/json',
-            success: function (data) {
-                if (data.success) {
-                    loadFriendRequests();
-                    loadFriends();
-                    $('#error-message-modal').text(`Pedido de amizade ${action === 'accept' ? 'aceito' : 'recusado'}!`);
-                } else {
-                    $('#error-message-modal').text(`Erro ao processar o pedido de amizade.`);
-                }
-            },
-            error: function (jqXHR) {
-                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao processar o pedido de amizade. Tente novamente.';
-                $('#error-message-modal').text(errorMessage);
-            }
-        });
-    }
-
-    function checkFriendRequests() {
-        $.ajax({
-            url: '/friends/friend-check-notification',
-            method: 'GET',
-            success: function (data) {
-                const notificationIcon = $('#friendRequestsNotification');
-                if (data.pendingRequests && data.pendingRequests > 0) {
-                    notificationIcon.show();
-                } else {
-                    notificationIcon.hide();
-                }
-            },
-            error: function (jqXHR) {
-                console.error('Erro ao verificar solicitações de amizade:', jqXHR);
-            }
-        });
-    }
-
-    function loadFriends() {
-        $.ajax({
-            url: '/friends', // Rota para obter a lista de amigos
-            method: 'GET',
-            success: function (data) {
-                const friendsList = $('#friendsList');
-                const currentFriends = {};
-
-                // Obter os amigos atualmente renderizados
-                friendsList.children('li').each(function () {
-                    const friendName = $(this).find('a').data('friend-name');
-                    currentFriends[friendName] = $(this);
+                    }
                 });
 
-                // Verificar e adicionar novos amigos
-                if (data.friends && data.friends.length > 0) {
-                    const newFriends = {};
-                    data.friends.forEach(friend => {
-                        newFriends[friend.username] = true;
-                        if (!currentFriends[friend.username]) {
-                            const formattedAvatarUrl = friend.avatarUrl.replace(/\\/g, '/');
-                            const backgroundColor = friend.online ? "#198754" : "#c93c3e";
-                            friendsList.append(`
-                                <li class="list-group-item d-flex justify-content-between align-items-center" data-friend-id="${friend._id}" data-friend-peerid="${friend.peerid}">
-                                    <a onclick="joinRoom('${friend.username}', '${friend.nickname}', '${friend._id}', '${friend.peerid}', '${formattedAvatarUrl}');" class="d-flex align-items-center friend-item" data-friend-name="${friend.username}">
-                                        <div class='c-avatar'>
-                                            <img id="friend-avatar-${friend._id}" src="${friend.avatarUrl}" alt="${friend.username}" class="c-friend_avatar_image me-2">
-                                            <span id="friend-${friend._id}" class='c-friend_avatar_status' style='background: ${backgroundColor};'></span>
-                                        </div>
-                                        <span id="friend-nickname-${friend._id}">${friend.nickname}</span>
-                                    </a>
-                                    <a onclick="RemoveFriend('${friend._id}');" class="remove-friend"><i class="fa-solid fa-xmark"></i></a>
-                                </li>
-                            `);
-                        }
-                    });
-
-                    // Remover amigos que não estão mais na lista
-                    for (const friendName in currentFriends) {
-                        if (!newFriends[friendName]) {
-                            currentFriends[friendName].remove();
-                        }
+                // Remover amigos que não estão mais na lista
+                for (const friendName in currentFriends) {
+                    if (!newFriends[friendName]) {
+                        currentFriends[friendName].remove();
                     }
-                } else {
-                    // Se não há amigos, limpar a lista e mostrar mensagem
-                    friendsList.empty();
-                    friendsList.append('<li class="list-group-item text-center">Nenhum amigo encontrado.</li>');
                 }
-            },
-            error: function (jqXHR) {
-                const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao carregar a lista de amigos. Tente novamente.';
-                console.error(errorMessage);
+            } else {
+                // Se não há amigos, limpar a lista e mostrar mensagem
+                friendsList.empty();
+                friendsList.append('<li class="list-group-item text-center">Nenhum amigo encontrado.</li>');
             }
-        });
-    }
+        },
+        error: function (jqXHR) {
+            const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao carregar a lista de amigos. Tente novamente.';
+            console.error(errorMessage);
+        }
+    });
+}
+
+
+
+$(document).ready(function () {
 
     // Verifica periodicamente se o usuário está logado
     setInterval(() => {
