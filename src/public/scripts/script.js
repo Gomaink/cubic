@@ -11,6 +11,11 @@ let friendToRemove = null;
 
 let currentRoomPeerIds = '';
 
+const incommingCallToast = new bootstrap.Toast(document.getElementById('incommingCallToast'));
+const callingToast = new bootstrap.Toast(document.getElementById('callingToast'));
+
+const socket = io({ query: { currentUserId } });
+
 //=========================[GENERAL FUNCTIONS]=========================//
 function showErrorToast(messageError) {
     // Define the toast element and its body
@@ -583,7 +588,204 @@ function loadFriends() {
     });
 }
 
+//=========================[VOICE CHAT FUNCTIONS]=========================//
 
+socket.on('userStatusChanged', (data) => {
+    const { userId, online, nickname, avatar } = data;
+    const color = online ? '#198754' : '#c93c3e';
+
+    // Verificações opcionais
+    if (userId) {
+        $(`#friend-${userId}`).css('background', color);
+    }
+
+    if (nickname) {
+        $(`#friend-nickname-${userId}`).text(nickname);
+    }
+
+    if (avatar) {
+        $(`#friend-avatar-${userId}`).attr('src', avatar);
+    }
+});
+
+
+var peer = new Peer();
+
+peer.on('open', function(id) {
+    console.log('My peer ID is: ' + id);
+
+    $.ajax({
+        url: '/user/update-peerid',
+        method: 'POST',
+        data: JSON.stringify({ userId: currentUserId, peerid: id }),
+        contentType: 'application/json',
+        success: function (data) {
+            if (data.success) {
+                console.log("PeerId atualizado!");
+            } else {
+                console.log("Ocorreu um erro ao atualizar o PeerId atualizado!" + data.error);
+            }
+        },
+        error: function (jqXHR) {
+            const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Erro ao atualizar o PeerID. Tente novamente.';
+            console.log(errorMessage);
+        }
+    });
+});
+
+if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+        let currentCall = null;
+        let remoteAudioStream = null;
+
+        // Atender a chamada e fornecer a MediaStream
+        peer.on('call', function(call) {
+            currentCall = call;
+            
+            incommingCallToast.show();
+            document.getElementById('callerUsername').innerText = call.metadata.callerUsername;
+
+            document.getElementById('acceptCallButton').onclick = function() {
+                incommingCallToast.hide();
+                call.answer(stream);
+                call.on('stream', function(remoteStream) {
+                    remoteAudioStream = remoteStream;
+                    var audioElement = new Audio();
+                    audioElement.srcObject = remoteStream;
+                    audioElement.play();
+                    document.getElementById('endCallButton').style.display = 'flex';
+                });
+
+                call.on('close', function(remoteStream) {
+                    incommingCallToast.hide();
+                    showErrorToast('Chamada encerrada.');
+                    document.getElementById('endCallButton').style.display = 'none';
+                });
+            };
+
+            document.getElementById('rejectCallButton').onclick = function() {
+                incommingCallToast.hide();
+                call.close();
+            };
+        });
+
+        // Realizar a chamada ao clicar no botão
+        document.getElementById('audioCallButton').addEventListener('click', function() {
+            $.ajax({
+                url: `/friends/${currentFriendId}`,
+                method: 'GET',
+                success: function (data) {
+                    if (data.friend) {
+                        const friend = data.friend;
+
+                        if(!friend.online)
+                            return showErrorToast("O seu amigo está offline, portanto não pode receber chamadas.");
+
+                        document.getElementById('calleeUsername').innerText = friend.username;
+                        callingToast.show();
+
+                        console.log('Calling peer ID: ' + friend.peerid);
+
+                        var call = peer.call(friend.peerid, stream, {
+                            metadata: { callerUsername: currentUsername }
+                        });
+
+                        currentCall = call;
+
+                        call.on('stream', function(remoteStream) {
+                            remoteAudioStream = remoteStream;
+                            var audioElement = new Audio();
+                            audioElement.srcObject = remoteStream;
+                            audioElement.play();
+                            document.getElementById('endCallButton').style.display = 'flex';
+                            callingToast.hide();
+                        });
+
+
+                        document.getElementById('rejectCallButton').onclick = function() {
+                            callingToast.hide();
+                            call.close();
+                        };
+
+                        call.on('close', function(remoteStream) {
+                            callingToast.hide();
+                            showErrorToast('Chamada encerrada.');
+                            document.getElementById('endCallButton').style.display = 'none';
+                        });
+
+                    } else {
+                        showErrorToast('Dados do amigo não encontrado.');
+                    }
+                },
+                error: function (jqXHR) {
+                    const errorMessage = jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Dados do amigo não encontrados.';
+                    showErrorToast(errorMessage);
+                }
+            });
+        });
+
+        document.getElementById('endCallButton').onclick = function() {
+            callingToast.hide();
+
+            if (currentCall) {
+                currentCall.close();
+                currentCall = null;
+                document.getElementById('endCallButton').style.display = 'none';
+                showErrorToast('Chamada encerrada.');
+            } else {
+                document.getElementById('endCallButton').style.display = 'none';
+                showErrorToast('Nenhuma chamada ativa para encerrar.');
+            }
+        };
+
+        // Controlar volume e mute
+        var muteButton = document.getElementById('muteButton');
+        var headphoneButton = document.getElementById('headphoneButton');
+        var volumeSlider = document.getElementById('volumeSlider');
+        var audioElement = new Audio();
+        var userHeaphone = true;
+        audioElement.muted = false;
+
+        muteButton.addEventListener('click', function() {
+            const icon = muteButton.querySelector('i');
+            
+            if (audioElement.muted) {
+                audioElement.muted = false;
+                icon.classList.remove('fa-microphone-slash');
+                icon.classList.add('fa-microphone');
+                icon.style.color = 'white'; // Define a cor para 'white' quando o microfone está desligado
+            } else {
+                audioElement.muted = true;
+                icon.classList.remove('fa-microphone');
+                icon.classList.add('fa-microphone-slash');
+                icon.style.color = '#FF6347'; // Define a cor para '#FF6347' quando o microfone está ligado
+            }
+        });
+
+        headphoneButton.addEventListener('click', function() {
+            const icon = headphoneButton.querySelector('i');
+            
+            if (userHeaphone) {
+                userHeaphone = false;
+                audioElement.volume = 0;
+                icon.style.color = '#FF6347'; // Define a cor para vermelho quando o microfone está desligado
+            } else {
+                userHeaphone = true;
+                audioElement.volume = volumeSlider.value;
+                icon.style.color = 'white'; // Define a cor para verde quando o microfone está ligado
+            }
+        });
+
+        volumeSlider.addEventListener('input', function() {
+            audioElement.volume = volumeSlider.value;
+        });
+    }).catch(function(err) {
+        showErrorToast('Failed to get local stream', err);
+    });
+} 
+else {
+    showErrorToast('Seu navegador não suporta a API getUserMedia.');
+}
 
 $(document).ready(function () {
 
