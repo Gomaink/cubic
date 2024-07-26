@@ -14,8 +14,8 @@ require('dotenv').config();
 const app = express();
 const port = process.env.PORT;
 
-//const server = createServer(app);
 // Read SSL certificate
+//const server = createServer(app);
 const privateKey = fs.readFileSync('key.pem', 'utf8');
 const certificate = fs.readFileSync('cert.pem', 'utf8');
 const credentials = { key: privateKey, cert: certificate };

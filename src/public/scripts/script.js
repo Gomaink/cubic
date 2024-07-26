@@ -372,10 +372,11 @@ socket.on('receiveMessage', function (data) {
             `);
         } else {
             // Start a new message container
+            const senderAvatar = message.sender === currentUserId ? avatarUrl : userAvatar.replace(/\\/g, '/');
             chatContent.append(`
                 <div class="message-container">
                     <div class="message">
-                        <img src="${userAvatar}" alt="${user}">
+                        <img src="${senderAvatar}" alt="${user}">
                         <div>
                             <span class="user">${user}</span>
                             <span class="text">${message}</span>
