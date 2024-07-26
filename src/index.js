@@ -4,8 +4,9 @@ const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 const User = require('./models/User');
 
-const { createServer } = require('node:http');
+const { createServer } = require('node:https');
 const { Server } = require('socket.io');
+const fs = require('fs');
 
 require('dotenv').config();
 
@@ -13,7 +14,13 @@ require('dotenv').config();
 const app = express();
 const port = process.env.PORT;
 
-const server = createServer(app);
+//const server = createServer(app);
+// Read SSL certificate
+const privateKey = fs.readFileSync('key.pem', 'utf8');
+const certificate = fs.readFileSync('cert.pem', 'utf8');
+const credentials = { key: privateKey, cert: certificate };
+
+const server = createServer(credentials, app);
 const io = new Server(server);
 
 //Mongoose instance

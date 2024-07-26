@@ -72,6 +72,24 @@ function showChatTitle(friendUsername, friendAvatar) {
 
 //=========================[USER FUNCTIONS]=========================//
 
+socket.on('userStatusChanged', (data) => {
+    const { userId, online, nickname, avatar } = data;
+    const color = online ? '#198754' : '#c93c3e';
+
+    // Verificações opcionais
+    if (userId) {
+        $(`#friend-${userId}`).css('background', color);
+    }
+
+    if (nickname) {
+        $(`#friend-nickname-${userId}`).text(nickname);
+    }
+
+    if (avatar) {
+        $(`#friend-avatar-${userId}`).attr('src', avatar);
+    }
+});
+
 function updateUsername(userId, newUsername) {
     $.ajax({
         url: '/user/update-username',
@@ -589,25 +607,6 @@ function loadFriends() {
 }
 
 //=========================[VOICE CHAT FUNCTIONS]=========================//
-
-socket.on('userStatusChanged', (data) => {
-    const { userId, online, nickname, avatar } = data;
-    const color = online ? '#198754' : '#c93c3e';
-
-    // Verificações opcionais
-    if (userId) {
-        $(`#friend-${userId}`).css('background', color);
-    }
-
-    if (nickname) {
-        $(`#friend-nickname-${userId}`).text(nickname);
-    }
-
-    if (avatar) {
-        $(`#friend-avatar-${userId}`).attr('src', avatar);
-    }
-});
-
 
 var peer = new Peer();
 

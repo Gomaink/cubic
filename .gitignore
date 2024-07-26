@@ -1,3 +1,6 @@
 src/node_modules
 .env
 todo.todo
+src/cert.pem
+src/csr.pem
+src/key.pem
