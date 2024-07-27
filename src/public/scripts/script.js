@@ -636,7 +636,8 @@ peer.on('open', function(id) {
 if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
         let currentCall = null;
-        let remoteAudioStream = null;
+        let remoteAudioElement = null;
+        var localStream = stream;
 
         // Atender a chamada e fornecer a MediaStream
         peer.on('call', function(call) {
@@ -647,16 +648,15 @@ if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
 
             document.getElementById('acceptCallButton').onclick = function() {
                 incommingCallToast.hide();
-                call.answer(stream);
+                call.answer(localStream);  // Use apenas localStream aqui
                 call.on('stream', function(remoteStream) {
-                    remoteAudioStream = remoteStream;
-                    var audioElement = new Audio();
-                    audioElement.srcObject = remoteStream;
-                    audioElement.play();
+                    remoteAudioElement = new Audio();
+                    remoteAudioElement.srcObject = remoteStream;
+                    remoteAudioElement.play();
                     document.getElementById('endCallButton').style.display = 'flex';
                 });
 
-                call.on('close', function(remoteStream) {
+                call.on('close', function() {
                     incommingCallToast.hide();
                     showErrorToast('Chamada encerrada.');
                     document.getElementById('endCallButton').style.display = 'none';
@@ -686,28 +686,26 @@ if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
 
                         console.log('Calling peer ID: ' + friend.peerid);
 
-                        var call = peer.call(friend.peerid, stream, {
+                        var call = peer.call(friend.peerid, localStream, {
                             metadata: { callerUsername: currentUsername }
                         });
 
                         currentCall = call;
 
                         call.on('stream', function(remoteStream) {
-                            remoteAudioStream = remoteStream;
-                            var audioElement = new Audio();
-                            audioElement.srcObject = remoteStream;
-                            audioElement.play();
+                            remoteAudioElement = new Audio();
+                            remoteAudioElement.srcObject = remoteStream;
+                            remoteAudioElement.play();
                             document.getElementById('endCallButton').style.display = 'flex';
                             callingToast.hide();
                         });
-
 
                         document.getElementById('rejectCallButton').onclick = function() {
                             callingToast.hide();
                             call.close();
                         };
 
-                        call.on('close', function(remoteStream) {
+                        call.on('close', function() {
                             callingToast.hide();
                             showErrorToast('Chamada encerrada.');
                             document.getElementById('endCallButton').style.display = 'none';
@@ -740,52 +738,32 @@ if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
 
         // Controlar volume e mute
         var muteButton = document.getElementById('muteButton');
-        var headphoneButton = document.getElementById('headphoneButton');
-        var volumeSlider = document.getElementById('volumeSlider');
-        var audioElement = new Audio();
-        var userHeaphone = true;
-        audioElement.muted = false;
+        var isMuted = false;
 
         muteButton.addEventListener('click', function() {
             const icon = muteButton.querySelector('i');
-            
-            if (audioElement.muted) {
-                audioElement.muted = false;
-                icon.classList.remove('fa-microphone-slash');
-                icon.classList.add('fa-microphone');
-                icon.style.color = 'white'; // Define a cor para 'white' quando o microfone está desligado
-            } else {
-                audioElement.muted = true;
-                icon.classList.remove('fa-microphone');
-                icon.classList.add('fa-microphone-slash');
-                icon.style.color = '#FF6347'; // Define a cor para '#FF6347' quando o microfone está ligado
-            }
-        });
+            if (remoteAudioElement) {
+                isMuted = !isMuted;
+                remoteAudioElement.muted = isMuted;
 
-        headphoneButton.addEventListener('click', function() {
-            const icon = headphoneButton.querySelector('i');
-            
-            if (userHeaphone) {
-                userHeaphone = false;
-                audioElement.volume = 0;
-                icon.style.color = '#FF6347'; // Define a cor para vermelho quando o microfone está desligado
-            } else {
-                userHeaphone = true;
-                audioElement.volume = volumeSlider.value;
-                icon.style.color = 'white'; // Define a cor para verde quando o microfone está ligado
+                if (isMuted) {
+                    icon.classList.remove('fa-microphone');
+                    icon.classList.add('fa-microphone-slash');
+                    icon.style.color = '#FF6347'; // Define a cor para '#FF6347' quando o microfone está mutado
+                } else {
+                    icon.classList.remove('fa-microphone-slash');
+                    icon.classList.add('fa-microphone');
+                    icon.style.color = 'white'; // Define a cor para 'white' quando o microfone está desmutado
+                }
             }
-        });
-
-        volumeSlider.addEventListener('input', function() {
-            audioElement.volume = volumeSlider.value;
         });
     }).catch(function(err) {
         showErrorToast('Failed to get local stream', err);
     });
-} 
-else {
+} else {
     showErrorToast('Seu navegador não suporta a API getUserMedia.');
 }
+
 
 $(document).ready(function () {
 

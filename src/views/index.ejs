@@ -10,15 +10,15 @@
     <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg">
+    <nav class="navbar navbar-expand-lg fixed-top">
         <div class="container-fluid">
-            <a class="navbar-brand" href="/" style="color: #fff;">
+            <a class="navbar-brand" href="#cubic" style="color: #fff;">
                 <img src="/images/cubic-w-nobg.png" alt="Logo" width="50" height="50"> Cubic
             </a>
             <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
                 <ul class="navbar-nav">
                     <li class="nav-item">
-                        <a class="nav-link" href="#">Sobre</a>
+                        <a class="nav-link" href="#sobre">Sobre</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="#">TOS</a>
@@ -34,7 +34,7 @@
         </div>
     </nav>
 
-    <section class="content-section">
+    <section id="cubic" class="content-section">
         <div class="container">
             <div class="row align-items-center">
                 <div class="col-md-6 text">
@@ -48,7 +48,31 @@
         </div>
     </section>
 
+    <section id="sobre" class="content-section">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-md-6 text">
+                    <h2>Sobre o Cubic.</h2>
+                    <p>O Cubic é um chat online onde você pode adicionar amigos, conversar com eles em tempo real, fazer ligações por vídeo, e customizar seu perfil - tudo isso de graça. Nosso ambiente é perfeito para gamers, garantindo que você não perca performance ao utilizar todos os nossos recursos online. Se você está procurando um lugar para se divertir, se conectar e interagir, o Cubic é a escolha ideal. Junte-se a nós e comece a explorar todas as possibilidades que oferecemos!</p>
+                </div>
+                <div class="col-md-6 image">
+                    <img src="/images/chat-preview.png" alt="Descrição da Imagem" class="img-fluid">
+                </div>
+            </div>
+        </div>
+    </section>
+
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="/scripts/script.js"></script>
+    <script>
+        document.addEventListener('scroll', function () {
+            var sections = document.querySelectorAll('.content-section');
+            var navLinks = document.querySelectorAll('.nav-link');
+            
+            sections.forEach(function (section) {
+                var rect = section.getBoundingClientRect();
+            });
+        });
+    </script>
 </body>
 </html>
