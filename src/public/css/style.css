@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css?family=Poppins');
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap');
 
 body {
   background: #0f1013;
@@ -53,6 +54,10 @@ html {
   margin-top: 56px; 
 }
 
+.login {
+  height: 80vh;
+}
+
 .content-section {
   color: #fff; 
 }
@@ -80,6 +85,19 @@ html {
     flex-direction: column-reverse; 
     text-align: center;
   }
+}
+
+.tos-content {
+  height: 600px; /* Ajuste a altura conforme necessário */
+  overflow-y: scroll;
+  padding: 20px;
+  background-color: #0f1013; /* Cor de fundo para destacar a área de rolagem */
+  border: 1px solid #444; /* Borda opcional para visualização */
+  border-radius: 5px; /* Borda arredondada opcional */
+}
+
+.tos-content p {
+  font-family: "Montserrat", sans-serif;
 }
 
 /*login*/

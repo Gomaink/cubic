@@ -145,6 +145,10 @@ router.post('/forgot-password', async (req, res) => {
             expiration: { $lte: Date.now() }
         });
 
+        // Gera um novo token e define uma data de expiração
+        const token = crypto.randomBytes(32).toString('hex');
+        const expiration = Date.now() + 3600000; // Token válido por 1 hora
+
         // Salva o novo token no banco de dados
         await new Token({
             userId: user._id,
@@ -152,7 +156,7 @@ router.post('/forgot-password', async (req, res) => {
             expiration
         }).save();
 
-        const resetLink = `http://localhost:3000/auth/forgot-password/${token}`;
+        const resetLink = `https://localhost:3000/auth/forgot-password/${token}`;
 
         const mailOptions = {
             from: 'seuemail@gmail.com',
