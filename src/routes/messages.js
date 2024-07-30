@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Message = require('../models/Message');
+const { decrypt } = require('../utils/cryptoUtils');
 
 // Route to send a message
 router.post('/send-message', async (req, res) => {
@@ -33,7 +34,13 @@ router.get('/:userId/:friendId', async (req, res) => {
             ]
         }).sort('timestamp');
 
-        res.status(200).json({ messages });
+        // Descriptografar mensagens
+        const decryptedMessages = messages.map(msg => ({
+            ...msg._doc,
+            message: decrypt(msg.message)
+        }));
+
+        res.status(200).json({ messages: decryptedMessages });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Erro ao obter as mensagens. Tente novamente mais tarde.' });
