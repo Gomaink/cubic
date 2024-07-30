@@ -2,60 +2,17 @@
 const UserId = currentUserId;
 const User = currentUsername;
 const Avatar = avatarUrl;
+const socket = io({ query: { currentUserId } });
+
 const confirmationToast = new bootstrap.Toast(document.getElementById('confirmationToast'));
+const incommingCallToast = new bootstrap.Toast(document.getElementById('incommingCallToast'));
+const callingToast = new bootstrap.Toast(document.getElementById('callingToast'));
 
 let currentFriendId = '';
 let currentRoom = '';
 let currentFriendAvatar = '';
 let friendToRemove = null;
-
 let currentRoomPeerIds = '';
-
-const incommingCallToast = new bootstrap.Toast(document.getElementById('incommingCallToast'));
-const callingToast = new bootstrap.Toast(document.getElementById('callingToast'));
-
-const socket = io({ query: { currentUserId } });
-
-//=========================[GENERAL FUNCTIONS]=========================//
-function showErrorToast(messageError) {
-    // Define the toast element and its body
-    const toastElement = document.getElementById('errorToast');
-    const toastBody = toastElement.querySelector('.toast-body');
-    
-    // Set the error message
-    toastBody.textContent = messageError;
-    
-    // Create a Bootstrap toast instance
-    const toast = new bootstrap.Toast(toastElement);
-    
-    // Show the toast
-    toast.show();
-}
-
-function formatTimestamp(timestamp) {
-    const now = new Date();
-    const date = new Date(timestamp);
-
-    const isToday = now.toDateString() === date.toDateString();
-    const isYesterday = new Date(now.setDate(now.getDate() - 1)).toDateString() === date.toDateString();
-
-    let hours = date.getHours();
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    const period = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12 || 12; // Converte 0 horas para 12 e mantém o formato de 12 horas
-    const time = `${hours.toString().padStart(2, '0')}:${minutes} ${period}`;
-
-    if (isToday) {
-        return `Hoje às ${time}`;
-    } else if (isYesterday) {
-        return `Ontem às ${time}`;
-    } else {
-        const day = date.getDate().toString().padStart(2, '0');
-        const month = (date.getMonth() + 1).toString().padStart(2, '0'); // Janeiro é 0!
-        const year = date.getFullYear();
-        return `${day}/${month}/${year} às ${time}`;
-    }
-}
 
 
 //=========================[USER FUNCTIONS]=========================//
@@ -64,7 +21,6 @@ socket.on('userStatusChanged', (data) => {
     const { userId, online, nickname, avatar } = data;
     const color = online ? '#198754' : '#c93c3e';
 
-    // Verificações opcionais
     if (userId) {
         $(`#friend-${userId}`).css('background', color);
     }
@@ -99,18 +55,15 @@ async function updateUsername(userId, newUsername) {
                 $('#error-message-modal-username').text(data.error);
             }
         } else {
-            // Se a resposta não for OK, pode ser um erro HTTP (por exemplo, 4xx ou 5xx)
             $('#error-message-modal-username').text(data.error || 'Erro ao atualizar nome de usuário. Tente novamente.');
         }
     } catch (error) {
-        // Trata erros de rede ou de execução
         $('#error-message-modal-username').text('Erro ao atualizar nome de usuário. Tente novamente.');
         console.error('Erro:', error);
     }
 }
 
 
-// Função para atualizar o nome de exibição (nickname)
 async function updateNickname(userId, newNickname) {
     try {
         const response = await fetch('/user/update-nickname', {
@@ -122,7 +75,6 @@ async function updateNickname(userId, newNickname) {
         });
 
         if (!response.ok) {
-            // Se a resposta não for OK, lance um erro com o status
             throw new Error(`HTTP error! Status: ${response.status}`);
         }
 
@@ -137,7 +89,6 @@ async function updateNickname(userId, newNickname) {
             document.getElementById('error-message-modal-nickname').textContent = data.error;
         }
     } catch (error) {
-        // Trate erros de fetch aqui
         const errorMessage = error.message || 'Erro ao atualizar nome de exibição. Tente novamente.';
         document.getElementById('error-message-modal-nickname').textContent = errorMessage;
     }
@@ -181,7 +132,7 @@ async function uploadAvatar(file) {
     }
 }
 
-// Manipulador do formulário de envio
+
 $('#modalAlterarAvatar form').on('submit', function(e) {
     e.preventDefault();
 
@@ -191,73 +142,52 @@ $('#modalAlterarAvatar form').on('submit', function(e) {
     uploadAvatar(file);
 });
 
-// Evento para submissão do formulário de alterar nome de usuário
+
 $('#modalAlterarNome form').on('submit', function (e) {
     e.preventDefault();
-    const newUsername = $('#newName').val().trim(); // Obtém o novo nome de usuário
-    const userId = currentUserId; // Substitua pelo ID do usuário atual
+    const newUsername = $('#newName').val().trim();
+    const userId = currentUserId; 
 
     if (newUsername === '') {
         return;
     }
     
-    updateUsername(userId, newUsername); // Chama a função para atualizar o nome de usuário
+    updateUsername(userId, newUsername); 
 });
 
-// Evento para submissão do formulário de alterar nickname
+
 $('#modalAlterarNick form').on('submit', function (e) {
     e.preventDefault();
-    const newNickname = $('#newNick').val().trim(); // Obtém o novo nickname
-    const userId = currentUserId; // Substitua pelo ID do usuário atual
+    const newNickname = $('#newNick').val().trim();
+    const userId = currentUserId; 
 
     if (newNickname === '') {
         return;
     }
 
-    updateNickname(userId, newNickname); // Chama a função para atualizar o nickname
+    updateNickname(userId, newNickname); 
 });
 
 //=========================[MESSAGE FUNCTIONS]=========================//
 
-// Função assíncrona para entrar na sala
 async function joinRoom(friendUsername, friendNickname, friendId, friendPeerId, friendAvatarUrl) {
     try {
-        // Atualizar informações da sala
         currentFriendId = friendId;
         currentFriendPeerId = friendPeerId;
         currentRoom = [UserId, currentFriendId].sort().join('_');
 
-        // Emitir evento para o socket
         socket.emit('joinRoom', currentRoom);
 
-        // Limpar o conteúdo do chat
         $('#chatContent').empty(); 
 
-        // Atualizar o título da página
         document.title = `Cubic | ${friendNickname}`;
 
-        // Exibir título do chat
         showChatTitle(friendUsername, friendAvatarUrl);
 
-        // Carregar mensagens
         await loadMessages(friendId, friendUsername, friendNickname, friendAvatarUrl);
     } catch (error) {
         console.error('Erro ao entrar na sala:', error);
     }
-}
-
-function showChatTitle(friendUsername, friendAvatar) {
-    const chatTitle = document.getElementById('chatTitle');
-    const chatAvatar = document.getElementById('chatAvatar');
-    const chatUsername = document.getElementById('chatUsername');
-    const callButtons = document.getElementById('callButtons');
-
-    chatAvatar.src = friendAvatar;
-
-    chatUsername.textContent = friendUsername;
-
-    chatTitle.style.display = 'flex';
-    callButtons.style.display = 'flex';
 }
 
 async function loadMessages(friendId, friendUsername, friendNickname, friendAvatar) {
@@ -341,18 +271,6 @@ async function loadMessages(friendId, friendUsername, friendNickname, friendAvat
     }
 }
 
-// Function to check if chat is scrolled to bottom
-function isChatScrolledToBottom() {
-    const chatContent = $('#chatContent');
-    return chatContent.prop('scrollHeight') - chatContent.scrollTop() === chatContent.outerHeight();
-}
-
-// Function to scroll chat content to bottom
-function scrollToBottom() {
-    const chatContent = $('#chatContent');
-    chatContent.scrollTop(chatContent.prop('scrollHeight'));
-}
-
 async function sendMessage(senderId, receiverId, message) {
     try {
         const response = await fetch('/messages/send-message', {
@@ -372,43 +290,10 @@ async function sendMessage(senderId, receiverId, message) {
         return data;
     } catch (error) {
         console.error('Erro AJAX:', error.message);
-        throw error; // Re-throwing the error to be handled by the caller
+        throw error;
     }
 }
 
-function showToast(messageId) {
-    const toastElement = document.getElementById(messageId);
-    const toast = new bootstrap.Toast(toastElement);
-    toast.show();
-}
-
-
-document.getElementById('messageInput').addEventListener('keypress', async function (e) {
-    if (e.key === 'Enter' && this.value.trim() !== '') {
-        const message = this.value.trim();
-
-        if (message.length > 2000) {
-            showToast('characterLimitToast');
-            return;
-        }
-
-        socket.emit('sendMessage', { user: User, userAvatar: Avatar, room: currentRoom, message });
-
-        try {
-            const data = await sendMessage(UserId, currentFriendId, message);
-
-            if (data.success) {
-                console.log('Mensagem enviada com sucesso!');
-            }
-        } catch (error) {
-            // Error handling is already done in sendMessage function
-        }
-
-        this.value = '';
-    }
-});
-
-//Receber mensagem
 socket.on('receiveMessage', function (data) {
     const { user, userAvatar, message } = data;
     const chatContent = $('#chatContent');
@@ -460,12 +345,91 @@ socket.on('receiveMessage', function (data) {
         `);
     }
 
-    // Scroll to bottom if chat was scrolled to bottom before receiving the message
+
     if (shouldScrollToBottom) {
         scrollToBottom();
     }
 });
 
+document.getElementById('messageInput').addEventListener('keypress', async function (e) {
+    if (e.key === 'Enter' && this.value.trim() !== '') {
+        const message = this.value.trim();
+
+        if (message.length > 2000) {
+            showToast('characterLimitToast');
+            return;
+        }
+
+        socket.emit('sendMessage', { user: User, userAvatar: Avatar, room: currentRoom, message });
+
+        try {
+            const data = await sendMessage(UserId, currentFriendId, message);
+
+            if (data.success) {
+                console.log('Mensagem enviada com sucesso!');
+            }
+        } catch (error) {
+            // Error handling is already done in sendMessage function
+        }
+
+        this.value = '';
+    }
+});
+
+function showToast(messageId) {
+    const toastElement = document.getElementById(messageId);
+    const toast = new bootstrap.Toast(toastElement);
+    toast.show();
+}
+
+function formatTimestamp(timestamp) {
+    const now = new Date();
+    const date = new Date(timestamp);
+
+    const isToday = now.toDateString() === date.toDateString();
+    const isYesterday = new Date(now.setDate(now.getDate() - 1)).toDateString() === date.toDateString();
+
+    let hours = date.getHours();
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const period = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12; 
+    const time = `${hours.toString().padStart(2, '0')}:${minutes} ${period}`;
+
+    if (isToday) {
+        return `Hoje às ${time}`;
+    } else if (isYesterday) {
+        return `Ontem às ${time}`;
+    } else {
+        const day = date.getDate().toString().padStart(2, '0');
+        const month = (date.getMonth() + 1).toString().padStart(2, '0'); 
+        const year = date.getFullYear();
+        return `${day}/${month}/${year} às ${time}`;
+    }
+}
+
+function isChatScrolledToBottom() {
+    const chatContent = $('#chatContent');
+    return chatContent.prop('scrollHeight') - chatContent.scrollTop() === chatContent.outerHeight();
+}
+
+function scrollToBottom() {
+    const chatContent = $('#chatContent');
+    chatContent.scrollTop(chatContent.prop('scrollHeight'));
+}
+
+function showChatTitle(friendUsername, friendAvatar) {
+    const chatTitle = document.getElementById('chatTitle');
+    const chatAvatar = document.getElementById('chatAvatar');
+    const chatUsername = document.getElementById('chatUsername');
+    const callButtons = document.getElementById('callButtons');
+
+    chatAvatar.src = friendAvatar;
+
+    chatUsername.textContent = friendUsername;
+
+    chatTitle.style.display = 'flex';
+    callButtons.style.display = 'flex';
+}
 //=========================[FRIENDS FUNCTIONS]=========================//
 
 function RemoveFriend(friendId) {
@@ -485,13 +449,11 @@ async function removeFriend(friendId) {
         const data = await response.json();
 
         if (response.ok && data.success) {
-            // Remove o amigo da lista
             const friendItem = document.querySelector(`li[data-friend-id="${friendId}"]`);
             if (friendItem) {
                 friendItem.remove();
             }
 
-            // Esconde o toast
             if (confirmationToast) {
                 confirmationToast.hide();
             }
@@ -874,19 +836,27 @@ if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     showErrorToast('Seu navegador não suporta a API getUserMedia.');
 }
 
+function showErrorToast(messageError) {
+    const toastElement = document.getElementById('errorToast');
+    const toastBody = toastElement.querySelector('.toast-body');
+    
+    toastBody.textContent = messageError;
+    
+    const toast = new bootstrap.Toast(toastElement);
+    
+    toast.show();
+}
 
+//=========================[TIMERS]=========================//
 $(document).ready(function () {
-    // Defina o intervalo de verificação (em milissegundos)
-    const CHECK_INTERVAL = 60000; // 1 minuto
+    const CHECK_INTERVAL = 60000; 
 
-    // Função para verificar autenticação do usuário
     function checkAuthentication() {
         $.ajax({
-            url: '/auth/check-auth', // Endpoint para verificar autenticação
+            url: '/auth/check-auth', 
             method: 'GET',
             success: function(data) {
                 if (!data.authenticated) {
-                    // Se não estiver autenticado, redireciona para o login
                     window.location.href = '/auth/login';
                 }
             },
@@ -896,15 +866,13 @@ $(document).ready(function () {
         });
     }
 
-    // Função para carregar a lista de amigos
     function updateFriends() {
         loadFriends();
     }
 
-    // Verifica autenticação e carrega amigos periodicamente
     function startPeriodicChecks() {
-        checkAuthentication();  // Verifica a autenticação imediatamente
-        updateFriends();        // Carrega amigos imediatamente
+        checkAuthentication(); 
+        updateFriends(); 
 
         setInterval(() => {
             checkAuthentication();
@@ -912,6 +880,5 @@ $(document).ready(function () {
         }, CHECK_INTERVAL);
     }
 
-    // Inicia as verificações periódicas quando o documento está pronto
     startPeriodicChecks();
 });
