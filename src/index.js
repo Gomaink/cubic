@@ -64,6 +64,14 @@ app.get("/", (req, res) => {
     res.render("index");
 });
 
+app.get("/terms", (req, res) => {
+    res.render("terms");
+});
+
+app.get("/privacy", (req, res) => {
+    res.render("privacy");
+});
+
 app.get("/error", (req, res) => {
     const { error, errorMessage } = req.query;
     res.render("error", { error, errorMessage });
