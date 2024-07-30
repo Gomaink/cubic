@@ -1,21 +1,32 @@
-opções para ao clicar com o botão direito poder deletar ou editar a mensagem
+TODO: Criar uma tela de configurações para o usuário tendo:
+- Alterar usuário
+- Alterar nickname
+- Alterar avatar
+- Alterar email
+- Alterar senha
+- Excluir conta
 
-ao alterar a senha com sucesso enviar um email avisando o usuario.
+TODO: Alterar a responsividade da sidebar, podendo expandi-la e comprimi-la em dispositivos menores.
 
-adicionar a possibilidade de adicionar qualquer tipo de arquivo as mensagens (max 15mb)
+TODO: Opções para ao clicar com o botão direito poder deletar ou editar a mensagem
 
-fazer o botão de mutar, surdar e a barra de volume funcionarem & aparecerem apenas se estiver em call.
+TODO: Ao alterar a senha com sucesso enviar um email avisando o usuario.
 
-salvar se o usuario esta com o mic mutado, a barra de volume, se esta surdo
+TODO: Adicionar a possibilidade de adicionar qualquer tipo de arquivo as mensagens (max 15mb)
 
-quando um usuário que está em uma ligação ficar offline, encerrar a chamada.
+TODO: Fazer o botão de mutar, surdar e a barra de volume funcionarem & aparecerem apenas se estiver em call.
 
-adicionar um fontawesome de sinal, e quando o jogador emitir som pelo microfone ele ficar verde, caso contrário branco normal.
+TODO: Salvar se o usuario esta com o mic mutado, a barra de volume, se esta surdo
 
-adicionar login com o google
+TODO: Quando um usuário que está em uma ligação ficar offline, encerrar a chamada.
 
-criar um simbolo de notificacao com a quantidade de mensagens que um amigo te enviou do lado do nome dele, sendo mais de 10 um simbolo 10+ e
-- sendo menos, os números respectivos.
+TODO: Adicionar um fontawesome de sinal, e quando o jogador emitir som pelo microfone ele ficar verde, caso contrário branco normal.
 
-arrumar a lista de amigos dinamicamente para o que eu tenho uma conversa mais recente e assim decrescentemente exemplo 
-- (amigo1: acabou de me mandar uma mensagem ou eu enviar uma pra ele: ordem: amigo1, amigo2, amigo3... | amigo2: me enviou mensagem ou eu enviei mensagem: ordem: amigo2, amigo1, amigo3...)
+TODO: Adicionar login com o google
+
+TODO: Criar um simbolo de notificacao com a quantidade de mensagens que um amigo te enviou do lado do nome dele, sendo mais de 10 um simbolo 10+ e
+sendo menos, os números respectivos.
+
+TODO: Arrumar a lista de amigos dinamicamente para o que eu tenho uma conversa mais recente e assim decrescentemente exemplo 
+(amigo1: acabou de me mandar uma mensagem ou eu enviar uma pra ele: ordem: amigo1, amigo2, amigo3... | 
+amigo2: me enviou mensagem ou eu enviei mensagem: ordem: amigo2, amigo1, amigo3...)
