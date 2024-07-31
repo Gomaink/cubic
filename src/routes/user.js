@@ -32,6 +32,22 @@ const upload = multer({
     }
 });
 
+router.get('/', async (req, res) => {
+    try {
+        if (!req.session.userId) {
+            return res.redirect("/auth/login");
+        }
+
+        const currentUser = await User.findById(req.session.userId);
+        console.log(currentUser);
+        return res.render('user', { currentUser });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Erro interno do servidor');
+    }
+});
+
 //Update a user username
 router.post('/update-username', async (req, res) => {
     const { userId, newUsername } = req.body;
@@ -103,6 +119,112 @@ router.post('/upload-avatar', upload.single('avatar'), async (req, res, next) =>
         res.status(500).json({ error: 'Erro ao salvar o avatar.' });
     }
 });
+
+//Update email
+router.post('/update-email', async (req, res) => {
+    const { newEmail } = req.body;
+
+    try {
+        const userId = await User.findById(req.session.userId);
+
+        // Verifica se o novo e-mail já está em uso
+        const existingUser = await User.findOne({ email: newEmail });
+        if (existingUser && existingUser._id.toString() !== userId) {
+            return res.status(400).json({ error: 'O e-mail já está em uso.' });
+        }
+
+        const user = await User.findByIdAndUpdate(userId, { email: newEmail }, { new: true });
+
+        if (!user) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        res.status(200).json({ success: true, message: 'E-mail atualizado com sucesso.' });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ error: 'Erro ao atualizar e-mail. Tente novamente.' });
+    }
+});
+
+//Update password
+router.post('/update-password', async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+
+    try {
+        const user = await User.findById(req.session.userId);
+
+        if (!user) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        // Verifica se a senha atual está correta
+        const match = await user.comparePassword(currentPassword);
+        if (!match) {
+            return res.status(400).json({ error: 'Senha atual incorreta.' });
+        }
+
+        // Atualiza a senha do usuário
+        user.password = newPassword;
+        await user.save();
+
+        res.status(200).json({ success: true, message: 'Senha atualizada com sucesso.' });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ error: 'Erro ao atualizar senha. Tente novamente.' });
+    }
+});
+
+//Update password
+router.post('/update-password', async (req, res) => {
+    const { newPassword } = req.body;
+
+    try {
+
+        const user = await User.findById(req.session.userId);
+
+        if (!user) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        user.password = newPassword; 
+        await user.save();
+
+        res.status(200).json({ success: true, message: 'Senha atualizada com sucesso.' });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ error: 'Erro ao atualizar a senha. Tente novamente.' });
+    }
+});
+
+// Verify password
+router.post('/verify-password', async (req, res) => {
+    const { currentPassword } = req.body;
+    const userId = req.session.userId;
+
+    try {
+        if (!userId) {
+            return res.status(401).json({ error: 'Usuário não autenticado.' });
+        }
+        
+        const user = await User.findById(userId);
+
+        if (!user) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        const isMatch = await user.comparePassword(currentPassword);
+
+        if (isMatch) {
+            res.status(200).json({ success: true });
+        } else {
+            res.status(401).json({ error: 'Senha atual incorreta.' });
+        }
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ error: 'Erro ao verificar a senha. Tente novamente.' });
+    }
+});
+
 
 //Update a PeerID
 router.post('/update-peerid', async (req, res) => {

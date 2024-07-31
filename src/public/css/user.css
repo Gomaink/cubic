@@ -1,0 +1,225 @@
+@import url('https://fonts.googleapis.com/css?family=Poppins');
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap');
+
+body, html {
+  background: #1a1d20;
+  font-family: 'Poppins', sans-serif;
+  height: 100%;
+  margin: 0;
+}
+
+.container {
+    max-width: 800px;
+    margin: auto;
+    padding-top: 100px; /* Adjust padding to your preference */
+}
+
+.container h1 {
+    color: #fff;
+    font-family: "Montserrat", sans-serif;
+    font-size: 17px;
+}
+
+h1 {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.nav-tabs .nav-link {
+    color: #fff;
+    background-color: transparent;
+    border-color: #444;
+    margin-right: 10px;
+}
+
+.nav-tabs .nav-link.active {
+    color: #fff;
+    background-color: rgba(0, 0, 0, 0.1);
+    border-color: #444;
+}
+
+.nav-tabs .nav-link:hover {
+    background-color: rgba(0, 0, 0, 0.1)
+}
+
+.tab-content {
+    background-color: #1a1d20;
+    padding: 20px;
+    border: 1px solid #444;
+    border-top: none;
+    border-radius: 0 0 5px 5px;
+    margin-top: -1px;
+    color: #fff;
+}
+
+p {
+    font-size: 14px;
+    margin: 5px 0;
+}
+
+.account-section {
+    padding: 5px;
+}
+
+.account-section:last-child {
+    border-bottom: none;
+}
+
+.account-section label {
+    color: #85898f;
+    font-weight: 900;
+    font-size: 14px;
+}
+
+.account-section span {
+    font-family: "Montserrat", sans-serif;
+}
+
+.account-avatar {
+    display: flex;
+    align-items: center;
+    margin-bottom: 20px;
+    position: relative; /* Garante que a sobreposição seja posicionada corretamente */
+}
+
+.avatar-container {
+    position: relative; /* Necessário para a sobreposição dentro deste contêiner */
+}
+
+.account-avatar img {
+    border-radius: 50%;
+    margin-right: 20px;
+    height: 70px;
+    width: 70px;
+    display: block;
+}
+
+.overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 70px;
+    height: 70px;
+    background: rgba(0, 0, 0, 0.5); /* Fundo semitransparente */
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    opacity: 0;
+    transition: opacity 0.3s;
+    border-radius: 50%; /* Mantém a borda arredondada da sobreposição */
+    cursor: pointer;
+}
+
+.avatar-container:hover .overlay {
+    opacity: 1;
+}
+
+
+.btn-edit {
+    border: 1px solid #85898f; 
+    background-color: transparent;
+    border-radius: 5px;
+    color: #fff;
+    font-family: "Montserrat", sans-serif;
+}
+
+.btn-edit:hover {
+    border: 1px solid #85898f; 
+    background-color: #85898f;
+    border-radius: 5px;
+    color: #fff;
+    font-family: "Montserrat", sans-serif;
+}
+
+.btn-delete {
+    border: 1px solid #FF6347; 
+    background-color: transparent;
+    border-radius: 5px;
+    color: #fff;
+    font-family: "Montserrat", sans-serif;
+}
+
+.btn-delete:hover {
+    border: 1px solid #FF6347; 
+    background-color: #FF6347;
+    border-radius: 5px;
+    color: #fff;
+    font-family: "Montserrat", sans-serif;
+}
+
+.btn-save {
+    border: 1px solid #198754; 
+    background-color: transparent;
+    border-radius: 5px;
+    color: #fff;
+    font-family: "Montserrat", sans-serif;
+}
+
+.btn-save:hover {
+    border: 1px solid #198754; 
+    background-color: #198754;
+    border-radius: 5px;
+    color: #fff;
+    font-family: "Montserrat", sans-serif;
+}
+
+input {
+    color: #fff;
+    background-color: transparent;
+    border: 1px solid #2a3236;
+    border-radius: 3px;
+}
+  
+input:focus {
+    color: #fff;
+    background-color: transparent;
+    border: 1px solid #323d43;
+    border-radius: 3px;
+}
+
+input[type=text] {
+    padding-left: 5px;
+    margin: 8px 0;
+    box-sizing: border-box;
+}
+
+/* Estilos para o toast em tema escuro */
+.toast-container {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1050; /* Certifique-se de que o toast está acima de outros elementos */
+}
+
+.toast {
+    min-width: 300px; /* Ajuste conforme necessário */
+    background-color: #343a40; /* Fundo do toast */
+    color: #f8f9fa; /* Cor do texto */
+}
+
+.toast-header {
+    background-color: #495057; /* Fundo do cabeçalho do toast */
+    color: #f8f9fa; /* Cor do texto do cabeçalho */
+}
+
+.toast-body {
+    background-color: #343a40; /* Fundo do corpo do toast */
+    color: #f8f9fa; /* Cor do texto do corpo */
+}
+
+.form-control {
+    background-color: #495057; /* Fundo do input */
+    color: #f8f9fa; /* Cor do texto do input */
+}
+
+.btn-primary {
+    background-color: #007bff; /* Cor do botão */
+    border-color: #007bff; /* Borda do botão */
+}
+
+.btn-close-white {
+    filter: invert(1); /* Torna o ícone do botão de fechar visível no fundo escuro */
+}

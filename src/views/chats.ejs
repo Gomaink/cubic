@@ -53,9 +53,7 @@
                         <i id="friendRequestsNotification" class="fa-regular fa-bell" style="display: none; margin-left: 5px;"></i>
                     </button>
                     <ul class="dropdown-menu">
-                        <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalAlterarNome"><i class="fas fa-user" style="margin-right: 10px;"></i>Alterar nome</a></li>
-                        <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalAlterarNick"><i class="far fa-user" style="margin-right: 10px;"></i>Alterar nick</a></li>
-                        <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalAlterarAvatar"><i class="fas fa-user-astronaut" style="margin-right: 10px;"></i>Alterar avatar</a></li>
+                        <li><a class="dropdown-item" href="/user"><i class="fa-solid fa-gear" style="margin-right: 10px;"></i>Configurações</a></li>
                         <li><hr class="dropdown-divider" style="color: #fff; background-color: #fff;"></li>
                         <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalFriendAdd"><i class="fa-solid fa-user-plus" style="margin-right: 10px;"></i>Adicionar amigo</a></li>
                         <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalFriendRequests"><i class="fa-solid fa-user-group" style="margin-right: 10px;"></i>Solicitações</a></li>
@@ -129,73 +127,6 @@
         <div class="toast-body">
             <p>Você está tentando ligar para <a id="calleeUsername" style="outline: none; color: #fff;"></a>.</p>
             <button class="btn btn-secondary btn-sm" data-bs-dismiss="toast" id="rejectCallButton">Desligar</button>
-        </div>
-    </div>
-    
-    <!-- Modais -->
-    <!-- Modal Alterar Nome -->
-    <div class="modal fade" id="modalAlterarNome" tabindex="-1" aria-labelledby="modalAlterarNomeLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="modalAlterarNomeLabel">Alterar nome de usuário</h5>
-                    <button type="button" class="modal-btn btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <form>
-                        <div class="mb-3">
-                            <label for="newName" class="form-label">Qual será seu novo nome de usuário?</label>
-                            <input type="text" class="update-modals modal-control" id="newName" placeholder="Algum nome legal..." autocomplete="off">
-                        </div>
-                        <div id="error-message-modal-username" class="error-message-modal text-secondary"></div>
-                        <button type="submit" class="btn btn-modal">Salvar</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Modal Alterar Nick -->
-    <div class="modal fade" id="modalAlterarNick" tabindex="-1" aria-labelledby="modalAlterarNickLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="modalAlterarNickLabel">Alterar nome de exibição</h5>
-                    <button type="button" class="modal-btn btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <form>
-                        <div class="mb-3">
-                            <label for="newNick" class="form-label">Qual será seu novo nome de exibição?</label>
-                            <input type="text" class="update-modals modal-control" id="newNick" placeholder="Algum nick legal..." autocomplete="off">
-                        </div>
-                        <div id="error-message-modal-nickname" class="error-message-modal text-secondary"></div>
-                        <button type="submit" class="btn btn-modal" style="margin-top: 1px;">Salvar</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Modal Alterar Avatar -->
-    <div class="modal fade" id="modalAlterarAvatar" tabindex="-1" aria-labelledby="modalAlterarAvatarLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="modalAlterarAvatarLabel">Alterar Avatar</h5>
-                    <button type="button" class="modal-btn btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <form>
-                        <div class="mb-3">
-                            <label for="newAvatar" class="form-label">Escolha uma imagem bem legal para o seu avatar!</label>
-                            <input type="file" class="update-modals modal-control" id="newAvatar" accept="image/png, image/jpeg, image/jpg" >
-                        </div>
-                        <div id="error-message-modal-avatar" class="error-message-modal text-secondary"></div>
-                        <button type="submit" class="btn btn-modal">Salvar</button>
-                    </form>
-                </div>
-            </div>
         </div>
     </div>
 
