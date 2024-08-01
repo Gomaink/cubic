@@ -35,8 +35,18 @@ function openConfirmPasswordToast() {
     toast.show();
 }
 
+function openConfirmDeleteAccountToast() {
+    var toastEl = document.getElementById('confirmDeleteAccountToast');
+    var toast = new bootstrap.Toast(toastEl, {
+        autohide: false // O toast não desaparecerá automaticamente
+    });
+    toast.show();
+}
 
 async function saveEdit(field) {
+    if(field == 'delete')
+        return openConfirmDeleteAccountToast();
+
     const span = document.querySelector(`span.editable[data-field="${field}"]`);
     const input = document.querySelector(`input.editable-input[data-field="${field}"]`);
     const editButton = document.querySelector(`button.btn-edit[onclick="toggleEdit('${field}')"]`);
@@ -193,6 +203,30 @@ async function updateEmail(userId, newEmail) {
     }
 }
 
+async function deleteAccount(currentPassword) {
+    try {
+        const response = await fetch('/user/delete-account', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ currentPassword: currentPassword })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            console.log("Conta deletada com sucesso.");
+            // Redirecionar para a página de logout ou página inicial
+            window.location.href = '/auth/logout';
+        } else {
+            console.error('Erro ao deletar a conta: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Erro ao deletar a conta:', error);
+    }
+}
+
 async function updatePassword(newPassword) {
     try {
         const response = await fetch('/user/update-password', {
@@ -217,8 +251,10 @@ async function updatePassword(newPassword) {
 }
 
 
-async function verifyCurrentPassword() {
-    const currentPassword = document.getElementById('currentPassword').value;
+async function verifyCurrentPassword(isDeleteAccount) {
+    const currentPassword = isDeleteAccount 
+        ? document.getElementById('currentDeletePassword').value 
+        : document.getElementById('currentPassword').value;
 
     try {
         const response = await fetch('/user/verify-password', {
@@ -232,12 +268,17 @@ async function verifyCurrentPassword() {
         const data = await response.json();
 
         if (response.ok && data.success) {
-            var toastEl = document.getElementById('confirmPasswordToast');
-            var toast = bootstrap.Toast.getInstance(toastEl);
+            const toastEl = isDeleteAccount 
+                ? document.getElementById('confirmDeleteAccountToast')
+                : document.getElementById('confirmPasswordToast');
+            const toast = bootstrap.Toast.getInstance(toastEl);
             toast.hide();
 
-            // Atualiza a senha
-            await updatePassword(userNewPassword);
+            if (isDeleteAccount) {
+                await deleteAccount(currentPassword);
+            } else {
+                await updatePassword(userNewPassword);
+            }
         } else {
             alert('Senha atual incorreta.');
         }

@@ -80,7 +80,7 @@
                 <label>DELETAR CONTA</label>
                 <div class="d-flex justify-content-between align-items-center">
                     <span>Delete sua conta com apenas um clique.</span>
-                    <button class="btn btn-delete">Deletar conta</button>
+                    <button class="btn btn-delete" onclick="saveEdit('delete')">Deletar conta</button>
                 </div>
             </div>
         </div>
@@ -108,7 +108,26 @@
                     <label for="currentPassword" class="form-label">Senha atual:</label>
                     <input type="password" class="form-control bg-secondary text-light" id="currentPassword" required>
                 </div>
-                <button type="button" class="btn btn-edit" onclick="verifyCurrentPassword()">Confirmar</button>
+                <button type="button" class="btn btn-edit" onclick="verifyCurrentPassword(false)">Confirmar</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Toast para Confirmar Senha Atual -->
+<div class="toast-container position-fixed top-50 start-50 translate-middle p-3" style="z-index: 1050;">
+    <div id="confirmDeleteAccountToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header bg-dark text-light">
+            <span class="me-auto">Confirmar Senha Atual</span>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body bg-dark text-light">
+            <form id="confirmDeleteAccountForm">
+                <div class="mb-3">
+                    <label for="currentPassword" class="form-label">Senha atual:</label>
+                    <input type="password" class="form-control bg-secondary text-light" id="currentDeletePassword" required>
+                </div>
+                <button type="button" class="btn btn-delete" onclick="verifyCurrentPassword(true)">Confirmar</button>
             </form>
         </div>
     </div>

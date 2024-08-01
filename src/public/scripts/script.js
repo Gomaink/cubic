@@ -366,37 +366,39 @@ async function loadFriendRequests() {
             }
         });
 
-        if (!response.ok) {
-            throw new Error('Erro na resposta da rede');
-        }
-
         const data = await response.json();
 
-        const friendRequestsList = document.getElementById('friendRequestsList');
-        friendRequestsList.innerHTML = '';
+        if (response.ok && data.friendRequests) {
+            const friendRequestsList = document.getElementById('friendRequestsList');
+            friendRequestsList.innerHTML = '';
 
-        if (data.friendRequests && data.friendRequests.length > 0) {
-            data.friendRequests.forEach(request => {
-                const listItem = document.createElement('li');
-                listItem.className = 'list-group-item d-flex justify-content-between align-items-center';
-                
-                listItem.innerHTML = `
-                    <span class="requester-name">${request.requester.username}</span>
-                    <div class="friend-requests-buttons">
-                        <button class="btn btn-success btn-sm accept-friend-request" data-request-id="${request._id}">Aceitar</button>
-                        <button class="btn btn-danger btn-sm decline-friend-request" data-request-id="${request._id}">Recusar</button>
-                    </div>
-                `;
-                
-                friendRequestsList.appendChild(listItem);
-            });
+            if (data.friendRequests.length > 0) {
+                data.friendRequests.forEach(request => {
+                    const listItem = document.createElement('li');
+                    listItem.className = 'list-group-item d-flex justify-content-between align-items-center';
+
+                    listItem.innerHTML = `
+                        <span class="requester-name">${request.requester.username}</span>
+                        <div class="friend-requests-buttons">
+                            <button class="btn btn-success btn-sm accept-friend-request" data-request-id="${request._id}">Aceitar</button>
+                            <button class="btn btn-danger btn-sm decline-friend-request" data-request-id="${request._id}">Recusar</button>
+                        </div>
+                    `;
+
+                    friendRequestsList.appendChild(listItem);
+                });
+            } else {
+                friendRequestsList.innerHTML = '<li class="list-group-item text-center">Nenhum pedido de amizade.</li>';
+            }
         } else {
-            friendRequestsList.innerHTML = '<li class="list-group-item text-center">Nenhum pedido de amizade.</li>';
+            $('#error-message-modal-username').text(data.error || 'Erro na resposta da rede');
         }
     } catch (error) {
-        console.error('Erro ao carregar pedidos de amizade:', error.message);
+        const errorMessage = error.message || 'Erro ao carregar pedidos de amizade. Tente novamente.';
+        $('#error-message-modal-username').text(errorMessage);
     }
 }
+
 
 async function respondToFriendRequest(requestId, action) {
     try {
@@ -609,7 +611,7 @@ async function initializeCall() {
 
         function initiateCall() {
             $.ajax({
-                url: `/friends/${currentFriendId}`,
+                url: `/friends/friend-data/${currentFriendId}`,
                 method: 'GET',
                 success: (data) => {
                     if (data.friend) {

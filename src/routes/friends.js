@@ -34,7 +34,7 @@ router.get('/', async (req, res) => {
 });
 
 //Get a friend data
-router.get('/:friendId', async (req, res) => {
+router.get('/friend-data/:friendId', async (req, res) => {
     try {
         const currentUser = await User.findById(req.session.userId);
         if (!currentUser) {

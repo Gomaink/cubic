@@ -4,6 +4,9 @@ const path = require('path');
 const fs = require('fs');
 const router = express.Router();
 const User = require('../models/User');
+const FriendRequest = require('../models/FriendRequest');
+const Token = require('../models/Token');
+const Friendship = require('../models/Friendship');
 
 // Configuração do Multer para fazer upload de avatares
 const storage = multer.diskStorage({
@@ -148,39 +151,11 @@ router.post('/update-email', async (req, res) => {
 
 //Update password
 router.post('/update-password', async (req, res) => {
-    const { currentPassword, newPassword } = req.body;
-
-    try {
-        const user = await User.findById(req.session.userId);
-
-        if (!user) {
-            return res.status(404).json({ error: 'Usuário não encontrado.' });
-        }
-
-        // Verifica se a senha atual está correta
-        const match = await user.comparePassword(currentPassword);
-        if (!match) {
-            return res.status(400).json({ error: 'Senha atual incorreta.' });
-        }
-
-        // Atualiza a senha do usuário
-        user.password = newPassword;
-        await user.save();
-
-        res.status(200).json({ success: true, message: 'Senha atualizada com sucesso.' });
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ error: 'Erro ao atualizar senha. Tente novamente.' });
-    }
-});
-
-//Update password
-//TODO FIX THAT SHIT HERE, ITS RETURNING AN ERROR 
-router.post('/update-password', async (req, res) => {
     const { newPassword } = req.body;
-    const userId = req.session.userId; 
 
     try {
+        const userId = await User.findById(req.session.userId);
+
         if (!userId) {
             return res.status(401).json({ error: 'Usuário não autenticado.' });
         }
@@ -191,9 +166,11 @@ router.post('/update-password', async (req, res) => {
             return res.status(404).json({ error: 'Usuário não encontrado.' });
         }
 
-        // Atualiza o campo password com a nova senha
-        user.password = newPassword; 
-        await user.save();
+        const updatePassword = await User.findByIdAndUpdate(userId, { password: newPassword }, { new: true });
+
+        if (!updatePassword) {
+            return res.status(404).json({ error: 'Usuário não encontrado ou ocorreu um erro ao atualizar a senha.' });
+        }
 
         res.status(200).json({ success: true, message: 'Senha atualizada com sucesso.' });
     } catch (err) {
@@ -247,6 +224,50 @@ router.post('/update-peerid', async (req, res) => {
     } catch (err) {
         console.error(err.message);
         res.status(500).json({ error: 'Erro ao atualizar PeerID. Tente novamente.' });
+    }
+});
+
+//Delete account
+router.post('/delete-account', async (req, res) => {
+    const { currentPassword } = req.body;
+    const userId = req.session.userId;
+
+    try {
+        if (!userId) {
+            return res.status(401).json({ error: 'Usuário não autenticado.' });
+        }
+
+        const user = await User.findById(userId);
+
+        if (!user) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        const isMatch = await user.comparePassword(currentPassword);
+
+        if (!isMatch) {
+            return res.status(401).json({ error: 'Senha atual incorreta.' });
+        }
+
+        // Delete friend requests where the user is requester or recipient
+        await FriendRequest.deleteMany({
+            $or: [{ requester: userId }, { recipient: userId }]
+        });
+
+        // Delete tokens associated with the user
+        await Token.deleteMany({ userId: userId });
+
+        // Delete friendships where the user is involved
+        await Friendship.deleteMany({ user: userId });
+        await Friendship.updateMany({ friends: userId }, { $pull: { friends: userId } });
+
+        // Delete the user
+        await user.deleteOne();
+
+        res.status(200).json({ success: true, message: 'Conta deletada com sucesso.' });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ error: 'Erro ao deletar a conta. Tente novamente.' });
     }
 });
 
