@@ -646,13 +646,13 @@ async function initializeCall() {
                 remoteAudioElement = new Audio();
                 remoteAudioElement.srcObject = remoteStream;
                 remoteAudioElement.play();
-                document.getElementById('endCallButton').style.display = 'flex';
+                toggleCallButtons(true);
             });
 
             call.on('close', () => {
                 callingToast.hide();
                 showErrorToast('Chamada encerrada.');
-                document.getElementById('endCallButton').style.display = 'none';
+                toggleCallButtons(false);
             });
 
             document.getElementById('rejectCallButton').onclick = () => {
@@ -667,11 +667,28 @@ async function initializeCall() {
             if (currentCall) {
                 currentCall.close();
                 currentCall = null;
-                document.getElementById('endCallButton').style.display = 'none';
+
+                toggleCallButtons(false);
                 showErrorToast('Chamada encerrada.');
             } else {
-                document.getElementById('endCallButton').style.display = 'none';
+                toggleCallButtons(false);
                 showErrorToast('Nenhuma chamada ativa para encerrar.');
+            }
+        }
+
+        function toggleCallButtons(show) 
+        {
+            if(show) 
+            {
+                document.getElementById('headphoneButton').style.display = 'none';
+                document.getElementById('muteButton').style.display = 'none';
+                document.getElementById('endCallButton').style.display = 'none';
+                document.getElementById('volumeSlider').style.display = 'none';
+            } else {
+                document.getElementById('headphoneButton').style.display = 'flex';
+                document.getElementById('muteButton').style.display = 'flex';
+                document.getElementById('endCallButton').style.display = 'flex';
+                document.getElementById('volumeSlider').style.display = 'flex';
             }
         }
 
