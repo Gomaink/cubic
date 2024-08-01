@@ -680,17 +680,15 @@ async function initializeCall() {
 
         function toggleCallButtons(show) 
         {
-            if(show) 
+            if(!show) 
             {
                 document.getElementById('headphoneButton').style.display = 'none';
                 document.getElementById('muteButton').style.display = 'none';
                 document.getElementById('endCallButton').style.display = 'none';
-                document.getElementById('volumeSlider').style.display = 'none';
             } else {
                 document.getElementById('headphoneButton').style.display = 'flex';
                 document.getElementById('muteButton').style.display = 'flex';
                 document.getElementById('endCallButton').style.display = 'flex';
-                document.getElementById('volumeSlider').style.display = 'flex';
             }
         }
 
