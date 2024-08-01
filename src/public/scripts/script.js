@@ -334,6 +334,7 @@ async function removeFriend(friendId) {
 
 async function addFriend(friendName) {
     try {
+        console.log(friendName);
         const response = await fetch('/friends/add-friend', {
             method: 'POST',
             headers: {
@@ -582,6 +583,7 @@ async function initializeCall() {
         let currentCall = null;
         let remoteAudioElement = null;
         const localStream = stream;
+        let isMuted = false;
 
         peer.on('call', handleIncomingCall);
         document.getElementById('audioCallButton').addEventListener('click', initiateCall);
@@ -675,9 +677,10 @@ async function initializeCall() {
 
         function toggleMute() {
             const icon = document.getElementById('muteButton').querySelector('i');
-            if (remoteAudioElement) {
+            const audioTrack = localStream.getAudioTracks()[0];
+            if (audioTrack) {
                 isMuted = !isMuted;
-                remoteAudioElement.muted = isMuted;
+                audioTrack.enabled = !isMuted;
 
                 if (isMuted) {
                     icon.classList.remove('fa-microphone');

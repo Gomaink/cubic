@@ -175,17 +175,23 @@ router.post('/update-password', async (req, res) => {
 });
 
 //Update password
+//TODO FIX THAT SHIT HERE, ITS RETURNING AN ERROR 
 router.post('/update-password', async (req, res) => {
     const { newPassword } = req.body;
+    const userId = req.session.userId; 
 
     try {
+        if (!userId) {
+            return res.status(401).json({ error: 'Usuário não autenticado.' });
+        }
 
-        const user = await User.findById(req.session.userId);
+        const user = await User.findById(userId);
 
         if (!user) {
             return res.status(404).json({ error: 'Usuário não encontrado.' });
         }
 
+        // Atualiza o campo password com a nova senha
         user.password = newPassword; 
         await user.save();
 

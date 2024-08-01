@@ -236,6 +236,7 @@ async function verifyCurrentPassword() {
             var toast = bootstrap.Toast.getInstance(toastEl);
             toast.hide();
 
+            // Atualiza a senha
             await updatePassword(userNewPassword);
         } else {
             alert('Senha atual incorreta.');
