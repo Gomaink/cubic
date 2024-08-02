@@ -1,3 +1,5 @@
+TODO: Existem situações quando o usuário está desconectado que ele não pode exercer e mesmo assim estão sendo exercidas.
+
 TODO: Alterar a responsividade da sidebar, podendo expandi-la e comprimi-la em dispositivos menores.
 
 TODO: Ao clicar no seu avatar no dropup, abrir um modal com um "perfil" do usuário, tipo o discord.

@@ -79,6 +79,19 @@ app.get("/error", (req, res) => {
 
 let usersOnline = {};
 
+async function setAllUsersOffline() {
+    try {
+        await User.updateMany({}, { online: false });
+        console.log('Todos os usuários foram definidos como offline.');
+    } catch (error) {
+        console.error('Erro ao definir todos os usuários como offline:', error.message);
+    }
+}
+
+mongoose.connection.once('open', () => {
+    setAllUsersOffline();
+});
+
 // WebSockets logic
 io.on('connection', (socket) => {
     
@@ -107,8 +120,8 @@ io.on('connection', (socket) => {
     });
 
     socket.on('sendMessage', ({ user, userAvatar, room, message }) => {
-        io.to(room).emit('receiveMessage', { user, userAvatar, message });
-    });
+        io.to(room).emit('receiveMessage', { user, userAvatar, message, room });
+    });    
 
 
     socket.on('disconnect', () => {
@@ -117,10 +130,16 @@ io.on('connection', (socket) => {
                 if (user) {
                     console.log(`User ${user.username} is now offline`);
                     for (let userId in usersOnline) {
-                        console.log(usersOnline[userId]);
                         if (usersOnline[userId] === socket.id) {
-                            delete usersOnline[userId];
-                            io.emit('userStatusChanged', { userId, online: false });
+                            User.findByIdAndUpdate(userId, { online: true }, { new: true })
+                            .then(user => {
+                                if (user) {
+                                    console.log(`User ${user.username} is now offline`);
+                                    delete usersOnline[userId];
+                                    io.emit('userStatusChanged', { userId, online: false });
+                                }
+                            })
+                            .catch(err => console.error(err));
                             break;
                         }
                     }

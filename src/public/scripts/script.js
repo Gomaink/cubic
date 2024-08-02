@@ -161,19 +161,22 @@ async function sendMessage(senderId, receiverId, message) {
 }
 
 socket.on('receiveMessage', function (data) {
-    const { user, userAvatar, message } = data;
+    const { user, userAvatar, message, room } = data;
     const chatContent = $('#chatContent');
     const shouldScrollToBottom = isChatScrolledToBottom();
+
+    // Verificar se a mensagem é para a sala atual
+    if (room !== currentRoom) {
+        return; // Não exibir mensagem se não estiver na sala correta
+    }
+
     let lastMessageContainer = chatContent.children('.message-container').last();
 
-    // Check if there is already a message container
     if (lastMessageContainer.length > 0) {
         const lastMessage = lastMessageContainer.find('.message').last();
         const lastSender = lastMessage.find('.user').text();
 
-        // Check if the last message sender is the same as the current message sender and it's not the initial load
         if (lastSender === user && !lastMessageContainer.hasClass('initial-load')) {
-            // Append to the last message container
             lastMessageContainer.append(`
                 <div class="message-conc">
                     <div>
@@ -182,7 +185,6 @@ socket.on('receiveMessage', function (data) {
                 </div>
             `);
         } else {
-            // Start a new message container
             const senderAvatar = message.sender === currentUserId ? avatarUrl : userAvatar.replace(/\\/g, '/');
             chatContent.append(`
                 <div class="message-container">
@@ -197,7 +199,6 @@ socket.on('receiveMessage', function (data) {
             `);
         }
     } else {
-        // No existing message containers, create a new one
         chatContent.append(`
             <div class="message-container initial-load">
                 <div class="message">
@@ -211,11 +212,11 @@ socket.on('receiveMessage', function (data) {
         `);
     }
 
-
     if (shouldScrollToBottom) {
         scrollToBottom();
     }
 });
+
 
 document.getElementById('messageInput').addEventListener('keypress', async function (e) {
     if (e.key === 'Enter' && this.value.trim() !== '') {
@@ -586,11 +587,13 @@ async function initializeCall() {
         let remoteAudioElement = null;
         const localStream = stream;
         let isMuted = false;
+        let isDeafened = false;
 
         peer.on('call', handleIncomingCall);
         document.getElementById('audioCallButton').addEventListener('click', initiateCall);
         document.getElementById('endCallButton').onclick = endCall;
         document.getElementById('muteButton').addEventListener('click', toggleMute);
+        document.getElementById('headphoneButton').addEventListener('click', toggleDeafen);
 
         function handleIncomingCall(call) {
             currentCall = call;
@@ -648,7 +651,13 @@ async function initializeCall() {
                 remoteAudioElement = new Audio();
                 remoteAudioElement.srcObject = remoteStream;
                 remoteAudioElement.play();
+
+                if (isDeafened) {
+                    remoteAudioElement.muted = true;
+                }
+
                 toggleCallButtons(true);
+                callingToast.hide();
             });
 
             call.on('close', () => {
@@ -662,6 +671,10 @@ async function initializeCall() {
                 call.close();
             };
         }
+
+        socket.on('disconnect', function() {
+            endCall();
+        });
 
         function endCall() {
             callingToast.hide();
@@ -710,6 +723,21 @@ async function initializeCall() {
                 }
             }
         }
+
+        function toggleDeafen() {
+            const icon = document.getElementById('headphoneButton').querySelector('i');
+            isDeafened = !isDeafened;
+        
+            if (remoteAudioElement) {
+                remoteAudioElement.muted = isDeafened;
+            }
+        
+            if (isDeafened) {
+                icon.style.color = '#FF6347';
+            } else {
+                icon.style.color = 'white';
+            }
+        }        
 
     } catch (err) {
         showErrorToast('Failed to get local stream', err);
