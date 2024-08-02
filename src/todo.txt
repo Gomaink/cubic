@@ -1,9 +1,5 @@
 TODO: Alterar a responsividade da sidebar, podendo expandi-la e comprimi-la em dispositivos menores.
 
-TODO: Criar tela de amizades, tendo três tabs uma "Amigos" em amigos terá toda a lista de amigos do usuário e um botão ao lado direito para remover
-Outra tab "Solicitações" onde vai ter um input e um botão para enviar solicitações, abaixo no caso os pedidos de amizade que o usuário recebeu, e um botão para Aceitar ou Negar
-Outra tab "Pendentes", abaixo no caso os pedidos de amizade que o usuário enviou e ao lado desses pedidos um botão para Remover a solicitação enviada.
-
 TODO: Ao clicar no seu avatar no dropup, abrir um modal com um "perfil" do usuário, tipo o discord.
 
 TODO: Ao clicar no nome de um amigo no chat, abrir um modal com um "perfil" do usuário, tipo o discord.
