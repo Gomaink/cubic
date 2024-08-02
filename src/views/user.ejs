@@ -7,7 +7,7 @@
     <link rel="icon" type="image/x-icon" href="/images/cubic-w-nobg.ico">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/css/user.css">
+    <link rel="stylesheet" href="/css/style-ucp.css">
 </head>
 <body>
 <div class="container mt-5">
@@ -35,7 +35,7 @@
                     <div class="overlay"><i class="fa-solid fa-pencil"></i></div>
                 </div>
                 <h3 id="avatar-user-nickname"><%= currentUser.nickname %></h3>
-                <input type="file" id="avatarInput" style="display: none;" accept="image/png, image/jpeg, image/jpg" onchange="handleFileSelect(event)">
+                <input class="user-input" type="file" id="avatarInput" style="display: none;" accept="image/png, image/jpeg, image/jpg" onchange="handleFileSelect(event)">
             </div>
             
             
@@ -43,7 +43,7 @@
                 <label>NOME DE EXIBIÇÃO</label>
                 <div class="d-flex justify-content-between align-items-center">
                     <span class="editable" data-field="nickname" id="user-nickname"><%= currentUser.nickname %></span>
-                    <input type="text" class="editable-input" data-field="nickname" value="<%= currentUser.nickname %>" style="display: none;">
+                    <input class="user-input" type="text" class="editable-input" data-field="nickname" value="<%= currentUser.nickname %>" style="display: none;">
                     <button class="btn btn-edit" onclick="toggleEdit('nickname')">Editar</button>
                     <button class="btn btn-save" data-field="nickname" style="display: none;" onclick="saveEdit('nickname')">Salvar</button>
                 </div>
@@ -53,7 +53,7 @@
                 <label>NOME DE USUÁRIO</label>
                 <div class="d-flex justify-content-between align-items-center">
                     <span class="editable" data-field="username" id="user-username"><%= currentUser.username %></span>
-                    <input type="text" class="editable-input" data-field="username" value="<%= currentUser.username %>" style="display: none;">
+                    <input class="user-input" type="text" class="editable-input" data-field="username" value="<%= currentUser.username %>" style="display: none;">
                     <button class="btn btn-edit" onclick="toggleEdit('username')">Editar</button>
                     <button class="btn btn-save" data-field="username" style="display: none;" onclick="saveEdit('username')">Salvar</button>
                 </div>
@@ -63,7 +63,7 @@
                 <label>E-MAIL</label>
                 <div class="d-flex justify-content-between align-items-center">
                     <span class="editable" data-field="email" id="user-email"><%= currentUser.email %></span>
-                    <input type="text" class="editable-input" data-field="email" value="<%= currentUser.email %>" style="display: none;">
+                    <input class="user-input" type="text" class="editable-input" data-field="email" value="<%= currentUser.email %>" style="display: none;">
                     <button class="btn btn-edit" onclick="toggleEdit('email')">Editar</button>
                     <button class="btn btn-save" data-field="email" style="display: none;" onclick="saveEdit('email')">Salvar</button>
                 </div>
@@ -73,7 +73,7 @@
                 <label>SENHA</label>
                 <div class="d-flex justify-content-between align-items-center">
                     <span class="editable" data-field="password" id="user-password">********</span>
-                    <input type="text" class="editable-input" data-field="password" value="" style="display: none;">
+                    <input class="user-input" type="text" class="editable-input" data-field="password" value="" style="display: none;">
                     <button class="btn btn-edit" onclick="toggleEdit('password')">Editar</button>
                     <button class="btn btn-save" data-field="password" style="display: none;" onclick="saveEdit('password')">Salvar</button>
                 </div>
@@ -113,7 +113,7 @@
             <form id="confirmPasswordForm">
                 <div class="mb-3">
                     <label for="currentPassword" class="form-label">Senha atual:</label>
-                    <input type="password" class="form-control bg-secondary text-light" id="currentPassword" required>
+                    <input class="user-input" type="password" class="form-control bg-secondary text-light" id="currentPassword" required>
                 </div>
                 <button type="button" class="btn btn-edit" onclick="verifyCurrentPassword(false)">Confirmar</button>
             </form>
@@ -132,7 +132,7 @@
             <form id="confirmDeleteAccountForm">
                 <div class="mb-3">
                     <label for="currentPassword" class="form-label">Senha atual:</label>
-                    <input type="password" class="form-control bg-secondary text-light" id="currentDeletePassword" required>
+                    <input class="user-input" type="password" class="form-control bg-secondary text-light" id="currentDeletePassword" required>
                 </div>
                 <button type="button" class="btn btn-delete" onclick="verifyCurrentPassword(true)">Confirmar</button>
             </form>

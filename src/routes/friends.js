@@ -4,8 +4,24 @@ const User = require('../models/User');
 const Friendship = require('../models/Friendship');
 const FriendRequest = require('../models/FriendRequest');
 
-//Get the list of friends
 router.get('/', async (req, res) => {
+    try {
+        if (!req.session.userId) {
+            return res.redirect("/auth/login");
+        }
+
+        const currentUser = await User.findById(req.session.userId);
+        console.log(currentUser);
+        return res.render('friends', { currentUser });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Erro interno do servidor');
+    }
+});
+
+//Get the list of friends
+router.get('/load-friends', async (req, res) => {
     try {
         const currentUser = await User.findById(req.session.userId);
         if (!currentUser) {
@@ -239,6 +255,43 @@ router.post('/respond-friend-request', async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Erro ao responder ao pedido de amizade. Tente novamente mais tarde.' });
+    }
+});
+
+// Rota para carregar as solicitações enviadas
+router.get('/load-requests', async (req, res) => {
+    try {
+        const currentUser = await User.findById(req.session.userId);
+        if (!currentUser) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        const requests = await FriendRequest.find({ requester: currentUser._id }).populate('recipient', 'username');
+
+        res.status(200).json({ requests });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Erro ao carregar as solicitações. Tente novamente mais tarde.' });
+    }
+});
+
+// Rota para remover uma solicitação de amizade
+router.delete('/remove-request/:requestId', async (req, res) => {
+    try {
+        const currentUser = await User.findById(req.session.userId);
+        if (!currentUser) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        const requestId = req.params.requestId;
+
+        // Remove the friend request
+        await FriendRequest.deleteOne({ _id: requestId, requester: currentUser._id });
+
+        res.status(200).json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Erro ao remover a solicitação. Tente novamente mais tarde.' });
     }
 });
 

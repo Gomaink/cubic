@@ -455,7 +455,7 @@ async function checkFriendRequests() {
 
 async function loadFriends() {
     try {
-        const response = await fetch('/friends', {
+        const response = await fetch('/friends/load-friends', {
             method: 'GET'
         });
 

@@ -165,21 +165,21 @@ p {
     font-family: "Montserrat", sans-serif;
 }
 
-input {
+.user-input input {
     color: #fff;
     background-color: transparent;
     border: 1px solid #2a3236;
     border-radius: 3px;
 }
   
-input:focus {
+.user-input input:focus {
     color: #fff;
     background-color: transparent;
     border: 1px solid #323d43;
     border-radius: 3px;
 }
 
-input[type=text] {
+.user-input input[type=text] {
     padding-left: 5px;
     margin: 8px 0;
     box-sizing: border-box;
@@ -222,4 +222,62 @@ input[type=text] {
 
 .btn-close-white {
     filter: invert(1); /* Torna o ícone do botão de fechar visível no fundo escuro */
+}
+
+/*FRIENDS*/
+.friend-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px;
+}
+.friend-info {
+    display: flex;
+    align-items: center;
+}
+.friend-avatar {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    margin-right: 10px;
+}
+.friend-nickname {
+    margin-right: 10px;
+}
+.friend-username {
+    color: #6c757d;
+}
+
+.request-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px;
+    border-bottom: 1px solid #ccc;
+}
+
+.request-buttons {
+    display: flex;
+    gap: 10px; /* Ajuste a distância entre os botões, se necessário */
+}
+
+.status-accepted {
+    color: #198754;
+}
+
+.status-pending {
+    color: #FDFD96;
+}
+
+.status-declined {
+    color: #FF6347;
+}
+
+.error-message {
+    color: #FF6347;
+    margin-bottom: 5px;
+}
+
+.input-group {
+    padding-bottom: 25px;
 }

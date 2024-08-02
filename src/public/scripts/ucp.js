@@ -287,3 +287,255 @@ async function verifyCurrentPassword(isDeleteAccount) {
         console.error('Erro:', error);
     }
 }
+
+//FRIENDS
+document.addEventListener("DOMContentLoaded", function() {
+    loadFriends();
+    loadRequests();
+    loadReceivedRequests();
+});
+
+async function loadFriends() {
+    try {
+        const response = await fetch('/friends/load-friends');
+        const data = await response.json();
+
+        if (response.ok) {
+            displayFriends(data.friends);
+        } else {
+            console.error('Erro ao carregar amigos:', data.error);
+        }
+    } catch (error) {
+        console.error('Erro ao carregar amigos:', error);
+    }
+}
+
+function displayFriends(friends) {
+    const friendList = document.getElementById('friend-list');
+    friendList.innerHTML = '';
+
+    friends.forEach(friend => {
+        const friendItem = document.createElement('div');
+        friendItem.className = 'friend-item';
+
+        const friendInfo = document.createElement('div');
+        friendInfo.className = 'friend-info';
+
+        const avatar = document.createElement('img');
+        avatar.className = 'friend-avatar';
+        avatar.src = friend.avatarUrl;
+        avatar.alt = 'Avatar';
+
+        const nickname = document.createElement('span');
+        nickname.className = 'friend-nickname';
+        nickname.innerText = friend.nickname;
+
+        const username = document.createElement('span');
+        username.className = 'friend-username';
+        username.innerText = ` • ${friend.username}`;
+
+        friendInfo.appendChild(avatar);
+        friendInfo.appendChild(nickname);
+        friendInfo.appendChild(username);
+
+        const removeButton = document.createElement('button');
+        removeButton.className = 'btn btn-delete';
+        removeButton.innerText = 'Remover';
+        removeButton.onclick = () => removeFriend(friend._id);
+
+        friendItem.appendChild(friendInfo);
+        friendItem.appendChild(removeButton);
+
+        friendList.appendChild(friendItem);
+    });
+}
+
+async function removeFriend(friendId) {
+    if (confirm('Tem certeza de que deseja remover este amigo?')) {
+        try {
+            const response = await fetch(`/friends/remove/${friendId}`, { method: 'DELETE' });
+            const data = await response.json();
+
+            if (response.ok) {
+                loadFriends();
+            } else {
+                console.error('Erro ao remover amigo:', data.error);
+            }
+        } catch (error) {
+            console.error('Erro ao remover amigo:', error);
+        }
+    }
+}
+
+
+//REQUESTS
+async function addFriend() {
+    const username = document.getElementById('friend-username').value;
+    const errorMessageElement = document.getElementById('error-message');
+    errorMessageElement.textContent = '';
+
+    if (!username) {
+        errorMessageElement.textContent = 'Por favor, insira um nome de usuário.';
+        return;
+    }
+
+    try {
+        const response = await fetch('/friends/add-friend', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ friendName: username })
+        });
+        const data = await response.json();
+
+        if (response.ok) {
+            loadRequests();
+            alert('Solicitação de amizade enviada.');
+        } else {
+            errorMessageElement.textContent = data.error || 'Erro ao adicionar amigo.';
+            console.error('Erro ao adicionar amigo:', data.error);
+        }
+    } catch (error) {
+        errorMessageElement.textContent = 'Erro ao adicionar amigo. Tente novamente mais tarde.';
+        console.error('Erro ao adicionar amigo:', error);
+    }
+}
+
+async function loadRequests() {
+    try {
+        const response = await fetch('/friends/load-requests');
+        const data = await response.json();
+
+        if (response.ok) {
+            displayRequests(data.requests);
+        } else {
+            console.error('Erro ao carregar solicitações:', data.error);
+        }
+    } catch (error) {
+        console.error('Erro ao carregar solicitações:', error);
+    }
+}
+
+async function loadReceivedRequests() {
+    try {
+        const response = await fetch('/friends/friend-list');
+        const data = await response.json();
+
+        if (response.ok) {
+            displayReceivedRequests(data.friendRequests);
+        } else {
+            console.error('Erro ao carregar solicitações recebidas:', data.error);
+        }
+    } catch (error) {
+        console.error('Erro ao carregar solicitações recebidas:', error);
+    }
+}
+
+function displayRequests(requests) {
+    const requestList = document.getElementById('request-list');
+    requestList.innerHTML = '';
+
+    requests.forEach(request => {
+        const requestItem = document.createElement('div');
+        requestItem.className = 'request-item';
+
+        const requestInfo = document.createElement('div');
+        let statusClass;
+        let statusText;
+        if (request.status === 'accepted') {
+            statusClass = 'status-accepted';
+            statusText = 'Aceito';
+        } else if (request.status === 'pending') {
+            statusClass = 'status-pending';
+            statusText = 'Pendente';
+        } else if (request.status === 'declined') {
+            statusClass = 'status-declined';
+            statusText = 'Negado';
+        }
+        requestInfo.innerHTML = `Usuário: ${request.recipient.username} • Status: <span class="${statusClass}">${statusText}</span>`;
+
+        const removeButton = document.createElement('button');
+        removeButton.className = 'btn btn-delete';
+        removeButton.innerText = 'Remover';
+        removeButton.onclick = () => removeRequest(request._id);
+
+        requestItem.appendChild(requestInfo);
+        requestItem.appendChild(removeButton);
+
+        requestList.appendChild(requestItem);
+    });
+}
+
+function displayReceivedRequests(friendRequests) {
+    const receivedRequestList = document.getElementById('received-request-list');
+    receivedRequestList.innerHTML = '';
+
+    friendRequests.forEach(request => {
+        const requestItem = document.createElement('div');
+        requestItem.className = 'request-item';
+
+        const requestInfo = document.createElement('div');
+        requestInfo.innerHTML = `De: ${request.requester.username}`;
+
+        const requestButtons = document.createElement('div');
+        requestButtons.className = 'request-buttons';
+
+        const acceptButton = document.createElement('button');
+        acceptButton.className = 'btn btn-save';
+        acceptButton.innerText = 'Aceitar';
+        acceptButton.onclick = () => respondRequest(request._id, 'accept');
+
+        const rejectButton = document.createElement('button');
+        rejectButton.className = 'btn btn-delete';
+        rejectButton.innerText = 'Recusar';
+        rejectButton.onclick = () => respondRequest(request._id, 'reject');
+
+        requestButtons.appendChild(acceptButton);
+        requestButtons.appendChild(rejectButton);
+
+        requestItem.appendChild(requestInfo);
+        requestItem.appendChild(requestButtons);
+
+        receivedRequestList.appendChild(requestItem);
+    });
+}
+
+async function respondRequest(requestId, action) {
+    try {
+        const response = await fetch('/friends/respond-friend-request', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ requestId, action })
+        });
+        const data = await response.json();
+
+        if (response.ok) {
+            loadReceivedRequests();
+            alert(`Solicitação de amizade ${action === 'accept' ? 'aceita' : 'recusada'}.`);
+        } else {
+            console.error('Erro ao responder solicitação:', data.error);
+        }
+    } catch (error) {
+        console.error('Erro ao responder solicitação:', error);
+    }
+}
+
+async function removeRequest(requestId) {
+    if (confirm('Tem certeza de que deseja remover esta solicitação de amizade?')) {
+        try {
+            const response = await fetch(`/friends/remove-request/${requestId}`, { method: 'DELETE' });
+            const data = await response.json();
+
+            if (response.ok) {
+                loadRequests();
+            } else {
+                console.error('Erro ao remover solicitação:', data.error);
+            }
+        } catch (error) {
+            console.error('Erro ao remover solicitação:', error);
+        }
+    }
+}
