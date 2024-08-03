@@ -52,8 +52,8 @@
                         <i id="friendRequestsNotification" class="fa-regular fa-bell" style="display: none; margin-left: 5px;"></i>
                     </button>
                     <ul class="dropdown-menu">
-                        <li><a class="dropdown-item" href="/user"><i class="fa-solid fa-gear" style="margin-right: 10px;"></i>Configurações</a></li>
-                        <li><a class="dropdown-item" href="/friends"><i class="fa-solid fa-user-group" style="margin-right: 10px;"></i>Amizades</a></li>
+                        <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#settingsModal"><i class="fa-solid fa-gear" style="margin-right: 10px;"></i>Configurações</a></li>
+                        <li><a class="dropdown-item" href="#" id="friendsDropdown" data-bs-toggle="modal" data-bs-target="#friendsModal"><i class="fa-solid fa-user-group" style="margin-right: 10px;"></i>Amizades</a></li>
                         <li><hr class="dropdown-divider" style="color: #fff; background-color: #fff;"></li>
                         <li><a class="dropdown-item" href="/auth/logout"><i class="fa-solid fa-right-from-bracket" style="margin-right: 10px;"></i>Desconectar</a></li>
                     </ul>
@@ -64,7 +64,7 @@
     
         <div class="chat-area">
             <div class="chat-nav d-flex justify-content-between align-items-center">
-                <a class="chatTitle align-items-center friend-item" id="chatTitle" style="display: none;">
+                <a class="chatTitle align-items-center" id="chatTitle" style="display: none;">
                     <img class="friend-avatar me-2" src="/images/cubic-w.jpeg" id="chatAvatar" alt="Avatar"> 
                     <span id="chatUsername">username</span>
                 </a>
@@ -124,6 +124,192 @@
         <div class="toast-body">
             <p>Você está tentando ligar para <a id="calleeUsername" style="outline: none; color: #fff;"></a>.</p>
             <button class="btn btn-secondary btn-sm" data-bs-dismiss="toast" id="rejectCallButton">Desligar</button>
+        </div>
+    </div>
+
+    <div class="modal fade" id="settingsModal" tabindex="-1" aria-labelledby="settingsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="settingsModalLabel">Configurações</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="container">
+                        <ul class="nav nav-tabs nav-options" id="myTab" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" id="home-tab" data-bs-toggle="tab" data-bs-target="#home" type="button" role="tab" aria-controls="home" aria-selected="true">Minha conta</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="audio-tab" data-bs-toggle="tab" data-bs-target="#audio" type="button" role="tab" aria-controls="audio" aria-selected="true">Voz e vídeo</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="appearance-tab" data-bs-toggle="tab" data-bs-target="#appearance" type="button" role="tab" aria-controls="appearance" aria-selected="false">Aparência</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="contact-tab" data-bs-toggle="tab" data-bs-target="#contact" type="button" role="tab" aria-controls="contact" aria-selected="false">Assinaturas</button>
+                            </li>
+                        </ul>
+                        <div class="tab-content" id="myTabContent">
+                            <div class="tab-pane fade show active" id="home" role="tabpanel" aria-labelledby="home-tab">
+                    
+                                <div class="account-avatar">
+                                    <div class="avatar-container" onclick="document.getElementById('avatarInput').click();">
+                                        <img id="avatarImg" src="<%= currentUser.avatarUrl || '/images/cubic-w.jpeg' %>" alt="Avatar" width="80" height="80">
+                                        <div class="overlay"><i class="fa-solid fa-pencil"></i></div>
+                                    </div>
+                                    <h3 id="avatar-user-nickname"><%= currentUser.nickname %></h3>
+                                    <input class="user-input" type="file" id="avatarInput" style="display: none;" accept="image/png, image/jpeg, image/jpg" onchange="handleFileSelect(event)">
+                                </div>
+                                
+                                
+                                <div class="account-section">
+                                    <label>NOME DE EXIBIÇÃO</label>
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <span class="editable" data-field="nickname" id="user-nickname"><%= currentUser.nickname %></span>
+                                        <input class="user-input editable-input" data-field="nickname" value="<%= currentUser.nickname %>" style="display: none;">
+                                        <button class="btn btn-edit" onclick="toggleEdit('nickname')">Editar</button>
+                                        <button class="btn btn-save" data-field="nickname" style="display: none;" onclick="saveEdit('nickname')">Salvar</button>
+                                    </div>
+                                </div>
+                                
+                                <div class="account-section">
+                                    <label>NOME DE USUÁRIO</label>
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <span class="editable" data-field="username" id="user-username"><%= currentUser.username %></span>
+                                        <input class="user-input editable-input" data-field="username" value="<%= currentUser.username %>" style="display: none;">
+                                        <button class="btn btn-edit" onclick="toggleEdit('username')">Editar</button>
+                                        <button class="btn btn-save" data-field="username" style="display: none;" onclick="saveEdit('username')">Salvar</button>
+                                    </div>
+                                </div>
+                                
+                                <div class="account-section">
+                                    <label>E-MAIL</label>
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <span class="editable" data-field="email" id="user-email"><%= currentUser.email %></span>
+                                        <input class="user-input editable-input" data-field="email" value="<%= currentUser.email %>" style="display: none;">
+                                        <button class="btn btn-edit" onclick="toggleEdit('email')">Editar</button>
+                                        <button class="btn btn-save" data-field="email" style="display: none;" onclick="saveEdit('email')">Salvar</button>
+                                    </div>
+                                </div>
+                                
+                                <div class="account-section">
+                                    <label>SENHA</label>
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <span class="editable" data-field="password" id="user-password">********</span>
+                                        <input class="user-input editable-input" data-field="password" value="" style="display: none;">
+                                        <button class="btn btn-edit" onclick="toggleEdit('password')">Editar</button>
+                                        <button class="btn btn-save" data-field="password" style="display: none;" onclick="saveEdit('password')">Salvar</button>
+                                    </div>
+                                </div>  
+                                <hr> 
+                                <div class="account-section">
+                                    <label>DELETAR CONTA</label>
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <span>Delete sua conta com apenas um clique.</span>
+                                        <button class="btn btn-delete" onclick="saveEdit('delete')">Deletar conta</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="tab-pane fade" id="audio" role="tabpanel" aria-labelledby="audio-tab">
+                                <h2>Em desenvolvimento...</h2>
+                                <!-- Conteúdo dos Projetos -->
+                            </div>
+                            <div class="tab-pane fade" id="appearance" role="tabpanel" aria-labelledby="appearance-tab">
+                                <h2>Em desenvolvimento...</h2>
+                                <!-- Conteúdo dos Projetos -->
+                            </div>
+                            <div class="tab-pane fade" id="contact" role="tabpanel" aria-labelledby="contact-tab">
+                                <h2>Em desenvolvimento...</h2>
+                                <!-- Conteúdo das Assinaturas -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Toast para Confirmar Senha Atual -->
+                    <div class="toast-container position-fixed top-50 start-50 translate-middle p-3" style="z-index: 1050;">
+                        <div id="confirmPasswordToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+                            <div class="toast-header bg-dark text-light">
+                                <span class="me-auto">Confirmar Senha Atual</span>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+                            </div>
+                            <div class="toast-body bg-dark text-light">
+                                <form id="confirmPasswordForm">
+                                    <div class="mb-3">
+                                        <label for="currentPassword" class="form-label">Senha atual:</label>
+                                        <input class="user-input" type="password" class="confirm-password form-control bg-secondary text-light" id="currentPassword" required>
+                                    </div>
+                                    <button type="button" class="btn btn-edit" onclick="verifyCurrentPassword(false)">Confirmar</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Toast para Confirmar Senha Atual -->
+                    <div class="toast-container position-fixed top-50 start-50 translate-middle p-3" style="z-index: 1050;">
+                        <div id="confirmDeleteAccountToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+                            <div class="toast-header bg-dark text-light">
+                                <span class="me-auto">Confirmar Senha Atual</span>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+                            </div>
+                            <div class="toast-body bg-dark text-light">
+                                <form id="confirmDeleteAccountForm">
+                                    <div class="mb-3">
+                                        <label for="currentPassword" class="form-label">Senha atual:</label>
+                                        <input class="user-input" type="password" class="confirm-password form-control bg-secondary text-light" id="currentDeletePassword" required>
+                                    </div>
+                                    <button type="button" class="btn btn-delete" onclick="verifyCurrentPassword(true)">Confirmar</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="friendsModal" tabindex="-1" aria-labelledby="friendsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="friendsModalLabel">Amizades</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="container">
+                        <ul class="nav nav-tabs nav-options" id="myTab" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" id="friends-tab" data-bs-toggle="tab" data-bs-target="#friends" type="button" role="tab" aria-controls="friends" aria-selected="true">Amigos</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="requests-tab" data-bs-toggle="tab" data-bs-target="#requests" type="button" role="tab" aria-controls="requests" aria-selected="true">Solicitações</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="pending-tab" data-bs-toggle="tab" data-bs-target="#pending" type="button" role="tab" aria-controls="pending" aria-selected="false">Pendentes</button>
+                            </li>
+                        </ul>
+                        <div class="tab-content" id="myTabContent">
+                            <div class="tab-pane fade show active" id="friends" role="tabpanel" aria-labelledby="friends-tab">
+                                <h3>Amigos</h3>
+                                <div id="friend-list"></div>
+                            </div>
+                            <div class="tab-pane fade" id="requests" role="tabpanel" aria-labelledby="requests-tab">
+                                <div class="input-group">
+                                    <input type="text" id="friend-username" class="form-control" placeholder="Nome de usuário">
+                                    <button class="btn btn-outline-secondary" type="button" onclick="addFriend()">Adicionar Amigo</button>
+                                </div>
+                                <div id="error-message" class="error-message"></div>
+                                <h3>Solicitações enviadas</h3>
+                                <div id="request-list"></div>
+                            </div>
+                            <div class="tab-pane fade" id="pending" role="tabpanel" aria-labelledby="pending-tab">
+                                <h3>Solicitações recebidas</h3>
+                                <div id="received-request-list"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

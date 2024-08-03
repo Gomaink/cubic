@@ -264,7 +264,7 @@ body, html {
 }
 
 .modal-content {
-  background-color: #0f1013;
+  background-color: #181b1e;
   color: #dad9d9;
 }
 
@@ -575,71 +575,279 @@ body, html {
   width: 100%;
 }
 
-/*range audio control*/
+/*==========================[DROPUP CONFIGURATIONS*==========================*/
+.container {
+    max-width: 800px;
+    margin: auto;}
 
-input[type="range"]::-webkit-slider-runnable-track {
-  width: 100%;
-  height: 8px;
-  cursor: pointer;
-  animate: 0.2s;
-  background: #525252; /* Cor da barra */
-  border-radius: 4px;
+.container h1 {
+    color: #fff;
+    font-family: "Montserrat", sans-serif;
+    font-size: 17px;
 }
 
-/* Estiliza a bolinha do slider no Webkit (Chrome, Safari, etc.) */
-input[type="range"]::-webkit-slider-thumb {
-  height: 20px;
-  width: 20px;
-  border-radius: 10px;
-  background: rgb(145, 145, 145); /* Cor da bolinha */
-  cursor: pointer;
-  -webkit-appearance: none;
-  margin-top: -6px; /* Ajusta a posição vertical da bolinha */
+h1 {
+    text-align: center;
+    margin-bottom: 30px;
 }
 
-/* Estiliza a barra do slider no Firefox */
-input[type="range"]::-moz-range-track {
-  width: 100%;
-  height: 8px;
-  cursor: pointer;
-  background: #525252; /* Cor da barra */
-  border-radius: 4px;
+.nav-tabs .nav-link {
+    color: #fff;
+    background-color: transparent;
+    border-color: #444;
+    margin-right: 10px;
 }
 
-/* Estiliza a bolinha do slider no Firefox */
-input[type="range"]::-moz-range-thumb {
-  height: 20px;
-  width: 20px;
-  border-radius: 10px;
-  background: rgb(145, 145, 145); /* Cor da bolinha */
-  cursor: pointer;
+.nav-options {
+  border-bottom: transparent;
 }
 
-/* Estiliza a barra do slider no IE */
-input[type="range"]::-ms-track {
-  width: 100%;
-  height: 8px;
-  cursor: pointer;
-  background: transparent; 
-  border-color: transparent;
-  color: transparent;
+.nav-tabs .nav-link.active {
+    color: #fff;
+    background-color: rgba(68, 68, 68, 0.2);
+    border-color: #444;
 }
 
-input[type="range"]::-ms-fill-lower {
-  background: #525252; /* Cor da barra */
-  border-radius: 4px;
+.nav-tabs .nav-link:hover {
+    background-color: rgba(0, 0, 0, 0.1)
 }
 
-input[type="range"]::-ms-fill-upper {
-  background: #525252; /* Cor da barra */
-  border-radius: 4px;
+.tab-content {
+    background-color: transparent;
+    padding: 20px;
+    border: 1px solid #444;
+    border-top: none;
+    border-radius: 0 0 5px 5px;
+    margin-top: -1px;
+    color: #fff;
 }
 
-/* Estiliza a bolinha do slider no IE */
-input[type="range"]::-ms-thumb {
-  height: 20px;
-  width: 20px;
-  border-radius: 10px;
-  background: rgb(145, 145, 145); /* Cor da bolinha */
-  cursor: pointer;
+p {
+    font-size: 14px;
+    margin: 5px 0;
+}
+
+.account-section {
+    padding: 5px;
+}
+
+.account-section:last-child {
+    border-bottom: none;
+}
+
+.account-section label {
+    color: #85898f;
+    font-weight: 900;
+    font-size: 14px;
+}
+
+.account-section span {
+    font-family: "Montserrat", sans-serif;
+}
+
+.account-avatar {
+    display: flex;
+    align-items: center;
+    margin-bottom: 20px;
+    position: relative; /* Garante que a sobreposição seja posicionada corretamente */
+}
+
+.avatar-container {
+    position: relative; /* Necessário para a sobreposição dentro deste contêiner */
+}
+
+.account-avatar img {
+    border-radius: 50%;
+    margin-right: 20px;
+    height: 70px;
+    width: 70px;
+    display: block;
+}
+
+.overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 70px;
+    height: 70px;
+    background: rgba(0, 0, 0, 0.5); /* Fundo semitransparente */
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    opacity: 0;
+    transition: opacity 0.3s;
+    border-radius: 50%; /* Mantém a borda arredondada da sobreposição */
+    cursor: pointer;
+}
+
+.avatar-container:hover .overlay {
+    opacity: 1;
+}
+
+
+.btn-edit {
+    border: 1px solid #85898f; 
+    background-color: transparent;
+    border-radius: 5px;
+    color: #fff;
+    font-family: "Montserrat", sans-serif;
+}
+
+.btn-edit:hover {
+    border: 1px solid #85898f; 
+    background-color: #85898f;
+    border-radius: 5px;
+    color: #fff;
+    font-family: "Montserrat", sans-serif;
+}
+
+.btn-delete {
+    border: 1px solid #FF6347; 
+    background-color: transparent;
+    border-radius: 5px;
+    color: #fff;
+    font-family: "Montserrat", sans-serif;
+}
+
+.btn-delete:hover {
+    border: 1px solid #FF6347; 
+    background-color: #FF6347;
+    border-radius: 5px;
+    color: #fff;
+    font-family: "Montserrat", sans-serif;
+}
+
+.btn-save {
+    border: 1px solid #198754; 
+    background-color: transparent;
+    border-radius: 5px;
+    color: #fff;
+    font-family: "Montserrat", sans-serif;
+}
+
+.btn-save:hover {
+    border: 1px solid #198754; 
+    background-color: #198754;
+    border-radius: 5px;
+    color: #fff;
+    font-family: "Montserrat", sans-serif;
+}
+
+.user-input {
+    color: #fff;
+    background-color: transparent;
+    border: 1px solid #2a3236;
+    border-radius: 3px;
+}
+  
+.user-input input:focus {
+    color: #fff;
+    background-color: transparent;
+    border: 1px solid #323d43;
+    border-radius: 3px;
+}
+
+.user-input input[type=text] {
+    padding-left: 5px;
+    margin: 8px 0;
+    box-sizing: border-box;
+}
+
+/* Estilos para o toast em tema escuro */
+.toast-container {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1050; /* Certifique-se de que o toast está acima de outros elementos */
+}
+
+.toast {
+    min-width: 300px; /* Ajuste conforme necessário */
+    background-color: #343a40; /* Fundo do toast */
+    color: #f8f9fa; /* Cor do texto */
+}
+
+.toast-header {
+    background-color: #495057; /* Fundo do cabeçalho do toast */
+    color: #f8f9fa; /* Cor do texto do cabeçalho */
+}
+
+.toast-body {
+    background-color: #343a40; /* Fundo do corpo do toast */
+    color: #f8f9fa; /* Cor do texto do corpo */
+}
+
+.confirm-password {
+    background-color: #495057; /* Fundo do input */
+    color: #f8f9fa; /* Cor do texto do input */
+}
+
+.btn-primary {
+    background-color: #007bff; /* Cor do botão */
+    border-color: #007bff; /* Borda do botão */
+}
+
+.btn-close-white {
+    filter: invert(1); /* Torna o ícone do botão de fechar visível no fundo escuro */
+}
+
+/*FRIENDS*/
+.friend-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px;
+}
+.friend-info {
+    display: flex;
+    align-items: center;
+}
+.friend-avatar {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    margin-right: 10px;
+}
+.friend-nickname {
+    margin-right: 10px;
+}
+.friend-username {
+    color: #6c757d;
+}
+
+.request-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px;
+    border-bottom: 1px solid #ccc;
+}
+
+.request-buttons {
+    display: flex;
+    gap: 10px; /* Ajuste a distância entre os botões, se necessário */
+}
+
+.status-accepted {
+    color: #198754;
+}
+
+.status-pending {
+    color: #FDFD96;
+}
+
+.status-declined {
+    color: #FF6347;
+}
+
+.error-message {
+    color: #FF6347;
+    margin-bottom: 5px;
+}
+
+.input-group {
+    padding-bottom: 25px;
 }
