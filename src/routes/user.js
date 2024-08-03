@@ -35,22 +35,6 @@ const upload = multer({
     }
 });
 
-router.get('/', async (req, res) => {
-    try {
-        if (!req.session.userId) {
-            return res.redirect("/auth/login");
-        }
-
-        const currentUser = await User.findById(req.session.userId);
-        console.log(currentUser);
-        return res.render('user', { currentUser });
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).send('Erro interno do servidor');
-    }
-});
-
 //Update a user username
 router.post('/update-username', async (req, res) => {
     const { userId, newUsername } = req.body;

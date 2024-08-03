@@ -4,22 +4,6 @@ const User = require('../models/User');
 const Friendship = require('../models/Friendship');
 const FriendRequest = require('../models/FriendRequest');
 
-router.get('/', async (req, res) => {
-    try {
-        if (!req.session.userId) {
-            return res.redirect("/auth/login");
-        }
-
-        const currentUser = await User.findById(req.session.userId);
-        console.log(currentUser);
-        return res.render('friends', { currentUser });
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).send('Erro interno do servidor');
-    }
-});
-
 //Get the list of friends
 router.get('/load-friends', async (req, res) => {
     try {
