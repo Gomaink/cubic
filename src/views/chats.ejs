@@ -141,7 +141,7 @@
                                 <button class="nav-link active" id="home-tab" data-bs-toggle="tab" data-bs-target="#home" type="button" role="tab" aria-controls="home" aria-selected="true">Minha conta</button>
                             </li>
                             <li class="nav-item" role="presentation">
-                                <button class="nav-link" id="audio-tab" data-bs-toggle="tab" data-bs-target="#audio" type="button" role="tab" aria-controls="audio" aria-selected="true">Voz e vídeo</button>
+                                <button class="nav-link" id="audio-tab" data-bs-toggle="tab" data-bs-target="#audio" type="button" role="tab" aria-controls="audio" aria-selected="true">Entrada e saída</button>
                             </li>
                             <li class="nav-item" role="presentation">
                                 <button class="nav-link" id="appearance-tab" data-bs-toggle="tab" data-bs-target="#appearance" type="button" role="tab" aria-controls="appearance" aria-selected="false">Aparência</button>
@@ -212,8 +212,26 @@
                                 </div>
                             </div>
                             <div class="tab-pane fade" id="audio" role="tabpanel" aria-labelledby="audio-tab">
-                                <h2>Em desenvolvimento...</h2>
-                                <!-- Conteúdo dos Projetos -->
+                                <div id="audio-settings">
+                                    <!-- Dispositivo de entrada -->
+                                    <div class="audio-device">
+                                        <label for="input-device">DISPOSITIVO DE ENTRADA:</label>
+                                        <select id="input-device" class="form-select"></select>
+                                    </div>
+                                    <div class="volume-control">
+                                        <label for="input-volume">Volume do dispositivo:</label>
+                                        <input class="device-volume" type="range" id="input-volume" min="0" max="100" step="1">
+                                    </div>
+                                    <!-- Dispositivo de saída -->
+                                    <div class="audio-device">
+                                        <label for="output-device">DISPOSITIVO DE SAÍDA:</label>
+                                        <select id="output-device" class="form-select"></select>
+                                    </div>
+                                    <div class="volume-control">
+                                        <label for="output-volume">Volume do dispositivo:</label>
+                                        <input class="device-volume" type="range" id="output-volume" min="0" max="100" step="1">
+                                    </div>
+                                </div>
                             </div>
                             <div class="tab-pane fade" id="appearance" role="tabpanel" aria-labelledby="appearance-tab">
                                 <h2>Em desenvolvimento...</h2>

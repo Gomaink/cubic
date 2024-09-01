@@ -7,6 +7,7 @@ const User = require('../models/User');
 const FriendRequest = require('../models/FriendRequest');
 const Token = require('../models/Token');
 const Friendship = require('../models/Friendship');
+const UserConfigs = require('../models/UserConfigs');
 
 // Configuração do Multer para fazer upload de avatares
 const storage = multer.diskStorage({
@@ -87,17 +88,14 @@ router.post('/upload-avatar', upload.single('avatar'), async (req, res, next) =>
             return res.status(404).json({ error: 'Usuário não encontrado.' });
         }
 
-        // Obtém o caminho absoluto do avatar no sistema de arquivos
         const avatarPath = req.file.path;
 
-        // Excluir o avatar anterior se existir
         if (currentUser.avatarUrl) {
             const oldAvatarPath = path.join(__dirname, '..', 'public', currentUser.avatarUrl);
-            fs.unlinkSync(oldAvatarPath); // Exclui o arquivo do sistema de arquivos
+            fs.unlinkSync(oldAvatarPath); 
         }
 
-        // Atualize o campo do caminho do avatar no documento do usuário
-        currentUser.avatarUrl = avatarPath.replace('public\\', ''); // Salva o caminho sem o prefixo 'public/'
+        currentUser.avatarUrl = avatarPath.replace('public\\', ''); 
         await currentUser.save();
 
         res.json({ success: true, avatarUrl: currentUser.avatarUrl });
@@ -114,7 +112,6 @@ router.post('/update-email', async (req, res) => {
     try {
         const userId = await User.findById(req.session.userId);
 
-        // Verifica se o novo e-mail já está em uso
         const existingUser = await User.findOne({ email: newEmail });
         if (existingUser && existingUser._id.toString() !== userId) {
             return res.status(400).json({ error: 'O e-mail já está em uso.' });
@@ -233,19 +230,15 @@ router.post('/delete-account', async (req, res) => {
             return res.status(401).json({ error: 'Senha atual incorreta.' });
         }
 
-        // Delete friend requests where the user is requester or recipient
         await FriendRequest.deleteMany({
             $or: [{ requester: userId }, { recipient: userId }]
         });
 
-        // Delete tokens associated with the user
         await Token.deleteMany({ userId: userId });
 
-        // Delete friendships where the user is involved
         await Friendship.deleteMany({ user: userId });
         await Friendship.updateMany({ friends: userId }, { $pull: { friends: userId } });
 
-        // Delete the user
         await user.deleteOne();
 
         res.status(200).json({ success: true, message: 'Conta deletada com sucesso.' });
@@ -255,5 +248,40 @@ router.post('/delete-account', async (req, res) => {
     }
 });
 
+router.post('/configs/save', async (req, res) => {
+    const { userId, inputVolume, outputVolume } = req.body;
+
+    try {
+        let userConfig = await UserConfigs.findOne({ userId });
+
+        if (userConfig) {
+            userConfig.inputVolume = inputVolume;
+            userConfig.outputVolume = outputVolume;
+        } else {
+            userConfig = new UserConfigs({ userId, inputVolume, outputVolume });
+        }
+
+        await userConfig.save();
+        res.status(200).json({ success: true, message: 'Configurações salvas com sucesso!' });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+router.get('/configs/:userId', async (req, res) => {
+    const { userId } = req.params;
+
+    try {
+        const userConfig = await UserConfigs.findOne({ userId });
+
+        if (userConfig) {
+            res.status(200).json(userConfig);
+        } else {
+            res.status(404).json({ success: false, message: 'Configurações não encontradas.' });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
 
 module.exports = router;

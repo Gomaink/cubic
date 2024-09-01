@@ -17,10 +17,8 @@ router.get('/load-friends', async (req, res) => {
             return res.status(200).json({ friends: [] });
         }
 
-        // Busca detalhes completos de cada amigo, incluindo avatarUrl, usando o modelo User
         const friends = await User.find({ _id: { $in: friendship.friends } }).select('_id username avatarUrl nickname online peerid');
 
-        // Preenche avatarUrl com a imagem padrão se for undefined
         friends.forEach(friend => {
             friend.avatarUrl = friend.avatarUrl || '/images/cubic-w.jpeg';
         });
@@ -48,15 +46,12 @@ router.get('/friend-data/:friendId', async (req, res) => {
             return res.status(404).json({ error: 'Amizade não encontrada.' });
         }
 
-        // Verificar se o friendId faz parte da lista de amigos do usuário
         if (!friendship.friends.includes(friendId)) {
             return res.status(404).json({ error: 'Amigo não encontrado.' });
         }
 
-        // Buscar os detalhes completos do amigo, incluindo avatarUrl
         const friend = await User.findById(friendId).select('_id username avatarUrl nickname online peerid');
 
-        // Preencher avatarUrl com a imagem padrão se for undefined
         friend.avatarUrl = friend.avatarUrl || '/images/cubic-w.jpeg';
 
         res.status(200).json({ friend });
@@ -143,13 +138,11 @@ router.delete('/remove/:friendId', async (req, res) => {
 
         const friendId = req.params.friendId;
 
-        // Remove friendId from currentUser's friends list
         await Friendship.updateOne(
             { user: currentUser._id },
             { $pull: { friends: friendId } }
         );
 
-        // Remove currentUser from friendId's friends list
         await Friendship.updateOne(
             { user: friendId },
             { $pull: { friends: currentUser._id } }
@@ -269,7 +262,6 @@ router.delete('/remove-request/:requestId', async (req, res) => {
 
         const requestId = req.params.requestId;
 
-        // Remove the friend request
         await FriendRequest.deleteOne({ _id: requestId, requester: currentUser._id });
 
         res.status(200).json({ success: true });

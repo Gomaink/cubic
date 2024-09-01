@@ -799,6 +799,47 @@ p {
     filter: invert(1); /* Torna o ícone do botão de fechar visível no fundo escuro */
 }
 
+#audio-settings {
+  margin-top: 20px;
+}
+
+.audio-device, .volume-control {
+  margin-bottom: 15px;
+}
+
+.device-volume {
+  width: 100%;
+}
+
+.audio-device label {
+  color: #85898f;
+  font-weight: 900;
+  font-size: 14px;
+}
+
+.audio-device select.form-select {
+  color: #fff;
+  width: 100%;
+  padding: 0.375rem 1.75rem 0.375rem 0.75rem;
+  font-size: 1rem;
+  line-height: 1.5;
+  border: 1px solid #ced4da;
+  border-radius: 0.25rem;
+  appearance: none;
+  background: url('data:image/svg+xml;charset=UTF-8,%3csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 5"%3e%3cpath fill="%23999" d="M2 0L0 2h4zM2 5L0 3h4z"/%3e%3c/svg%3e') no-repeat right 0.75rem center/8px 10px;
+}
+
+option {
+  color: #fff;
+  background-color: #181b1e;
+}
+
+.audio-device select.form-select:focus {
+  border-color: #86b7fe;
+  outline: 0;
+  box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+
 /*FRIENDS*/
 .friend-item {
     display: flex;

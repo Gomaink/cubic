@@ -38,13 +38,11 @@ router.post('/login', async (req, res) => {
     const { email, password } = req.body;
 
     try {
-        // Email or username match
         const user = await User.findOne({ $or: [{ email }, { username: email }] });
         if (!user) {
             return res.render('login', { error: 'E-mail ou senha incorretos.' });
         }
 
-        // Password verify
         const isPasswordValid = await user.comparePassword(password);
         if (!isPasswordValid) {
             return res.render('login', { error: 'E-mail ou senha incorretos.' });
@@ -128,28 +126,23 @@ router.post('/forgot-password', async (req, res) => {
             return res.json({ error: 'E-mail não cadastrado.' });
         }
 
-        // Verifica se existe um token ativo para o usuário
         const existingToken = await Token.findOne({
             userId: user._id,
             expiration: { $gt: Date.now() }
         });
 
         if (existingToken) {
-            // Se existir, retorna um erro indicando que já há um pedido ativo
             return res.json({ error: 'Já há um pedido de redefinição de senha ativo para este usuário.' });
         }
 
-        // Deleta qualquer token expirado para o usuário
         await Token.deleteMany({
             userId: user._id,
             expiration: { $lte: Date.now() }
         });
 
-        // Gera um novo token e define uma data de expiração
         const token = crypto.randomBytes(32).toString('hex');
-        const expiration = Date.now() + 3600000; // Token válido por 1 hora
+        const expiration = Date.now() + 3600000;
 
-        // Salva o novo token no banco de dados
         await new Token({
             userId: user._id,
             token,

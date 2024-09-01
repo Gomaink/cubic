@@ -4,3 +4,4 @@ todo.todo
 src/cert.pem
 src/csr.pem
 src/key.pem
+src/public/uploads/avatars/

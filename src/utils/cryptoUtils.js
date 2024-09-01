@@ -1,8 +1,8 @@
 const crypto = require('crypto');
-require('dotenv').config(); // Carregar variáveis de ambiente do arquivo .env
+require('dotenv').config();
 
 const algorithm = 'aes-256-ctr';
-const secretKey = Buffer.from(process.env.SECRET_KEY, 'hex'); // Ler a chave do .env
+const secretKey = Buffer.from(process.env.SECRET_KEY, 'hex'); 
 
 const encrypt = (text) => {
     const iv = crypto.randomBytes(16);

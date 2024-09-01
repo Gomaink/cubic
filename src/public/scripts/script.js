@@ -15,7 +15,6 @@ let currentFriendAvatar = '';
 let friendToRemove = null;
 let currentRoomPeerIds = '';
 
-
 //=========================[USER FUNCTIONS]=========================//
 
 socket.on('userStatusChanged', (data) => {
@@ -1013,9 +1012,9 @@ async function initializeCall() {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         let currentCall = null;
         let remoteAudioElement = null;
-        const localStream = stream;
         let isMuted = false;
         let isDeafened = false;
+        let localStream = stream;
 
         peer.on('call', handleIncomingCall);
         document.getElementById('audioCallButton').addEventListener('click', initiateCall);
@@ -1178,6 +1177,111 @@ if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     showErrorToast('Seu navegador não suporta a API getUserMedia.');
 }
 
+document.addEventListener('DOMContentLoaded', function() {
+    const inputDeviceSelect = document.getElementById('input-device');
+    const outputDeviceSelect = document.getElementById('output-device');
+    const inputVolumeControl = document.getElementById('input-volume');
+    const outputVolumeControl = document.getElementById('output-volume');
+
+    // Preencher dispositivos de áudio
+    navigator.mediaDevices.enumerateDevices()
+        .then(devices => {
+            devices.forEach(device => {
+                if (device.kind === 'audioinput') {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.text = device.label || `Microfone ${inputDeviceSelect.length + 1}`;
+                    inputDeviceSelect.appendChild(option);
+                } else if (device.kind === 'audiooutput') {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.text = device.label || `Alto-falante ${outputDeviceSelect.length + 1}`;
+                    outputDeviceSelect.appendChild(option);
+                }
+            });
+        });
+
+    // Controlar volume do dispositivo de entrada
+    inputVolumeControl.addEventListener('input', function() {
+        if (localStream) {
+            const audioTracks = localStream.getAudioTracks();
+            if (audioTracks.length > 0) {
+                audioTracks[0].applyConstraints({
+                    volume: inputVolumeControl.value / 100
+                });
+                saveUserConfigs(userId, document.getElementById('inputVolume').value, this.value);
+            }
+        }
+    });
+
+    // Controlar volume do dispositivo de saída
+    outputVolumeControl.addEventListener('input', function() {
+        if (remoteAudioElement) {
+            remoteAudioElement.volume = outputVolumeControl.value / 100;
+            saveUserConfigs(userId, this.value, document.getElementById('outputVolume').value);
+        }
+    });
+
+    // Selecionar dispositivo de entrada
+    inputDeviceSelect.addEventListener('change', function() {
+        const deviceId = inputDeviceSelect.value;
+        if (deviceId) {
+            navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } })
+                .then(stream => {
+                    localStream = stream;
+                    const audioTracks = stream.getAudioTracks();
+                    if (audioTracks.length > 0) {
+                        audioTracks[0].applyConstraints({
+                            volume: inputVolumeControl.value / 100
+                        });
+                    }
+                });
+        }
+    });
+
+    // Selecionar dispositivo de saída
+    outputDeviceSelect.addEventListener('change', function() {
+        const deviceId = outputDeviceSelect.value;
+        if (deviceId && typeof remoteAudioElement.setSinkId === 'function') {
+            remoteAudioElement.setSinkId(deviceId);
+        }
+    });
+});
+
+async function saveUserConfigs(userId, inputVolume, outputVolume) {
+    try {
+        const response = await fetch('/user/configs/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, inputVolume, outputVolume })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            console.log('Configurações salvas com sucesso!');
+        } else {
+            console.error('Erro ao salvar configurações:', data.error);
+        }
+    } catch (error) {
+        console.error('Erro ao salvar configurações:', error.message);
+    }
+}
+
+async function loadUserConfigs(userId) {
+    try {
+        const response = await fetch(`/user/configs/${userId}`);
+        const data = await response.json();
+        if (data.success) {
+            document.getElementById('inputVolume').value = data.inputVolume;
+            document.getElementById('outputVolume').value = data.outputVolume;
+        } else {
+            console.error('Erro ao carregar configurações:', data.message);
+        }
+    } catch (error) {
+        console.error('Erro ao carregar configurações:', error.message);
+    }
+}
+
 function showErrorToast(messageError) {
     const toastElement = document.getElementById('errorToast');
     const toastBody = toastElement.querySelector('.toast-body');
@@ -1191,6 +1295,7 @@ function showErrorToast(messageError) {
 
 //=========================[TIMERS]=========================//
 $(document).ready(function () {
+    loadUserConfigs(currentUserId);
     const CHECK_INTERVAL = 60000; 
 
     function checkAuthentication() {
