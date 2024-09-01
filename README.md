@@ -54,7 +54,9 @@ GMAIL_APPKEY= Your gmail application key
 npm run devstart
 ```
 
-The application will run on `http://localhost:3000.`
+**!!! For your test environment you need to generate an SSL certificate, and add the files to the root folder (the files are configured for: cert.pem, csr.pem and key.pem) !!!**
+
+The application will run on `https://localhost:3000.`
 
 # API Documentation
 Below is the list of available API endpoints for the Cubic platform.
