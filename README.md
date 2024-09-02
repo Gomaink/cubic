@@ -30,7 +30,7 @@ To get started with Cubic, follow the steps below:
 
 ## 1. Clone the Repository:
 ```
-git clone https://github.com/yourusername/cubic.git
+git clone https://github.com/Gomaink/cubic.git
 cd cubic
 ```
 
