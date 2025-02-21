@@ -1,6 +1,8 @@
 # Cubic - Online Chat Platform
 Cubic is an online chat platform where you can add friends, chat with them in real-time, make video calls, and customize your profile — all for free. Our environment is perfect for gamers, ensuring that you don't lose performance while using all our online features. If you are looking for a place to have fun, connect, and interact, Cubic is the ideal choice. Join us and start exploring all the possibilities we offer!
 
+<a href="https://imgur.com/viujgc2"><img src="https://i.imgur.com/viujgc2.png" title="source: imgur.com" width="1000" height="500"/></a>
+
 # Features
 - **User Authentication**: Secure registration and login system with username, email, and password. Users can update their profile details, including username, nickname, email, password, and avatar.
 - **Real-Time Chat**: Supports real-time messaging using Socket.io, where messages load from the most recent at the bottom. The chat area displays avatars and usernames side by side.
@@ -12,6 +14,8 @@ Cubic is an online chat platform where you can add friends, chat with them in re
 - **Audio Settings**: Users can save and load audio configurations (input and output volume settings) to customize their experience.
 - **Data Encryption**: Unique encryption keys are generated and saved in environment variables to secure sensitive data like passwords.
 - **Peer-to-Peer Communication**: Integrates PeerJS for peer-to-peer communication and supports audio calls with microphone mute/unmute functionality.
+
+<a href="https://imgur.com/BrFrDO9"><img src="https://i.imgur.com/BrFrDO9.png" title="source: imgur.com" width="800" height="600"/></a>
 
 # Technologies Used
 - **Frontend**: HTML, CSS (Bootstrap 5.3), JavaScript (ES6+), EJS (Embedded JavaScript) for templating.
