@@ -1,0 +1,89 @@
+name: cubic
+
+services:
+  db:
+    image: postgres:18.4-alpine3.24
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cubic}
+      POSTGRES_USER: ${POSTGRES_USER:-cubic}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cubic-dev-password}
+    volumes:
+      - cubic_postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cubic} -d ${POSTGRES_DB:-cubic}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - cubic
+
+  migrate:
+    build:
+      context: .
+      dockerfile: infra/docker/migrate.Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cubic}:${POSTGRES_PASSWORD:-cubic-dev-password}@db:5432/${POSTGRES_DB:-cubic}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - cubic
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_HOST: 0.0.0.0
+      API_PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cubic}:${POSTGRES_PASSWORD:-cubic-dev-password}@db:5432/${POSTGRES_DB:-cubic}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    ports:
+      - "${API_PORT:-3001}:3001"
+    networks:
+      - cubic
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      API_INTERNAL_URL: http://api:3001
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:3001}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    networks:
+      - cubic
+
+volumes:
+  cubic_postgres:
+
+networks:
+  cubic:
+    driver: bridge

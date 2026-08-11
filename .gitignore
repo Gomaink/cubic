@@ -1,7 +1,27 @@
-src/node_modules
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.svelte-kit/
+
+# Environment
 .env
-todo.todo
-src/cert.pem
-src/csr.pem
-src/key.pem
-src/public/uploads/avatars/
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Coverage
+coverage/
+
+# Runtime data
+.data/

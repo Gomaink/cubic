@@ -1,0 +1,28 @@
+{
+  "name": "cubic",
+  "version": "2.0.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24 <25",
+    "npm": ">=11"
+  },
+  "scripts": {
+    "dev": "npm run build:packages && concurrently -n api,web -c auto \"npm run dev --workspace @cubic/api\" \"npm run dev --workspace @cubic/web\"",
+    "build": "npm run build:packages && npm run build --workspace @cubic/api && npm run build --workspace @cubic/web",
+    "build:packages": "npm run build --workspace @cubic/shared && npm run build --workspace @cubic/database",
+    "check": "npm run build:packages && npm run check --workspaces --if-present",
+    "db:generate": "npm run db:generate --workspace @cubic/database",
+    "db:migrate": "npm run db:migrate --workspace @cubic/database",
+    "db:push": "npm run db:push --workspace @cubic/database",
+    "db:studio": "npm run db:studio --workspace @cubic/database"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "^6.0.3"
+  }
+}

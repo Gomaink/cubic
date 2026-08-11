@@ -1,0 +1,25 @@
+{
+  "name": "@cubic/api",
+  "version": "2.0.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "check": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@cubic/database": "2.0.0-alpha.1",
+    "@cubic/shared": "2.0.0-alpha.1",
+    "@fastify/cors": "^11.3.0",
+    "fastify": "^5.11.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsx": "^4.23.12",
+    "typescript": "^6.0.3"
+  }
+}
