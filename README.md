@@ -2,13 +2,23 @@
 
 Cubic is being rebuilt as a fast, lightweight and self-hosted messenger with a reactive web UI, group conversations, low-latency voice rooms and screen sharing.
 
-> **Current version:** `v2.0.0-alpha.1` — foundation release. This alpha is intentionally not a feature-complete replacement for Cubic v1.
+> **Current version:** `v2.0.0-alpha.2` — identity & security. This alpha is still not a feature-complete replacement for Cubic v1.
 
-## Why v2 exists
+## What alpha.2 adds
 
-The legacy implementation was designed around 1:1 messages and 1:1 PeerJS calls. That made groups, authorization, group voice, screen sharing and reliable realtime state much harder to add safely. v2 starts from a conversation-centric architecture and separates text realtime from media realtime.
+- PostgreSQL-backed users, settings and revocable sessions.
+- Argon2id password hashing for all new passwords.
+- Seamless bcrypt verification/rehash for imported Cubic v1 accounts.
+- Register, login, logout and current-session API routes.
+- Server-authoritative authentication middleware.
+- HttpOnly, SameSite session cookies; only token digests are stored in PostgreSQL.
+- Global and authentication-specific Fastify rate limits.
+- Protected SvelteKit `/app` route and functional login/register screens.
+- Same-origin SvelteKit `/api/*` proxy so the browser does not need to know the API container address.
+- User settings API for theme, compact/reduced-motion preferences and future voice input/output volume.
+- Cubic v1 user/config importer.
 
-## Alpha.1 stack
+## Stack
 
 - Node.js 24 LTS
 - TypeScript
@@ -16,21 +26,22 @@ The legacy implementation was designed around 1:1 messages and 1:1 PeerJS calls.
 - Fastify
 - PostgreSQL 18
 - Drizzle ORM / Drizzle Kit
+- Argon2id
 - Docker Compose
 
-LiveKit and Socket.IO are deliberately not wired in yet. They enter after the identity/conversation foundation exists.
+Socket.IO and LiveKit are deliberately not wired in yet. Auth must be trustworthy before realtime messaging or media can depend on it.
 
 ## Repository layout
 
 ```text
 apps/
-  api/          Fastify API
-  web/          SvelteKit web application
+  api/          Fastify API, auth, import tooling
+  web/          SvelteKit web application + same-origin API proxy
 packages/
-  database/     PostgreSQL + Drizzle
+  database/     PostgreSQL + Drizzle schema
   shared/       shared contracts/version metadata
 infra/docker/   production Dockerfiles
-docs/           architecture, roadmap and migration notes
+docs/           architecture, security, roadmap and migration notes
 ```
 
 ## Quick start with Docker
@@ -41,12 +52,14 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-The one-shot `migrate` service applies the alpha schema with `drizzle-kit push` before the API starts. This is intentionally temporary for the alpha phase; committed SQL migrations replace it before v2 stable.
+The one-shot `migrate` service currently applies alpha schemas with `drizzle-kit push` before the API starts. Committed SQL migrations replace this convenience path before v2 stable.
 
 Open:
 
 - Web: `http://localhost:3000`
-- API health: `http://localhost:3001/api/v1/health`
+- API health from the host: `http://localhost:3001/api/v1/health`
+
+Create an account at `/register`, then verify protected routing at `/app`.
 
 Check the stack:
 
@@ -54,6 +67,23 @@ Check the stack:
 docker compose ps
 curl http://localhost:3001/api/v1/health
 ```
+
+## Cookies and HTTPS
+
+For local/LAN HTTP testing:
+
+```env
+SESSION_COOKIE_SECURE=false
+```
+
+When Cubic is behind Traefik or another HTTPS reverse proxy:
+
+```env
+SESSION_COOKIE_SECURE=true
+TRUST_PROXY_HOPS=1
+```
+
+Do not expose a production login over plain HTTP. The Compose stack binds the host API port to `127.0.0.1` by default; browser traffic goes through the SvelteKit `/api/*` proxy.
 
 ## Local development
 
@@ -69,13 +99,12 @@ npm run db:push
 npm run dev
 ```
 
-`npm run db:push` is convenient during the alpha foundation. Before stable releases, database changes must be represented by generated migrations committed under `packages/database/drizzle`.
-
 ## Useful commands
 
 ```bash
 npm run dev
 npm run check
+npm run test
 npm run build
 npm run db:generate
 npm run db:migrate
@@ -83,9 +112,22 @@ npm run db:push
 npm run db:studio
 ```
 
+## Import Cubic v1 accounts
+
+Export the old Mongo collections first, then run:
+
+```bash
+DATABASE_URL='postgresql://...' \
+  npm run import:v1-users -- --users users.json --configs userconfigs.json
+```
+
+Imported bcrypt password hashes are not decrypted. On the user's first successful login, Cubic verifies the existing bcrypt hash and replaces it with Argon2id.
+
+See [`docs/MIGRATION_V1.md`](docs/MIGRATION_V1.md) for the supported alpha.2 migration scope.
+
 ## Legacy v1
 
-Do not delete the old code history. Keep the original implementation available through:
+Keep the original implementation available through:
 
 ```text
 tag:    v1.0.0-legacy

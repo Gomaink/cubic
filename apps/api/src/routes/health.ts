@@ -7,7 +7,7 @@ export interface HealthRoutesOptions {
 }
 
 export const healthRoutes: FastifyPluginAsync<HealthRoutesOptions> = async (app, options) => {
-  app.get('/health', async (_request, reply) => {
+  app.get('/health', { config: { rateLimit: false } }, async (_request, reply) => {
     const databaseUp = await checkDatabase(options.pool);
 
     const payload: HealthResponse = {
@@ -15,13 +15,14 @@ export const healthRoutes: FastifyPluginAsync<HealthRoutesOptions> = async (app,
       service: 'cubic-api',
       version: CUBIC_VERSION,
       database: databaseUp ? 'up' : 'down',
+      auth: 'ready',
       timestamp: new Date().toISOString()
     };
 
     return reply.code(databaseUp ? 200 : 503).send(payload);
   });
 
-  app.get('/ready', async (_request, reply) => {
+  app.get('/ready', { config: { rateLimit: false } }, async (_request, reply) => {
     const databaseUp = await checkDatabase(options.pool);
     return reply.code(databaseUp ? 200 : 503).send({ ready: databaseUp });
   });

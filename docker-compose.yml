@@ -43,6 +43,11 @@ services:
       API_PORT: 3001
       DATABASE_URL: postgresql://${POSTGRES_USER:-cubic}:${POSTGRES_PASSWORD:-cubic-dev-password}@db:5432/${POSTGRES_DB:-cubic}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-cubic_session}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-30}
+      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-true}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -58,8 +63,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-    ports:
-      - "${API_PORT:-3001}:3001"
     networks:
       - cubic
 
@@ -72,12 +75,11 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       API_INTERNAL_URL: http://api:3001
-      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:3001}
     depends_on:
       api:
         condition: service_healthy
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "${WEB_PORT:-3010}:3000"
     networks:
       - cubic
 

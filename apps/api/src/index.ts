@@ -5,8 +5,13 @@ import { loadEnv } from './config/env.js';
 const env = loadEnv();
 const database = createDatabase(env.DATABASE_URL);
 const app = await createApp({
-  pool: database.pool,
+  database,
   corsOrigin: env.CORS_ORIGIN,
+  trustProxyHops: env.TRUST_PROXY_HOPS,
+  cookieName: env.SESSION_COOKIE_NAME,
+  cookieSecure: env.SESSION_COOKIE_SECURE,
+  sessionTtlDays: env.SESSION_TTL_DAYS,
+  registrationEnabled: env.REGISTRATION_ENABLED,
   logger: env.NODE_ENV !== 'test'
 });
 

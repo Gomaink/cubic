@@ -12,4 +12,4 @@ RUN npm ci
 COPY tsconfig.base.json ./
 COPY packages/database packages/database
 
-CMD ["npm", "run", "db:push", "--workspace", "@cubic/database"]
+CMD ["npm", "run", "db:migrate", "--workspace", "@cubic/database"]

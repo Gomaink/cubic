@@ -28,3 +28,6 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Security unit tests
+        run: npm run test

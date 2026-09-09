@@ -6,22 +6,50 @@
 2. **Server-authoritative identity.** Clients never choose who they are by sending a `senderId`.
 3. **Separate text realtime from media realtime.** Messaging/presence and WebRTC media solve different problems.
 4. **Modular monolith first.** Keep deployment simple for self-hosters; split services only when scale justifies it.
-5. **Stateless app processes where practical.** Durable state belongs in PostgreSQL; ephemeral distributed state can move to Redis later.
-6. **TLS terminates at the reverse proxy.** Cubic itself serves plain HTTP inside the trusted container network.
+5. **Durable auth state in PostgreSQL.** Sessions are revocable and do not depend on process memory.
+6. **Stateless app processes where practical.** Ephemeral distributed state can move to Redis later.
+7. **TLS terminates at the reverse proxy.** Cubic serves plain HTTP inside the trusted container network.
 
-## Alpha.1 runtime
+## Alpha.2 runtime
 
 ```text
 Browser
    |
+   | same-origin /api/*
    v
 SvelteKit web :3000
-   |
+   |            \
+   |             `-- protected SSR -> auth/me
    v
 Fastify API :3001
    |
+   +-- Argon2id
+   +-- rate limits
+   +-- session resolver
+   |
    v
 PostgreSQL 18
+  users
+  user_settings
+  sessions
+```
+
+The SvelteKit proxy deliberately keeps API calls same-origin in the browser. The API remains independently reachable for health checks and future native/API clients.
+
+## Session lifecycle
+
+```text
+register/login
+   -> verify/hash password
+   -> generate random token
+   -> store SHA-256(token) in sessions
+   -> Set-Cookie(HttpOnly, SameSite=Lax)
+
+protected request
+   -> cookie token
+   -> SHA-256(token)
+   -> sessions JOIN users
+   -> request.auth.user
 ```
 
 ## Planned realtime/media runtime
@@ -32,14 +60,18 @@ Browser
   |
   `-- WebRTC -----------> LiveKit SFU (voice, camera, screen share)
                               |
-                              `-- integrated TURN / ICE path
+                              `-- TURN / ICE path
 ```
 
-## Planned core data model
+## Core data model progression
 
 ```text
+alpha.2:
 users
+user_settings
 sessions
+
+alpha.3+:
 friendships
 friend_requests
 blocks
@@ -52,5 +84,3 @@ attachments
 calls
 call_participants
 ```
-
-The exact schema begins in alpha.2 and alpha.3. Alpha.1 contains only `cubic_meta` so the database package and migration workflow can be validated without prematurely freezing product-domain tables.

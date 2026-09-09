@@ -1,6 +1,6 @@
 # Cubic v2 roadmap
 
-## v2.0.0-alpha.1 — foundation
+## v2.0.0-alpha.1 — foundation ✅
 
 - TypeScript monorepo
 - SvelteKit web app
@@ -11,16 +11,20 @@
 - CI baseline
 - architecture and migration documentation
 
-## v2.0.0-alpha.2 — identity & security
+## v2.0.0-alpha.2 — identity & security ✅
 
-- users and sessions
+- relational users, settings and sessions
 - Argon2id password hashing
-- login/register/logout
+- login/register/logout/current-user
 - server-authoritative identity
-- CSRF/session hardening
+- HttpOnly/SameSite session cookies
+- revocable PostgreSQL sessions with hashed tokens
 - rate limiting
-- secure avatar upload abstraction
-- MongoDB v1 user migration tooling
+- v1 bcrypt compatibility + transparent Argon2id upgrade
+- v1 user/settings import tooling
+- protected SvelteKit app shell
+
+The avatar upload implementation was deliberately moved out of alpha.2 so v2 does not reintroduce the v1 MIME-only upload design. It will land with the media/attachment storage boundary.
 
 ## v2.0.0-alpha.3 — conversation engine
 
@@ -31,6 +35,7 @@
 - cursor pagination
 - Socket.IO authenticated from the server session
 - realtime messages and presence
+- v1 DM/message migration stage
 
 ## v2.0.0-alpha.4 — groups
 
@@ -38,7 +43,8 @@
 - add/remove members
 - owner/admin/member permissions
 - invites
-- group avatar
+- group avatar/storage boundary
+- friendship/request migration
 
 ## v2.0.0-alpha.5 — voice
 
@@ -63,6 +69,7 @@
 - edit/delete
 - reactions
 - attachments
+- validated media uploads
 - typing indicators
 - delivered/read receipts
 
@@ -76,7 +83,7 @@
 
 ## v2.0.0-beta.3 — hardening & scale
 
-- Redis optional for distributed ephemeral state
+- Redis optional for distributed ephemeral state/rate limits
 - load testing
 - rate-limit tuning
 - reconnection/load-shedding work
