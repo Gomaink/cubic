@@ -3,7 +3,7 @@
 </script>
 
 <svelte:head>
-  <title>Cubic v2 — Identity online</title>
+  <title>Cubic v2 — Realtime messenger</title>
   <meta
     name="description"
     content="Cubic is a lightweight self-hosted messenger being rebuilt for groups, voice rooms and screen sharing."
@@ -28,11 +28,11 @@
   </nav>
 
   <section class="hero hero-alpha2">
-    <p class="eyebrow">v2.0.0-alpha.2 · identity & security</p>
-    <h1>Your identity now belongs to the server.</h1>
+    <p class="eyebrow">v2.0.0-alpha.3 · conversation engine</p>
+    <h1>Your conversations are now live.</h1>
     <p class="lead">
-      Cubic now has real PostgreSQL accounts, persistent sessions, Argon2id passwords and
-      authorization boundaries ready for the conversation engine.
+      Cubic now has a server-authoritative social graph, canonical direct messages,
+      persistent history and authenticated realtime delivery between devices.
     </p>
 
     <div class="hero-actions">
@@ -47,7 +47,7 @@
     <div class="status-card" class:online={data.apiReachable}>
       <span class="status-dot" aria-hidden="true"></span>
       <div>
-        <strong>{data.apiReachable ? 'Identity layer online' : 'Web online · API unavailable'}</strong>
+        <strong>{data.apiReachable ? 'Conversation engine online' : 'Web online · API unavailable'}</strong>
         <span>
           {#if data.health}
             API {data.health.version} · PostgreSQL {data.health.database} · auth {data.health.auth ?? 'starting'}
@@ -59,32 +59,32 @@
     </div>
   </section>
 
-  <section class="feature-grid" aria-label="Alpha 2 capabilities">
+  <section class="feature-grid" aria-label="Alpha 3 capabilities">
     <article class="feature-card">
       <span class="feature-index">01</span>
-      <h2>Server-authoritative identity</h2>
-      <p>Writes will derive the user from the authenticated session instead of trusting IDs sent by the browser.</p>
+      <h2>Social graph</h2>
+      <p>Search, friend requests, friendships and blocks now run on server-authoritative identity.</p>
     </article>
     <article class="feature-card">
       <span class="feature-index">02</span>
-      <h2>Persistent sessions</h2>
-      <p>Random session tokens live in HttpOnly cookies; only token digests are persisted in PostgreSQL.</p>
+      <h2>Canonical direct messages</h2>
+      <p>Each pair of users shares one direct conversation with membership-based authorization and durable history.</p>
     </article>
     <article class="feature-card">
       <span class="feature-index">03</span>
-      <h2>Legacy-friendly migration</h2>
-      <p>Imported bcrypt accounts can log in once and transparently move to Argon2id.</p>
+      <h2>Authenticated realtime</h2>
+      <p>Socket.IO resolves the existing server session and delivers new messages instantly to conversation members.</p>
     </article>
     <article class="feature-card">
       <span class="feature-index">04</span>
-      <h2>Ready for conversations</h2>
-      <p>The next alpha attaches messages, groups and realtime events to this trusted identity boundary.</p>
+      <h2>Mobile-resilient UI</h2>
+      <p>The messenger resynchronizes after mobile tab suspension and keeps landing/auth pages independently scrollable.</p>
     </article>
   </section>
 
   <section class="next next-wide">
     <p class="eyebrow">Next milestone</p>
-    <h2>alpha.3 — conversation engine</h2>
-    <p>Conversation membership, DMs, group-ready messages, cursor pagination and authenticated realtime.</p>
+    <h2>alpha.4 — groups & permissions</h2>
+    <p>Group creation, membership management, roles, permissions, invites and the first group-ready media boundary.</p>
   </section>
 </main>

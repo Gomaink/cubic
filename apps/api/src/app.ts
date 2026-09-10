@@ -7,6 +7,9 @@ import { CUBIC_VERSION } from '@cubic/shared';
 import { authRoutes } from './routes/auth.js';
 import { healthRoutes } from './routes/health.js';
 import { userRoutes } from './routes/users.js';
+import { socialRoutes } from './routes/social.js';
+import { conversationRoutes } from './routes/conversations.js';
+import { createRealtimeEvents, type RealtimeEvents } from './realtime/events.js';
 
 export interface CreateAppOptions {
   database: Database;
@@ -17,9 +20,11 @@ export interface CreateAppOptions {
   sessionTtlDays: number;
   registrationEnabled: boolean;
   logger?: boolean;
+  realtimeEvents?: RealtimeEvents;
 }
 
 export async function createApp(options: CreateAppOptions): Promise<FastifyInstance> {
+  const realtimeEvents = options.realtimeEvents ?? createRealtimeEvents();
   const app = Fastify({
     logger: options.logger ?? true,
     trustProxy: options.trustProxyHops,
@@ -52,7 +57,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   app.get('/', async () => ({
     name: 'Cubic API',
     version: CUBIC_VERSION,
-    status: 'identity-ready'
+    status: 'conversation-ready'
   }));
 
   await app.register(healthRoutes, {
@@ -73,6 +78,19 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     prefix: '/api/v1/users',
     database: options.database,
     cookieName: options.cookieName
+  });
+
+  await app.register(socialRoutes, {
+    prefix: '/api/v1/social',
+    database: options.database,
+    cookieName: options.cookieName
+  });
+
+  await app.register(conversationRoutes, {
+    prefix: '/api/v1/conversations',
+    database: options.database,
+    cookieName: options.cookieName,
+    realtimeEvents
   });
 
   return app;

@@ -20,7 +20,8 @@ COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/web/package.json apps/web/package.json
 COPY --from=build /app/apps/web/build apps/web/build
+COPY apps/web/server.mjs apps/web/server.mjs
 
 USER node
 EXPOSE 3000
-CMD ["node", "apps/web/build"]
+CMD ["node", "apps/web/server.mjs"]

@@ -34,8 +34,11 @@ The avatar upload implementation was deliberately moved out of alpha.2 so v2 doe
 - DMs and groups using the same model
 - cursor pagination
 - Socket.IO authenticated from the server session
-- realtime messages and presence
+- realtime messages via authenticated Socket.IO
+- presence refinement remains deferred until multi-device semantics are finalized
 - v1 DM/message migration stage
+
+Alpha.3 validated end to end on the self-hosted Docker deployment: social graph, canonical DMs, durable messages, session-authenticated realtime delivery and mobile resume/reconnect behavior.
 
 ## v2.0.0-alpha.4 — groups
 

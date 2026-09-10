@@ -1,4 +1,4 @@
-export const CUBIC_VERSION = '2.0.0-alpha.2' as const;
+export const CUBIC_VERSION = '2.0.0-alpha.3' as const;
 export const CUBIC_NAME = 'Cubic' as const;
 
 export type HealthStatus = 'ok' | 'degraded';
@@ -30,5 +30,6 @@ export interface HealthResponse {
   version: typeof CUBIC_VERSION;
   database: 'up' | 'down';
   auth: 'ready';
+  conversations?: 'ready';
   timestamp: string;
 }

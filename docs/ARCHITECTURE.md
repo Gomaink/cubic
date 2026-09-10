@@ -52,6 +52,31 @@ protected request
    -> request.auth.user
 ```
 
+
+## Alpha.3 realtime runtime
+
+```text
+Browser
+  |
+  | HTTP /api/*
+  | WebSocket /socket.io
+  v
+Cubic web container
+  |-- SvelteKit HTTP handling
+  `-- same-origin WebSocket proxy
+           |
+           v
+       Cubic API
+       |-- authenticated session resolution
+       |-- Socket.IO conversation rooms
+       |-- server-authoritative message writes
+       `-- PostgreSQL
+```
+
+The API is not published on a host port in the production Compose topology. Browser HTTP and WebSocket traffic enters through the web service and reaches the API on the private Docker network. Socket connections resolve the existing Cubic session cookie and only join rooms for conversations the authenticated user belongs to.
+
+On mobile browser resume (`pageshow`, focus, visibility and online transitions), the client reconnects when necessary and refreshes social/conversation state plus the active history to close any suspension gap.
+
 ## Planned realtime/media runtime
 
 ```text

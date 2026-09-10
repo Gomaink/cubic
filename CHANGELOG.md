@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.0-alpha.3
+
+- Added social graph: user search, friend requests, friendships and blocks.
+- Added canonical direct conversations and membership authorization.
+- Added idempotent message persistence and cursor-ready history.
+- Added first usable messenger UI for People, conversations and DMs.
+- Added authenticated Socket.IO realtime messaging with per-conversation rooms and reconnect/resync behavior.
+- Removed the temporary 2-second message polling path.
+- Added same-origin WebSocket proxying while keeping the API unexposed on the host.
+- Fixed empty JSON POST handling for social actions.
+- Fixed mobile chat navigation, composer/empty-state layout and iOS viewport/background-resume freezes.
+- Added local-HTTP UUID fallback for idempotent client message IDs.
+
+
 All notable changes to Cubic v2 will be documented here.
 
 ## [2.0.0-alpha.2] - 2026-08-11

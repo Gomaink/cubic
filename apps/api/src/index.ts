@@ -1,9 +1,12 @@
 import { createDatabase } from '@cubic/database';
 import { createApp } from './app.js';
 import { loadEnv } from './config/env.js';
+import { createRealtimeEvents } from './realtime/events.js';
+import { attachRealtime } from './realtime/socket.js';
 
 const env = loadEnv();
 const database = createDatabase(env.DATABASE_URL);
+const realtimeEvents = createRealtimeEvents();
 const app = await createApp({
   database,
   corsOrigin: env.CORS_ORIGIN,
@@ -12,13 +15,26 @@ const app = await createApp({
   cookieSecure: env.SESSION_COOKIE_SECURE,
   sessionTtlDays: env.SESSION_TTL_DAYS,
   registrationEnabled: env.REGISTRATION_ENABLED,
+  realtimeEvents,
   logger: env.NODE_ENV !== 'test'
 });
 
+const realtime = attachRealtime({
+  server: app.server,
+  database,
+  cookieName: env.SESSION_COOKIE_NAME,
+  events: realtimeEvents
+});
+
+let shuttingDown = false;
+
 async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
   app.log.info({ signal }, 'Shutting down Cubic API');
 
   try {
+    await realtime.close();
     await app.close();
     await database.pool.end();
     process.exit(0);

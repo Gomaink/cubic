@@ -29,7 +29,7 @@ Cubic is being rebuilt as a fast, lightweight and self-hosted messenger with a r
 - Argon2id
 - Docker Compose
 
-Socket.IO and LiveKit are deliberately not wired in yet. Auth must be trustworthy before realtime messaging or media can depend on it.
+Socket.IO is now wired into the authenticated session boundary for realtime messaging. LiveKit remains deferred to the voice/media milestone.
 
 ## Repository layout
 
