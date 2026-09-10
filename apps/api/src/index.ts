@@ -15,6 +15,8 @@ const app = await createApp({
   cookieSecure: env.SESSION_COOKIE_SECURE,
   sessionTtlDays: env.SESSION_TTL_DAYS,
   registrationEnabled: env.REGISTRATION_ENABLED,
+  mediaRoot: env.MEDIA_ROOT,
+  groupAvatarMaxBytes: env.GROUP_AVATAR_MAX_BYTES,
   realtimeEvents,
   logger: env.NODE_ENV !== 'test'
 });

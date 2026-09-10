@@ -27,13 +27,17 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
   app.get('/', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
     const result = await options.database.pool.query(
-      `select c.id, c.kind, c.title, c.created_at, c.updated_at,
+      `select c.id, c.kind, c.title, c.avatar_key, c.created_at, c.updated_at, mine.role as current_role,
               peer.id as peer_id, peer.username as peer_username, peer.display_name as peer_display_name, peer.avatar_url as peer_avatar_url,
+              members.member_count,
               lm.id as last_message_id, lm.body as last_message_body, lm.created_at as last_message_at, lm.sender_id as last_message_sender_id
        from conversation_members mine
        join conversations c on c.id = mine.conversation_id
        left join direct_conversation_pairs dp on dp.conversation_id = c.id
        left join users peer on peer.id = case when dp.user_low_id = $1 then dp.user_high_id else dp.user_low_id end
+       left join lateral (
+         select count(*)::int as member_count from conversation_members cm where cm.conversation_id = c.id
+       ) members on true
        left join lateral (
          select m.id, m.body, m.created_at, m.sender_id
          from messages m where m.conversation_id = c.id and m.deleted_at is null
@@ -45,7 +49,9 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     );
 
     return reply.send({ conversations: result.rows.map((row) => ({
-      id: row.id, kind: row.kind, title: row.title, createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
+      id: row.id, kind: row.kind, title: row.title, currentRole: row.current_role, memberCount: row.member_count ?? 0,
+      avatarUrl: row.kind === 'group' && row.avatar_key ? `/api/v1/groups/${row.id}/avatar?v=${new Date(row.updated_at).getTime()}` : null,
+      createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
       peer: row.peer_id ? { id: row.peer_id, username: row.peer_username, displayName: row.peer_display_name, avatarUrl: row.peer_avatar_url } : null,
       lastMessage: row.last_message_id ? { id: row.last_message_id, body: row.last_message_body, createdAt: new Date(row.last_message_at).toISOString(), senderId: row.last_message_sender_id } : null
     })) });
@@ -61,7 +67,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
 
     const friend = await options.database.db.select({ id: friendships.id }).from(friendships)
       .where(and(eq(friendships.userLowId, low), eq(friendships.userHighId, high))).limit(1);
-    if (!friend[0]) return reply.code(403).send({ error: 'Direct conversations are limited to friends in alpha.3.' });
+    if (!friend[0]) return reply.code(403).send({ error: 'Direct conversations are limited to friends in alpha.4.' });
 
     const blocked = await options.database.db.select({ id: blocks.id }).from(blocks)
       .where(and(eq(blocks.blockerId, me), eq(blocks.blockedId, target))).limit(1);

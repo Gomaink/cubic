@@ -85,3 +85,20 @@ All notable changes to Cubic v2 will be documented here.
 - DMs/groups/message schema and Socket.IO: alpha.3+.
 - LiveKit group voice: alpha.5.
 - Screen sharing/video: alpha.6.
+
+## v2.0.0-alpha.4
+
+Completed Cubic v2.0.0-alpha.4 Groups & Permissions.
+
+- Added group conversations on top of the alpha.3 conversation engine.
+- Added owner/admin/member roles and server-authoritative permission checks.
+- Added group rename, membership management and ownership transfer.
+- Added realtime group membership updates.
+- Added group invite lifecycle: pending, accepted, declined and cancelled.
+- Added persistent group avatars with authenticated local media storage.
+- Added `group_invites` and `conversations.avatar_key` through migration 0002.
+- Added direct streaming proxying for `/api/*` so multipart and future attachments do not pass through the SvelteKit body buffer.
+- Added transaction-scoped membership/ownership locking.
+- Fixed media-volume ownership for the non-root API runtime.
+- Fixed iOS avatar picker/resume behavior and visible upload error handling.
+- Verified avatar replacement/removal does not leave orphan files.

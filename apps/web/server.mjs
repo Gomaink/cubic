@@ -23,7 +23,10 @@ proxy.on('error', (error, _request, response) => {
 });
 
 const server = createServer((request, response) => {
-  if (request.url?.startsWith('/socket.io')) {
+  if (
+    request.url?.startsWith('/socket.io') ||
+    request.url?.startsWith('/api/')
+  ) {
     proxy.web(request, response, { target: apiTarget });
     return;
   }

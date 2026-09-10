@@ -121,6 +121,7 @@ export const conversations = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     kind: varchar('kind', { length: 16 }).notNull().default('direct'),
     title: varchar('title', { length: 96 }),
+    avatarKey: text('avatar_key'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
@@ -150,6 +151,24 @@ export const directConversationPairs = pgTable(
     userHighId: uuid('user_high_id').notNull().references(() => users.id, { onDelete: 'cascade' })
   },
   (table) => [uniqueIndex('direct_conversation_pairs_pair_uq').on(table.userLowId, table.userHighId)]
+);
+
+export const groupInvites = pgTable(
+  'group_invites',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+    inviterId: uuid('inviter_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    inviteeId: uuid('invitee_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    status: varchar('status', { length: 16 }).notNull().default('pending'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    respondedAt: timestamp('responded_at', { withTimezone: true, mode: 'date' })
+  },
+  (table) => [
+    uniqueIndex('group_invites_conversation_invitee_uq').on(table.conversationId, table.inviteeId),
+    index('group_invites_invitee_status_idx').on(table.inviteeId, table.status),
+    index('group_invites_conversation_status_idx').on(table.conversationId, table.status)
+  ]
 );
 
 export const messages = pgTable(

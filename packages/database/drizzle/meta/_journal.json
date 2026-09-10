@@ -15,6 +15,13 @@
       "when": 1788992082050,
       "tag": "0001_violet_talkback",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789008286207,
+      "tag": "0002_aspiring_santa_claus",
+      "breakpoints": true
     }
   ]
 }

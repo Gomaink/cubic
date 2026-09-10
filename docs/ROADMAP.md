@@ -26,7 +26,7 @@
 
 The avatar upload implementation was deliberately moved out of alpha.2 so v2 does not reintroduce the v1 MIME-only upload design. It will land with the media/attachment storage boundary.
 
-## v2.0.0-alpha.3 — conversation engine
+## v2.0.0-alpha.3 — conversation engine ✅
 
 - `conversations`
 - `conversation_members`
@@ -40,7 +40,7 @@ The avatar upload implementation was deliberately moved out of alpha.2 so v2 doe
 
 Alpha.3 validated end to end on the self-hosted Docker deployment: social graph, canonical DMs, durable messages, session-authenticated realtime delivery and mobile resume/reconnect behavior.
 
-## v2.0.0-alpha.4 — groups
+## v2.0.0-alpha.4 — groups 🚧
 
 - create/rename groups
 - add/remove members
@@ -103,3 +103,10 @@ Alpha.3 validated end to end on the self-hosted Docker deployment: social graph,
 ## v2.0.0
 
 First stable Cubic v2 release.
+
+### Alpha.4 hardening status
+Group invitations, group avatar storage boundary and transaction-scoped membership locking are implemented in the alpha.4 worktree. The next checkpoint is migration `0002`, functional invite/avatar testing and then alpha.4 closeout.
+
+### Alpha.4 completed
+
+Alpha.4 is functionally complete and validated. The next milestone is alpha.5, focused on realtime voice using self-hosted LiveKit/WebRTC, while keeping the existing Cubic identity, conversation membership and permission model as the authorization boundary.

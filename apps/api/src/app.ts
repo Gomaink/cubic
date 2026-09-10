@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
+import multipart from '@fastify/multipart';
 import type { Database } from '@cubic/database';
 import { CUBIC_VERSION } from '@cubic/shared';
 import { authRoutes } from './routes/auth.js';
@@ -9,7 +10,9 @@ import { healthRoutes } from './routes/health.js';
 import { userRoutes } from './routes/users.js';
 import { socialRoutes } from './routes/social.js';
 import { conversationRoutes } from './routes/conversations.js';
+import { groupRoutes } from './routes/groups.js';
 import { createRealtimeEvents, type RealtimeEvents } from './realtime/events.js';
+import { LocalMediaStore } from './media/local.js';
 
 export interface CreateAppOptions {
   database: Database;
@@ -19,6 +22,8 @@ export interface CreateAppOptions {
   cookieSecure: boolean;
   sessionTtlDays: number;
   registrationEnabled: boolean;
+  mediaRoot?: string;
+  groupAvatarMaxBytes?: number;
   logger?: boolean;
   realtimeEvents?: RealtimeEvents;
 }
@@ -28,10 +33,11 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   const app = Fastify({
     logger: options.logger ?? true,
     trustProxy: options.trustProxyHops,
-    bodyLimit: 2 * 1024 * 1024
+    bodyLimit: Math.max(2 * 1024 * 1024, (options.groupAvatarMaxBytes ?? 2 * 1024 * 1024) + 512 * 1024)
   });
 
   await app.register(cookie);
+  await app.register(multipart, { limits: { files: 1, fileSize: options.groupAvatarMaxBytes ?? 2 * 1024 * 1024 } });
 
   await app.register(cors, {
     origin: options.corsOrigin,
@@ -91,6 +97,17 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     database: options.database,
     cookieName: options.cookieName,
     realtimeEvents
+  });
+
+  const mediaStore = new LocalMediaStore(options.mediaRoot ?? '/data/media');
+
+  await app.register(groupRoutes, {
+    prefix: '/api/v1/groups',
+    database: options.database,
+    cookieName: options.cookieName,
+    realtimeEvents,
+    mediaStore,
+    groupAvatarMaxBytes: options.groupAvatarMaxBytes ?? 2 * 1024 * 1024
   });
 
   return app;

@@ -162,7 +162,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     io.to(conversationRoom(event.conversationId)).emit('message:created', event.message);
   });
 
-  const unsubscribeConversation = options.events.onConversationOpened((event) => {
+  const unsubscribeOpened = options.events.onConversationOpened((event) => {
     for (const userId of event.userIds) {
       const room = userRoom(userId);
       io.in(room).socketsJoin(conversationRoom(event.conversationId));
@@ -170,10 +170,37 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     }
   });
 
+  const unsubscribeChanged = options.events.onConversationChanged((event) => {
+    for (const userId of event.userIds) {
+      io.to(userRoom(userId)).emit('conversation:updated', { conversationId: event.conversationId });
+    }
+  });
+
+  const unsubscribeRemoved = options.events.onConversationRemoved((event) => {
+    for (const userId of event.removedUserIds) {
+      const room = userRoom(userId);
+      io.in(room).socketsLeave(conversationRoom(event.conversationId));
+      io.to(room).emit('conversation:removed', { conversationId: event.conversationId });
+    }
+
+    for (const userId of event.remainingUserIds) {
+      io.to(userRoom(userId)).emit('conversation:updated', { conversationId: event.conversationId });
+    }
+  });
+
+  const unsubscribeInvites = options.events.onGroupInvitesChanged((event) => {
+    for (const userId of event.userIds) {
+      io.to(userRoom(userId)).emit('group:invites:updated');
+    }
+  });
+
   return {
     async close() {
       unsubscribeMessage();
-      unsubscribeConversation();
+      unsubscribeOpened();
+      unsubscribeChanged();
+      unsubscribeRemoved();
+      unsubscribeInvites();
       io.disconnectSockets(true);
       await new Promise<void>((resolve) => io.close(() => resolve()));
     }

@@ -48,6 +48,8 @@ services:
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-30}
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-true}
+      MEDIA_ROOT: ${MEDIA_ROOT:-/data/media}
+      GROUP_AVATAR_MAX_BYTES: ${GROUP_AVATAR_MAX_BYTES:-2097152}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -63,6 +65,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    volumes:
+      - cubic_media:/data/media
     networks:
       - cubic
 
@@ -75,6 +79,7 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       API_INTERNAL_URL: http://api:3001
+      BODY_SIZE_LIMIT: 4M
     depends_on:
       api:
         condition: service_healthy
@@ -85,6 +90,7 @@ services:
 
 volumes:
   cubic_postgres:
+  cubic_media:
 
 networks:
   cubic:

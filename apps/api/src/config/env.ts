@@ -13,7 +13,9 @@ const envSchema = z.object({
   SESSION_COOKIE_NAME: z.string().min(1).max(64).default('cubic_session'),
   SESSION_COOKIE_SECURE: booleanString,
   SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
-  REGISTRATION_ENABLED: enabledString
+  REGISTRATION_ENABLED: enabledString,
+  MEDIA_ROOT: z.string().min(1).default('/data/media'),
+  GROUP_AVATAR_MAX_BYTES: z.coerce.number().int().min(65536).max(8 * 1024 * 1024).default(2 * 1024 * 1024)
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

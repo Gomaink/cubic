@@ -28,6 +28,9 @@ COPY --from=build /app/packages/database/dist packages/database/dist
 COPY --from=build /app/packages/shared/package.json packages/shared/package.json
 COPY --from=build /app/packages/shared/dist packages/shared/dist
 
+# Seed new named volumes with the correct ownership for the non-root API user.
+RUN mkdir -p /data/media && chown -R node:node /data/media
+
 USER node
 EXPOSE 3001
 CMD ["node", "apps/api/dist/index.js"]

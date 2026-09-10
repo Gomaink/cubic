@@ -29,3 +29,27 @@ fetch('/api/v1/auth/me', { credentials: 'include' })
 ```
 
 This prevents LAN/docker API addresses from leaking into client configuration and makes the authentication cookie same-origin from the browser's perspective.
+
+
+## Group routes (alpha.4)
+
+- `POST /api/v1/groups` — create a group from friends
+- `GET /api/v1/groups/:id` — group details and members
+- `PATCH /api/v1/groups/:id` — rename (owner/admin)
+- `POST /api/v1/groups/:id/members` — add a friend (owner/admin)
+- `PATCH /api/v1/groups/:id/members/:userId` — admin/member role (owner)
+- `DELETE /api/v1/groups/:id/members/:userId` — remove member according to role hierarchy
+- `POST /api/v1/groups/:id/transfer-owner` — transfer ownership
+- `POST /api/v1/groups/:id/leave` — leave a group
+- `DELETE /api/v1/groups/:id` — delete a group (owner)
+
+## Group invites and media (alpha.4)
+
+- `GET /api/v1/groups/invites` — pending invitations for the authenticated user
+- `POST /api/v1/groups/:id/invites` — invite an available friend (owner/admin)
+- `POST /api/v1/groups/invites/:inviteId/accept` — accept invitation
+- `POST /api/v1/groups/invites/:inviteId/decline` — decline invitation
+- `DELETE /api/v1/groups/invites/:inviteId` — cancel pending invitation
+- `GET /api/v1/groups/:id/avatar` — authenticated group avatar
+- `POST /api/v1/groups/:id/avatar` — replace avatar (owner/admin, multipart field `avatar`)
+- `DELETE /api/v1/groups/:id/avatar` — remove avatar (owner/admin)
