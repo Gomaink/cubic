@@ -496,6 +496,316 @@
     messagesViewport = null;
   }
 
+
+  type MessageAttachment = {
+    id: string;
+    conversationId: string;
+    messageId: string | null;
+    originalName: string;
+    contentType: string;
+    kind: string;
+    sizeBytes: number;
+    width: number | null;
+    height: number | null;
+    createdAt: string;
+    url: string;
+  };
+
+  type StagedAttachment = {
+    localId: string;
+    fileName: string;
+    sizeBytes: number;
+    progress: number;
+    status: 'uploading' | 'ready' | 'error';
+    attachment: MessageAttachment | null;
+    error: string;
+  };
+
+  const MAX_ATTACHMENTS_PER_MESSAGE = 10;
+  const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+  let attachmentInput: HTMLInputElement | null = null;
+  let stagedAttachments = $state<StagedAttachment[]>([]);
+  let stagedAttachmentConversationId = $state<string | null>(null);
+  const attachmentUploadRequests = new Map<string, XMLHttpRequest>();
+
+  function attachmentsOf(message: any): MessageAttachment[] {
+    return Array.isArray(message?.attachments) ? message.attachments : [];
+  }
+
+  function currentStagedAttachments(): StagedAttachment[] {
+    if (!activeConversation) return [];
+    if (stagedAttachmentConversationId !== activeConversation.id) return [];
+    return stagedAttachments;
+  }
+
+  function updateStagedAttachment(
+    localId: string,
+    patch: Partial<StagedAttachment>
+  ) {
+    stagedAttachments = stagedAttachments.map((item) =>
+      item.localId === localId ? { ...item, ...patch } : item
+    );
+  }
+
+  function formatAttachmentSize(sizeBytes: number): string {
+    if (sizeBytes < 1024) return `${sizeBytes} B`;
+    if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
+    return `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  function uploadAttachment(
+    file: File,
+    conversationId: string,
+    localId: string
+  ): Promise<MessageAttachment> {
+    return new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      attachmentUploadRequests.set(localId, request);
+
+      request.open(
+        'POST',
+        `/api/v1/conversations/${conversationId}/attachments`
+      );
+      request.withCredentials = true;
+
+      request.upload.onprogress = (event) => {
+        if (!event.lengthComputable) return;
+        updateStagedAttachment(localId, {
+          progress: Math.min(
+            99,
+            Math.max(1, Math.round((event.loaded / event.total) * 100))
+          )
+        });
+      };
+
+      request.onload = () => {
+        attachmentUploadRequests.delete(localId);
+
+        let payload: any = null;
+        try {
+          payload = request.responseText
+            ? JSON.parse(request.responseText)
+            : null;
+        } catch {
+          // Fall through to status-based error.
+        }
+
+        if (
+          request.status >= 200 &&
+          request.status < 300 &&
+          payload?.attachment
+        ) {
+          resolve(payload.attachment as MessageAttachment);
+          return;
+        }
+
+        reject(
+          new Error(
+            payload?.error ??
+              `Attachment upload failed (${request.status || 'network'}).`
+          )
+        );
+      };
+
+      request.onerror = () => {
+        attachmentUploadRequests.delete(localId);
+        reject(new Error('Attachment upload failed.'));
+      };
+
+      request.onabort = () => {
+        attachmentUploadRequests.delete(localId);
+        reject(new Error('Attachment upload cancelled.'));
+      };
+
+      const form = new FormData();
+      form.append('file', file, file.name);
+      request.send(form);
+    });
+  }
+
+  async function discardStagedAttachment(
+    localId: string,
+    deleteRemote = true
+  ) {
+    const item = stagedAttachments.find(
+      (candidate) => candidate.localId === localId
+    );
+
+    stagedAttachments = stagedAttachments.filter(
+      (candidate) => candidate.localId !== localId
+    );
+
+    const request = attachmentUploadRequests.get(localId);
+    if (request) {
+      attachmentUploadRequests.delete(localId);
+      request.abort();
+    }
+
+    if (deleteRemote && item?.attachment?.id) {
+      await fetch(`/api/v1/attachments/${item.attachment.id}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      }).catch(() => {});
+    }
+
+    if (stagedAttachments.length === 0) {
+      stagedAttachmentConversationId = null;
+    }
+  }
+
+  async function discardAllStagedAttachments(deleteRemote = true) {
+    const items = [...stagedAttachments];
+
+    stagedAttachments = [];
+    stagedAttachmentConversationId = null;
+
+    for (const item of items) {
+      const request = attachmentUploadRequests.get(item.localId);
+      if (request) {
+        attachmentUploadRequests.delete(item.localId);
+        request.abort();
+      }
+
+      if (deleteRemote && item.attachment?.id) {
+        await fetch(`/api/v1/attachments/${item.attachment.id}`, {
+          method: 'DELETE',
+          credentials: 'include'
+        }).catch(() => {});
+      }
+    }
+  }
+
+  async function queueAttachmentFiles(
+    fileList: FileList | File[]
+  ) {
+    if (!activeConversation) return;
+
+    const files = Array.from(fileList);
+    if (files.length === 0) return;
+
+    const conversationId = activeConversation.id;
+
+    if (
+      stagedAttachmentConversationId &&
+      stagedAttachmentConversationId !== conversationId
+    ) {
+      await discardAllStagedAttachments(true);
+    }
+
+    stagedAttachmentConversationId = conversationId;
+
+    const availableSlots =
+      MAX_ATTACHMENTS_PER_MESSAGE - stagedAttachments.length;
+
+    if (availableSlots <= 0) {
+      error = `You can attach up to ${MAX_ATTACHMENTS_PER_MESSAGE} files.`;
+      return;
+    }
+
+    const acceptedFiles = files.slice(0, availableSlots);
+
+    if (files.length > availableSlots) {
+      error = `Only ${availableSlots} more attachment${
+        availableSlots === 1 ? '' : 's'
+      } can be added.`;
+    } else {
+      error = '';
+    }
+
+    const tasks = acceptedFiles.map(async (file) => {
+      if (file.size < 1) {
+        error = `${file.name || 'File'} is empty.`;
+        return;
+      }
+
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        error = `${file.name} exceeds the 25 MB limit.`;
+        return;
+      }
+
+      const localId = createClientMessageId();
+
+      stagedAttachments = [
+        ...stagedAttachments,
+        {
+          localId,
+          fileName: file.name || 'attachment',
+          sizeBytes: file.size,
+          progress: 0,
+          status: 'uploading',
+          attachment: null,
+          error: ''
+        }
+      ];
+
+      try {
+        const attachment = await uploadAttachment(
+          file,
+          conversationId,
+          localId
+        );
+
+        updateStagedAttachment(localId, {
+          progress: 100,
+          status: 'ready',
+          attachment,
+          error: ''
+        });
+      } catch (uploadError) {
+        if (
+          !stagedAttachments.some(
+            (candidate) => candidate.localId === localId
+          )
+        ) {
+          return;
+        }
+
+        updateStagedAttachment(localId, {
+          status: 'error',
+          error:
+            uploadError instanceof Error
+              ? uploadError.message
+              : 'Attachment upload failed.'
+        });
+      }
+    });
+
+    await Promise.allSettled(tasks);
+  }
+
+  function handleAttachmentPaste(event: ClipboardEvent) {
+    const files = event.clipboardData?.files;
+    if (!files || files.length === 0) return;
+
+    event.preventDefault();
+    void queueAttachmentFiles(files);
+  }
+
+  function handleAttachmentDrop(event: DragEvent) {
+    const files = event.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+
+    event.preventDefault();
+    void queueAttachmentFiles(files);
+  }
+
+  function stagedReadyIds(): string[] {
+    return currentStagedAttachments()
+      .filter(
+        (item) =>
+          item.status === 'ready' &&
+          Boolean(item.attachment?.id)
+      )
+      .map((item) => item.attachment!.id);
+  }
+
+  function stagedUploadPending(): boolean {
+    return currentStagedAttachments().some(
+      (item) => item.status === 'uploading'
+    );
+  }
+
   function createClientMessageId() {
     if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
     const bytes = new Uint8Array(16);
@@ -506,24 +816,73 @@
     return [hex.slice(0,4).join(''), hex.slice(4,6).join(''), hex.slice(6,8).join(''), hex.slice(8,10).join(''), hex.slice(10,16).join('')].join('-');
   }
 
+
   async function sendMessage() {
     const body = messageBody.trim();
-    if (!body || !activeConversation || busy) return;
+    const attachmentIds = stagedReadyIds();
+
+    if (
+      !activeConversation ||
+      busy ||
+      stagedUploadPending() ||
+      (!body && attachmentIds.length === 0)
+    ) {
+      return;
+    }
+
     const conversationId = activeConversation.id;
-    messageBody = ''; busy = true; error = '';
+    const sentStagedLocalIds = new Set(
+      currentStagedAttachments()
+        .filter((item) => item.status === 'ready')
+        .map((item) => item.localId)
+    );
+
+    messageBody = '';
+    busy = true;
+    error = '';
+
     try {
-      const result = await api(`/api/v1/conversations/${conversationId}/messages`, {
-        method: 'POST', body: JSON.stringify({ clientMessageId: createClientMessageId(), body })
-      });
-      if (activeConversation?.id === conversationId && result?.message) {
+      const result = await api(
+        `/api/v1/conversations/${conversationId}/messages`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            clientMessageId: createClientMessageId(),
+            body,
+            attachmentIds
+          })
+        }
+      );
+
+      stagedAttachments = stagedAttachments.filter(
+        (item) => !sentStagedLocalIds.has(item.localId)
+      );
+
+      if (
+        stagedAttachmentConversationId === conversationId &&
+        stagedAttachments.length === 0
+      ) {
+        stagedAttachmentConversationId = null;
+      }
+
+      if (
+        activeConversation?.id === conversationId &&
+        result?.message
+      ) {
         upsertMessage(result.message);
         await scrollToLatest('smooth');
       }
+
       await refreshConversations();
     } catch (e) {
       messageBody = body;
-      error = e instanceof Error ? e.message : 'Could not send message.';
-    } finally { busy = false; }
+      error =
+        e instanceof Error
+          ? e.message
+          : 'Could not send message.';
+    } finally {
+      busy = false;
+    }
   }
 
   function toggleNewGroupMember(userId: string) {
@@ -2536,6 +2895,44 @@
               <div class="discord-message-body" class:deleted={Boolean(message.deletedAt)}>
                 {message.deletedAt ? 'Message deleted' : message.body}
               </div>
+
+              {#if !message.deletedAt && attachmentsOf(message).length > 0}
+                <div class="cubic-message-attachments">
+                  {#each attachmentsOf(message) as attachment (attachment.id)}
+                    <a
+                      class="cubic-message-attachment"
+                      href={attachment.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`Open ${attachment.originalName}`}
+                    >
+                      <span class="cubic-attachment-glyph" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" width="18" height="18">
+                          <path
+                            d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.8"
+                            stroke-linejoin="round"
+                          />
+                          <path
+                            d="M14 2v6h6"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.8"
+                            stroke-linejoin="round"
+                          />
+                        </svg>
+                      </span>
+
+                      <span class="cubic-attachment-copy">
+                        <strong>{attachment.originalName}</strong>
+                        <small>{formatAttachmentSize(attachment.sizeBytes)}</small>
+                      </span>
+                    </a>
+                  {/each}
+                </div>
+              {/if}
             </div>
           </article>
         {/each}
@@ -2558,9 +2955,143 @@
       </div>
 
       {#if error}<div class="inline-error chat-error">{error}</div>{/if}
-      <form class="composer" onsubmit={(event) => { event.preventDefault(); sendMessage(); }}>
-        <input bind:value={messageBody} maxlength="8000" autocomplete="off" placeholder="Message…" />
-        <button type="submit" aria-label="Send message" title="Send" disabled={!messageBody.trim() || busy}><Icon name="send" size={18} /></button>
+
+      {#if currentStagedAttachments().length > 0}
+        <div
+          class="cubic-attachment-staging"
+          aria-label="Attachments ready to send"
+        >
+          {#each currentStagedAttachments() as item (item.localId)}
+            <div
+              class="cubic-staged-attachment"
+              class:error={item.status === 'error'}
+            >
+              <div class="cubic-staged-attachment-main">
+                <span class="cubic-attachment-glyph" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18">
+                    <path
+                      d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linejoin="round"
+                    />
+                    <path
+                      d="M14 2v6h6"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </span>
+
+                <span class="cubic-staged-attachment-copy">
+                  <strong>{item.fileName}</strong>
+                  <small>
+                    {#if item.status === 'uploading'}
+                      Uploading… {item.progress}%
+                    {:else if item.status === 'ready'}
+                      {formatAttachmentSize(item.sizeBytes)} · Ready
+                    {:else}
+                      {item.error || 'Upload failed'}
+                    {/if}
+                  </small>
+                </span>
+              </div>
+
+              {#if item.status === 'uploading'}
+                <div
+                  class="cubic-upload-progress"
+                  aria-label={`Uploading ${item.fileName}: ${item.progress}%`}
+                >
+                  <span style={`width: ${item.progress}%`}></span>
+                </div>
+              {/if}
+
+              <button
+                class="cubic-staged-remove"
+                type="button"
+                aria-label={`Remove ${item.fileName}`}
+                title="Remove attachment"
+                onclick={() => void discardStagedAttachment(item.localId)}
+              >
+                ×
+              </button>
+            </div>
+          {/each}
+        </div>
+      {/if}
+
+      <form
+        class="composer cubic-attachment-composer"
+        onsubmit={(event) => {
+          event.preventDefault();
+          sendMessage();
+        }}
+        onpaste={handleAttachmentPaste}
+        ondragover={(event) => {
+          if (event.dataTransfer?.types.includes('Files')) {
+            event.preventDefault();
+          }
+        }}
+        ondrop={handleAttachmentDrop}
+      >
+        <input
+          class="cubic-attachment-input"
+          bind:this={attachmentInput}
+          type="file"
+          multiple
+          tabindex="-1"
+          aria-hidden="true"
+          onchange={(event) => {
+            const input = event.currentTarget;
+            if (input.files?.length) {
+              void queueAttachmentFiles(input.files);
+            }
+            input.value = '';
+          }}
+        />
+
+        <button
+          class="cubic-attachment-picker"
+          type="button"
+          aria-label="Add attachment"
+          title="Add attachment"
+          disabled={busy || stagedUploadPending()}
+          onclick={() => attachmentInput?.click()}
+        >
+          <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+            <path
+              d="m20.5 11.5-8.9 8.9a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 1 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+
+        <input
+          bind:value={messageBody}
+          maxlength="8000"
+          autocomplete="off"
+          placeholder="Message…"
+        />
+
+        <button
+          type="submit"
+          aria-label="Send message"
+          title={stagedUploadPending() ? 'Wait for attachments to finish uploading' : 'Send'}
+          disabled={
+            busy ||
+            stagedUploadPending() ||
+            (!messageBody.trim() && stagedReadyIds().length === 0)
+          }
+        >
+          <Icon name="send" size={18} />
+        </button>
       </form>
 
       {#if groupPanelOpen && groupDetails}

@@ -3499,3 +3499,186 @@ body { background: var(--cubic-onyx-0); }
     width: min(270px, calc(100vw - 16px));
   }
 }
+
+/* Cubic alpha.7 Slice 1B — attachment composer/message UI only */
+.cubic-attachment-input {
+  display: none;
+}
+
+.composer.cubic-attachment-composer {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.cubic-attachment-picker {
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  min-height: 38px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  color: #b5bac1;
+  background: transparent;
+  cursor: pointer;
+}
+
+.cubic-attachment-picker:hover:not(:disabled) {
+  color: #dbdee1;
+  background: #2b2d31;
+}
+
+.cubic-attachment-picker:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+.cubic-attachment-staging {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 260px));
+  gap: 8px;
+  padding: 8px 10px 0;
+}
+
+.cubic-staged-attachment {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #2b2d31;
+  border-radius: 8px;
+  background: #1e1f22;
+}
+
+.cubic-staged-attachment.error {
+  border-color: rgba(242, 63, 66, .55);
+}
+
+.cubic-staged-attachment-main {
+  min-width: 0;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 38px 9px 10px;
+}
+
+.cubic-attachment-glyph {
+  width: 31px;
+  height: 31px;
+  min-width: 31px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: #b5bac1;
+  background: #2b2d31;
+}
+
+.cubic-staged-attachment-copy,
+.cubic-attachment-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.cubic-staged-attachment-copy strong,
+.cubic-attachment-copy strong {
+  overflow: hidden;
+  color: #dbdee1;
+  font-size: .78rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cubic-staged-attachment-copy small,
+.cubic-attachment-copy small {
+  color: #949ba4;
+  font-size: .66rem;
+}
+
+.cubic-staged-attachment.error .cubic-staged-attachment-copy small {
+  color: #fa777c;
+}
+
+.cubic-staged-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: #b5bac1;
+  background: transparent;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cubic-staged-remove:hover {
+  color: #fff;
+  background: #35373c;
+}
+
+.cubic-upload-progress {
+  height: 3px;
+  overflow: hidden;
+  background: #111214;
+}
+
+.cubic-upload-progress > span {
+  height: 100%;
+  display: block;
+  background: #5865f2;
+  transition: width .12s linear;
+}
+
+.cubic-message-attachments {
+  max-width: min(520px, 100%);
+  display: grid;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.cubic-message-attachment {
+  width: min(100%, 420px);
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid #2b2d31;
+  border-radius: 8px;
+  color: inherit;
+  background: #1e1f22;
+  text-decoration: none;
+}
+
+.cubic-message-attachment:hover {
+  border-color: #3f4147;
+  background: #232428;
+}
+
+@media (max-width: 680px) {
+  .cubic-attachment-staging {
+    grid-template-columns: 1fr;
+    padding-inline: 8px;
+  }
+
+  .cubic-message-attachments,
+  .cubic-message-attachment {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .cubic-attachment-picker {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    min-height: 36px;
+  }
+}

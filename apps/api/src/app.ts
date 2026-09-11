@@ -13,8 +13,10 @@ import { conversationRoutes } from './routes/conversations.js';
 import { groupRoutes } from './routes/groups.js';
 import { voiceRoutes } from './routes/voice.js';
 import { callHistoryRoutes } from './routes/call-history.js';
+import { attachmentRoutes } from './routes/attachments.js';
 import { createRealtimeEvents, type RealtimeEvents } from './realtime/events.js';
 import { LocalMediaStore } from './media/local.js';
+import { AttachmentStore } from './media/attachments.js';
 
 export interface CreateAppOptions {
   database: Database;
@@ -26,6 +28,7 @@ export interface CreateAppOptions {
   registrationEnabled: boolean;
   mediaRoot?: string;
   groupAvatarMaxBytes?: number;
+  attachmentMaxBytes?: number;
   livekitPublicUrl: string;
   livekitApiKey: string;
   livekitApiSecret: string;
@@ -38,11 +41,23 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   const app = Fastify({
     logger: options.logger ?? true,
     trustProxy: options.trustProxyHops,
-    bodyLimit: Math.max(2 * 1024 * 1024, (options.groupAvatarMaxBytes ?? 2 * 1024 * 1024) + 512 * 1024)
+    bodyLimit: Math.max(
+      2 * 1024 * 1024,
+      (options.groupAvatarMaxBytes ?? 2 * 1024 * 1024) + 512 * 1024,
+      (options.attachmentMaxBytes ?? 25 * 1024 * 1024) + 1024 * 1024
+    )
   });
 
   await app.register(cookie);
-  await app.register(multipart, { limits: { files: 1, fileSize: options.groupAvatarMaxBytes ?? 2 * 1024 * 1024 } });
+  await app.register(multipart, {
+    limits: {
+      files: 1,
+      fileSize: Math.max(
+        options.groupAvatarMaxBytes ?? 2 * 1024 * 1024,
+        options.attachmentMaxBytes ?? 25 * 1024 * 1024
+      )
+    }
+  });
 
   await app.register(cors, {
     origin: options.corsOrigin,
@@ -102,6 +117,16 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     database: options.database,
     cookieName: options.cookieName,
     realtimeEvents
+  });
+
+  const attachmentStore = new AttachmentStore(options.mediaRoot ?? '/data/media');
+
+  await app.register(attachmentRoutes, {
+    prefix: '/api/v1',
+    database: options.database,
+    cookieName: options.cookieName,
+    attachmentStore,
+    attachmentMaxBytes: options.attachmentMaxBytes ?? 25 * 1024 * 1024
   });
 
   const mediaStore = new LocalMediaStore(options.mediaRoot ?? '/data/media');

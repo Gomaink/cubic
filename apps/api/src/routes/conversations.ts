@@ -2,14 +2,33 @@ import type { FastifyPluginAsync } from 'fastify';
 import { and, desc, eq, lt } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Database } from '@cubic/database';
-import { blocks, conversationMembers, conversations, directConversationPairs, friendships, messages, users } from '@cubic/database/schema';
+import { attachments, blocks, conversationMembers, conversations, directConversationPairs, friendships, messages, users } from '@cubic/database/schema';
 import { createRequireAuth } from '../auth/guard.js';
 import type { RealtimeEvents, RealtimeMessage } from '../realtime/events.js';
 
 const directBodySchema = z.object({ userId: z.string().uuid() });
 const conversationParamsSchema = z.object({ id: z.string().uuid() });
 const messagesQuerySchema = z.object({ before: z.string().datetime().optional(), limit: z.coerce.number().int().min(1).max(100).default(50) });
-const messageBodySchema = z.object({ clientMessageId: z.string().uuid(), body: z.string().trim().min(1).max(8000) });
+const messageBodySchema = z.object({
+  clientMessageId: z.string().uuid(),
+  body: z.string().trim().max(8000).default(''),
+  attachmentIds: z.array(z.string().uuid()).max(10).default([])
+}).superRefine((value, ctx) => {
+  if (!value.body && value.attachmentIds.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Message body or attachment is required.'
+    });
+  }
+
+  if (new Set(value.attachmentIds).size !== value.attachmentIds.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['attachmentIds'],
+      message: 'Attachment IDs must be unique.'
+    });
+  }
+});
 
 function orderedPair(a: string, b: string): [string, string] { return a < b ? [a, b] : [b, a]; }
 
@@ -19,6 +38,71 @@ async function isMember(database: Database, conversationId: string, userId: stri
   const rows = await database.db.select({ userId: conversationMembers.userId }).from(conversationMembers)
     .where(and(eq(conversationMembers.conversationId, conversationId), eq(conversationMembers.userId, userId))).limit(1);
   return Boolean(rows[0]);
+}
+
+type AttachmentDto = {
+  id: string;
+  conversationId: string;
+  messageId: string | null;
+  originalName: string;
+  contentType: string;
+  kind: string;
+  sizeBytes: number;
+  width: number | null;
+  height: number | null;
+  createdAt: string;
+  url: string;
+};
+
+function attachmentDto(row: any): AttachmentDto {
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    messageId: row.message_id,
+    originalName: row.original_name,
+    contentType: row.content_type,
+    kind: row.kind,
+    sizeBytes: row.size_bytes,
+    width: row.width,
+    height: row.height,
+    createdAt: new Date(row.created_at).toISOString(),
+    url: `/api/v1/attachments/${row.id}/content`
+  };
+}
+
+async function attachmentsForMessages(
+  database: Database,
+  messageIds: string[]
+): Promise<Map<string, AttachmentDto[]>> {
+  const byMessage = new Map<string, AttachmentDto[]>();
+  if (messageIds.length === 0) return byMessage;
+
+  const result = await database.pool.query(
+    `select
+       id,
+       conversation_id,
+       message_id,
+       original_name,
+       content_type,
+       kind,
+       size_bytes,
+       width,
+       height,
+       created_at
+     from attachments
+     where message_id = any($1::uuid[])
+     order by created_at asc, id asc`,
+    [messageIds]
+  );
+
+  for (const row of result.rows) {
+    if (!row.message_id) continue;
+    const list = byMessage.get(row.message_id) ?? [];
+    list.push(attachmentDto(row));
+    byMessage.set(row.message_id, list);
+  }
+
+  return byMessage;
 }
 
 export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> = async (app, options) => {
@@ -122,8 +206,19 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
 
     const hasMore = rows.length > query.data.limit;
     const page = rows.slice(0, query.data.limit).reverse();
+    const attachmentsByMessage = await attachmentsForMessages(
+      options.database,
+      page.map((row) => row.id)
+    );
+
     return reply.send({
-      messages: page.map((row) => ({ ...row, createdAt: row.createdAt.toISOString(), editedAt: row.editedAt?.toISOString() ?? null, deletedAt: row.deletedAt?.toISOString() ?? null })),
+      messages: page.map((row) => ({
+        ...row,
+        createdAt: row.createdAt.toISOString(),
+        editedAt: row.editedAt?.toISOString() ?? null,
+        deletedAt: row.deletedAt?.toISOString() ?? null,
+        attachments: attachmentsByMessage.get(row.id) ?? []
+      })),
       nextCursor: hasMore && page[0] ? page[0].createdAt.toISOString() : null
     });
   });
@@ -145,23 +240,133 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
 
     const existing = await options.database.db.select().from(messages)
       .where(and(eq(messages.senderId, me), eq(messages.clientMessageId, parsed.data.clientMessageId))).limit(1);
-    if (existing[0]) return reply.send({ message: { ...existing[0], createdAt: existing[0].createdAt.toISOString(), editedAt: existing[0].editedAt?.toISOString() ?? null, deletedAt: existing[0].deletedAt?.toISOString() ?? null }, duplicate: true });
+
+    if (existing[0]) {
+      const attachmentsByMessage = await attachmentsForMessages(
+        options.database,
+        [existing[0].id]
+      );
+
+      return reply.send({
+        message: {
+          ...existing[0],
+          createdAt: existing[0].createdAt.toISOString(),
+          editedAt: existing[0].editedAt?.toISOString() ?? null,
+          deletedAt: existing[0].deletedAt?.toISOString() ?? null,
+          attachments: attachmentsByMessage.get(existing[0].id) ?? []
+        },
+        duplicate: true
+      });
+    }
 
     const now = new Date();
-    const [created] = await options.database.db.insert(messages).values({ conversationId: params.data.id, senderId: me, clientMessageId: parsed.data.clientMessageId, body: parsed.data.body, createdAt: now }).returning();
-    if (!created) throw new Error('Failed to persist message.');
+    const client = await options.database.pool.connect();
 
-    await options.database.db.update(conversations).set({ updatedAt: now }).where(eq(conversations.id, params.data.id));
+    let created: any;
+    let boundAttachmentRows: any[] = [];
 
-    const message: RealtimeMessage = {
-      ...created,
-      createdAt: created.createdAt.toISOString(),
-      editedAt: created.editedAt?.toISOString() ?? null,
-      deletedAt: created.deletedAt?.toISOString() ?? null,
+    try {
+      await client.query('begin');
+
+      const messageResult = await client.query(
+        `insert into messages (
+           conversation_id,
+           sender_id,
+           client_message_id,
+           body,
+           created_at
+         ) values ($1, $2, $3, $4, $5)
+         returning *`,
+        [
+          params.data.id,
+          me,
+          parsed.data.clientMessageId,
+          parsed.data.body,
+          now
+        ]
+      );
+
+      created = messageResult.rows[0];
+      if (!created) throw new Error('Failed to persist message.');
+
+      if (parsed.data.attachmentIds.length > 0) {
+        const attachmentResult = await client.query(
+          `update attachments
+              set message_id = $1,
+                  attached_at = $2
+            where id = any($3::uuid[])
+              and conversation_id = $4
+              and uploader_id = $5
+              and message_id is null
+          returning
+              id,
+              conversation_id,
+              message_id,
+              original_name,
+              content_type,
+              kind,
+              size_bytes,
+              width,
+              height,
+              created_at`,
+          [
+            created.id,
+            now,
+            parsed.data.attachmentIds,
+            params.data.id,
+            me
+          ]
+        );
+
+        if (attachmentResult.rowCount !== parsed.data.attachmentIds.length) {
+          const error = new Error('One or more attachments are not available.');
+          (error as NodeJS.ErrnoException).code = 'CUBIC_ATTACHMENT_BIND';
+          throw error;
+        }
+
+        boundAttachmentRows = attachmentResult.rows;
+      }
+
+      await client.query(
+        `update conversations
+            set updated_at = $1
+          where id = $2`,
+        [now, params.data.id]
+      );
+
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback').catch(() => {});
+
+      if ((error as NodeJS.ErrnoException).code === 'CUBIC_ATTACHMENT_BIND') {
+        return reply.code(400).send({
+          error: 'One or more attachments are no longer available.'
+        });
+      }
+
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    const message = {
+      id: created.id,
+      conversationId: created.conversation_id,
+      senderId: created.sender_id,
+      clientMessageId: created.client_message_id,
+      body: created.body,
+      createdAt: new Date(created.created_at).toISOString(),
+      editedAt: created.edited_at
+        ? new Date(created.edited_at).toISOString()
+        : null,
+      deletedAt: created.deleted_at
+        ? new Date(created.deleted_at).toISOString()
+        : null,
       senderUsername: request.auth.user.username,
       senderDisplayName: request.auth.user.displayName,
-      senderAvatarUrl: request.auth.user.avatarUrl
-    };
+      senderAvatarUrl: request.auth.user.avatarUrl,
+      attachments: boundAttachmentRows.map(attachmentDto)
+    } satisfies RealtimeMessage & { attachments: AttachmentDto[] };
 
     options.realtimeEvents?.emitMessageCreated({
       conversationId: params.data.id,

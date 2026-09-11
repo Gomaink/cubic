@@ -16,6 +16,7 @@ const envSchema = z.object({
   REGISTRATION_ENABLED: enabledString,
   MEDIA_ROOT: z.string().min(1).default('/data/media'),
   GROUP_AVATAR_MAX_BYTES: z.coerce.number().int().min(65536).max(8 * 1024 * 1024).default(2 * 1024 * 1024),
+  ATTACHMENT_MAX_BYTES: z.coerce.number().int().min(1024 * 1024).max(250 * 1024 * 1024).default(25 * 1024 * 1024),
   LIVEKIT_PUBLIC_URL: z.string().min(1),
   LIVEKIT_API_KEY: z.string().min(3),
   LIVEKIT_API_SECRET: z.string().min(32)

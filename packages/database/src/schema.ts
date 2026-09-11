@@ -190,6 +190,41 @@ export const messages = pgTable(
   ]
 );
 
+
+export const attachments = pgTable(
+  'attachments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    uploaderId: uuid('uploader_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    messageId: uuid('message_id')
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    storageKey: text('storage_key').notNull(),
+    originalName: text('original_name').notNull(),
+    contentType: varchar('content_type', { length: 160 }).notNull(),
+    kind: varchar('kind', { length: 16 }).notNull().default('file'),
+    sizeBytes: integer('size_bytes').notNull(),
+    width: integer('width'),
+    height: integer('height'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    attachedAt: timestamp('attached_at', { withTimezone: true, mode: 'date' })
+  },
+  (table) => [
+    uniqueIndex('attachments_storage_key_uq').on(table.storageKey),
+    index('attachments_message_idx').on(table.messageId),
+    index('attachments_conversation_created_idx')
+      .on(table.conversationId, table.createdAt),
+    index('attachments_pending_uploader_idx')
+      .on(table.uploaderId, table.createdAt)
+  ]
+);
+
 export const calls = pgTable(
   'calls',
   {
