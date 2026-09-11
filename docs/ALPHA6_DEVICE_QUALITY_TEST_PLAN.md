@@ -60,3 +60,19 @@
 - message history paging and jump-to-latest
 - low-height / high-zoom call-stage layout
 - Firefox and no-camera error handling
+
+## Final alpha.6.1 validation
+
+Validated manually:
+
+- camera preflight before enabling capture
+- screen-share preflight before opening native picker
+- resolution/FPS selection and persistence
+- screen share at 30/60 FPS profiles
+- shared audio when the browser/source provides ScreenShareAudio
+- non-fatal no-audio behavior on unsupported browsers/sources
+- independent stream volume
+- stream mute
+- stream-volume persistence
+- microphone audio remaining independent from stream volume
+- no regression in voice/video/screen-share/device-selection flows

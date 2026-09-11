@@ -20,6 +20,8 @@
     | 'maximize'
     | 'screen-share'
     | 'screen-share-off'
+    | 'volume'
+    | 'volume-off'
     | 'check'
     | 'x'
     | 'chevron-down'
@@ -89,6 +91,13 @@
     <rect x="3" y="4" width="18" height="13" rx="2" />
     <path d="M8 21h8M12 17v4M9 10l3-3 3 3M12 7v6" />
     {#if name === 'screen-share-off'}<path d="M3 3l18 18" />{/if}
+  {:else if name === 'volume' || name === 'volume-off'}
+    <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+    {#if name === 'volume'}
+      <path d="M15 9a4 4 0 0 1 0 6M17.5 6.5a8 8 0 0 1 0 11" />
+    {:else}
+      <path d="m16 9 5 5M21 9l-5 5" />
+    {/if}
   {:else if name === 'check'}
     <path d="m5 12 4 4L19 6" />
   {:else if name === 'x'}

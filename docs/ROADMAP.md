@@ -143,3 +143,15 @@ Screen sharing and presentation mode are implemented on the existing LiveKit roo
 
 Device selection, media quality presets, adaptive delivery and final media UI polish complete the
 functional alpha.6 scope. After regression testing, the milestone can move directly to closeout/tag.
+
+### Alpha.6.1 media interaction
+
+A follow-up media UX release adds preflight resolution/FPS selection for camera and screen sharing, clearer browser-dependent shared-audio behavior, and independent per-stream volume controls.
+
+### Alpha.6.1 completed
+
+Alpha.6.1 closes the remaining media-interaction gaps after the alpha.6 media milestone.
+
+Camera and Go Live now use explicit preflight quality selection, shared-audio capability is surfaced clearly, and remote screen-share audio has independent volume control.
+
+The media layer should now be treated as closed for the alpha.6 line. The next product milestone can move to attachments/media messages rather than further transport work.

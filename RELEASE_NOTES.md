@@ -100,3 +100,30 @@ The final functional alpha.6 slice adds browser-persisted device selection and c
 quality presets, along with LiveKit Adaptive Stream and Dynacast. Audio-only calls now remain compact,
 while calls with camera or screen sharing use the media stage without duplicating the participant
 list in the floating dock.
+
+## Alpha.6.1 media interaction follow-up
+
+Camera and Go Live now use a preflight dialog before capture begins. Users choose 720p/1080p and an available frame rate, while screen sharing can explicitly request shared audio.
+
+Because display-audio support varies by browser and selected surface, Cubic detects whether a ScreenShareAudio track was actually published and explains when the stream is video-only.
+
+Remote screen shares now expose a Discord-style right-click menu with an independent 0–100% stream-volume control. This does not change the participant's microphone volume.
+
+## Alpha.6.1 completion status
+
+The media-interaction follow-up is complete and validated.
+
+Validated flows include:
+
+- camera preflight with resolution/FPS selection
+- screen-share preflight with resolution/FPS selection
+- native picker opening only after explicit Go Live confirmation
+- persisted media choices
+- shared-audio request on browsers/sources that support it
+- graceful screen sharing when no shared-audio track is provided
+- independent remote stream volume
+- stream mute without muting microphone audio
+- persisted per-participant stream volume
+- continued operation of voice, camera, multiple shares, presentation mode, device selection and 60 FPS presets
+
+No database schema changes were required. Migration `0003` remains the latest migration.

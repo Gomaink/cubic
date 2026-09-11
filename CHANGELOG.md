@@ -181,3 +181,27 @@ Completed Cubic v2.0.0-alpha.5 Voice.
 - Hid the large media stage for audio-only calls.
 - Reduced participant duplication between the media stage and floating voice dock.
 - Added an Onyx-style Voice & Video settings panel.
+
+## v2.0.0-alpha.6.1
+
+- Added Discord-style camera/share preflight with resolution and FPS choices before capture starts.
+- Screen sharing now explicitly requests browser/system audio when supported.
+- Added a non-fatal notice when the selected browser/source publishes video without ScreenShareAudio.
+- Added per-stream right-click volume controls for remote screen shares.
+- Stream volume persists per remote participant in the current browser.
+- Voice audio and screen-share audio are attached with separate source metadata.
+
+## v2.0.0-alpha.6.1
+
+Completed Cubic v2.0.0-alpha.6.1 Media Interaction.
+
+- Added camera preflight before capture starts.
+- Added Go Live preflight before the browser-native screen-share picker opens.
+- Added explicit resolution and FPS selection for camera and screen sharing.
+- Persisted the last camera/share media choices in the browser.
+- Requested shared tab/system audio when supported by the browser and selected capture source.
+- Added non-fatal detection and messaging when a browser/source does not provide ScreenShareAudio.
+- Added independent per-stream volume control for remote screen-share audio.
+- Added stream mute without affecting the sharer's microphone audio.
+- Persisted per-participant stream volume preferences locally.
+- Preserved all alpha.6 voice, camera, screen-share, device-selection and 60 FPS behavior.

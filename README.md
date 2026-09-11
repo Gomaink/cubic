@@ -143,3 +143,7 @@ See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 ## Current alpha milestone
 
 `v2.0.0-alpha.5` completes the voice layer: authenticated LiveKit rooms, direct-call ringing lifecycle, group voice, mute/deafen, persisted call history, incremental message history and the unified message stream. Alpha.6 moves to camera and screen sharing.
+
+## Current alpha milestone
+
+`v2.0.0-alpha.6.1` completes Cubic's media interaction layer on top of alpha.6: camera/Go Live preflight quality selection, explicit shared-audio capability handling, and independent remote screen-share volume controls.

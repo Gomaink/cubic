@@ -4,13 +4,15 @@
     name,
     local = false,
     focused = false,
-    onclick
+    onclick,
+    oncontextmenu
   }: {
     track?: any | null;
     name: string;
     local?: boolean;
     focused?: boolean;
     onclick?: () => void;
+    oncontextmenu?: (event: MouseEvent) => void;
   } = $props();
 
   let videoElement: HTMLVideoElement | null = null;
@@ -36,6 +38,7 @@
   aria-label={`${focused ? 'Unfocus' : 'Focus'} ${name}'s screen share`}
   title={`${focused ? 'Unfocus' : 'Focus'} ${name}'s screen share`}
   onclick={onclick}
+  oncontextmenu={oncontextmenu}
 >
   {#if track}
     <video bind:this={videoElement} autoplay playsinline muted={local}></video>

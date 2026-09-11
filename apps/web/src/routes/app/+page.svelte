@@ -44,6 +44,7 @@
     videoTrack: any | null;
     screenShareEnabled: boolean;
     screenShareTrack: any | null;
+    screenShareAudioEnabled: boolean;
   };
 
   let voiceRoom: Room | null = null;
@@ -86,6 +87,28 @@
   let audioOutputSupported = $state(false);
   let cameraQuality = $state<CameraQualityPreset>('balanced');
   let screenShareQuality = $state<ScreenShareQualityPreset>('text');
+
+  type MediaPreflightKind = 'camera' | 'screen-share';
+  type MediaResolutionChoice = 720 | 1080;
+  type MediaFpsChoice = 15 | 24 | 30 | 60;
+
+  let mediaPreflightKind = $state<MediaPreflightKind | null>(null);
+  let mediaPreflightResolution = $state<MediaResolutionChoice>(1080);
+  let mediaPreflightFps = $state<MediaFpsChoice>(60);
+  let mediaPreflightBusy = $state(false);
+  let screenShareRequestAudio = $state(true);
+  let voiceMediaNotice = $state('');
+
+  type StreamVolumeMenuState = {
+    identity: string;
+    name: string;
+    x: number;
+    y: number;
+    volume: number;
+    audioAvailable: boolean;
+  };
+
+  let streamVolumeMenu = $state<StreamVolumeMenuState | null>(null);
   let focusedVideoIdentity = $state<string | null>(null);
   let focusedScreenShareIdentity = $state<string | null>(null);
   let screenShareFocusDismissed = false;
@@ -953,6 +976,9 @@
     selectedVideoInput = localStorage.getItem('cubic.videoInput') ?? '';
     selectedAudioOutput = localStorage.getItem('cubic.audioOutput') ?? '';
 
+    const savedShareAudio = localStorage.getItem('cubic.screenShareRequestAudio');
+    if (savedShareAudio === 'false') screenShareRequestAudio = false;
+
     audioOutputSupported =
       typeof HTMLMediaElement !== 'undefined' &&
       'setSinkId' in HTMLMediaElement.prototype;
@@ -966,6 +992,292 @@
 
   function deviceLabel(device: MediaDeviceInfo, index: number, fallback: string): string {
     return device.label || `${fallback} ${index + 1}`;
+  }
+
+  function clampStreamVolume(value: number): number {
+    return Math.max(0, Math.min(100, Math.round(value)));
+  }
+
+  function savedStreamVolume(identity: string): number {
+    if (typeof localStorage === 'undefined') return 100;
+    const raw = Number(localStorage.getItem(`cubic.streamVolume.${identity}`));
+    return Number.isFinite(raw) ? clampStreamVolume(raw) : 100;
+  }
+
+  function applyStreamVolume(identity: string, volume: number) {
+    const normalized = clampStreamVolume(volume);
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(`cubic.streamVolume.${identity}`, String(normalized));
+    }
+
+    const escapedIdentity =
+      typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+        ? CSS.escape(identity)
+        : identity.replace(/["\\]/g, '\\$&');
+
+    voiceAudioHost
+      ?.querySelectorAll<HTMLMediaElement>(
+        `[data-cubic-stream-audio="1"][data-participant-identity="${escapedIdentity}"]`
+      )
+      .forEach((element) => {
+        element.volume = normalized / 100;
+        element.muted = voiceDeafened;
+      });
+
+    if (streamVolumeMenu?.identity === identity) {
+      streamVolumeMenu = { ...streamVolumeMenu, volume: normalized };
+    }
+  }
+
+  function openStreamVolumeMenu(event: MouseEvent, participant: VoiceParticipantView) {
+    if (participant.local) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const width = 270;
+    const height = 160;
+    const x = Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8));
+    const y = Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8));
+
+    streamVolumeMenu = {
+      identity: participant.identity,
+      name: participant.name,
+      x,
+      y,
+      volume: savedStreamVolume(participant.identity),
+      audioAvailable: participant.screenShareAudioEnabled
+    };
+  }
+
+  function closeStreamVolumeMenu() {
+    streamVolumeMenu = null;
+  }
+
+  function onStreamVolumeInput(event: Event) {
+    const menu = streamVolumeMenu;
+    if (!menu) return;
+
+    const value = Number((event.currentTarget as HTMLInputElement).value);
+    applyStreamVolume(menu.identity, value);
+  }
+
+  function toggleStreamVolumeMute() {
+    const menu = streamVolumeMenu;
+    if (!menu) return;
+    applyStreamVolume(menu.identity, menu.volume === 0 ? 100 : 0);
+  }
+
+  function cameraPreflightDefaults(): {
+    resolution: MediaResolutionChoice;
+    fps: MediaFpsChoice;
+  } {
+    const savedResolution =
+      typeof localStorage !== 'undefined'
+        ? Number(localStorage.getItem('cubic.cameraStartResolution'))
+        : 0;
+    const savedFps =
+      typeof localStorage !== 'undefined'
+        ? Number(localStorage.getItem('cubic.cameraStartFps'))
+        : 0;
+
+    if ((savedResolution === 720 || savedResolution === 1080) && [24, 30, 60].includes(savedFps)) {
+      return {
+        resolution: savedResolution as MediaResolutionChoice,
+        fps: savedFps as MediaFpsChoice
+      };
+    }
+
+    if (cameraQuality === 'smooth') return { resolution: 720, fps: 60 };
+    if (cameraQuality === 'high') return { resolution: 1080, fps: 30 };
+    return { resolution: 720, fps: cameraQuality === 'data-saver' ? 24 : 30 };
+  }
+
+  function screenSharePreflightDefaults(): {
+    resolution: MediaResolutionChoice;
+    fps: MediaFpsChoice;
+  } {
+    const savedResolution =
+      typeof localStorage !== 'undefined'
+        ? Number(localStorage.getItem('cubic.screenShareStartResolution'))
+        : 0;
+    const savedFps =
+      typeof localStorage !== 'undefined'
+        ? Number(localStorage.getItem('cubic.screenShareStartFps'))
+        : 0;
+
+    if ((savedResolution === 720 || savedResolution === 1080) && [15, 30, 60].includes(savedFps)) {
+      return {
+        resolution: savedResolution as MediaResolutionChoice,
+        fps: savedFps as MediaFpsChoice
+      };
+    }
+
+    if (screenShareQuality === 'motion') return { resolution: 720, fps: 60 };
+    if (screenShareQuality === 'smooth') return { resolution: 1080, fps: 60 };
+    if (screenShareQuality === 'balanced') return { resolution: 1080, fps: 30 };
+    return { resolution: 1080, fps: 15 };
+  }
+
+  function openMediaPreflight(kind: MediaPreflightKind) {
+    voiceError = '';
+    voiceMediaNotice = '';
+    mediaPreflightKind = kind;
+
+    const defaults =
+      kind === 'camera'
+        ? cameraPreflightDefaults()
+        : screenSharePreflightDefaults();
+
+    mediaPreflightResolution = defaults.resolution;
+    mediaPreflightFps = defaults.fps;
+  }
+
+  function closeMediaPreflight() {
+    if (mediaPreflightBusy) return;
+    mediaPreflightKind = null;
+  }
+
+  function videoDimensions(resolution: MediaResolutionChoice) {
+    return resolution === 1080
+      ? { width: 1920, height: 1080 }
+      : { width: 1280, height: 720 };
+  }
+
+  function cameraStartCaptureOptions(
+    resolution: MediaResolutionChoice,
+    fps: MediaFpsChoice
+  ): any {
+    return {
+      deviceId: selectedVideoInput ? { exact: selectedVideoInput } : undefined,
+      resolution: videoDimensions(resolution),
+      frameRate: fps
+    };
+  }
+
+  function cameraStartPublishOptions(
+    resolution: MediaResolutionChoice,
+    fps: MediaFpsChoice
+  ): any {
+    const maxBitrate =
+      resolution === 1080
+        ? (fps === 60 ? 6_000_000 : 3_500_000)
+        : (fps === 60 ? 3_000_000 : 1_500_000);
+
+    return {
+      simulcast: true,
+      videoEncoding: { maxBitrate, maxFramerate: fps },
+      degradationPreference: fps === 60 ? 'maintain-framerate' : 'balanced'
+    };
+  }
+
+  function screenStartCaptureOptions(
+    resolution: MediaResolutionChoice,
+    fps: MediaFpsChoice
+  ): any {
+    return {
+      audio: screenShareRequestAudio,
+      systemAudio: screenShareRequestAudio ? 'include' : 'exclude',
+      surfaceSwitching: 'include',
+      selfBrowserSurface: 'include',
+      suppressLocalAudioPlayback: false,
+      contentHint: fps === 60 ? 'motion' : (fps === 15 ? 'text' : 'detail'),
+      resolution: {
+        ...videoDimensions(resolution),
+        frameRate: fps
+      }
+    };
+  }
+
+  function screenStartPublishOptions(
+    resolution: MediaResolutionChoice,
+    fps: MediaFpsChoice
+  ): any {
+    let maxBitrate = 2_500_000;
+
+    if (resolution === 720) {
+      maxBitrate = fps === 60 ? 5_000_000 : fps === 30 ? 2_500_000 : 1_500_000;
+    } else {
+      maxBitrate = fps === 60 ? 8_000_000 : fps === 30 ? 4_500_000 : 2_500_000;
+    }
+
+    return {
+      simulcast: true,
+      screenShareEncoding: { maxBitrate, maxFramerate: fps },
+      degradationPreference: fps === 60 ? 'maintain-framerate' : 'maintain-resolution'
+    };
+  }
+
+  function setPreflightResolution(resolution: MediaResolutionChoice) {
+    mediaPreflightResolution = resolution;
+  }
+
+  function setPreflightFps(fps: MediaFpsChoice) {
+    mediaPreflightFps = fps;
+  }
+
+  async function confirmMediaPreflight() {
+    const room = voiceRoom;
+    const kind = mediaPreflightKind;
+    if (!room || voiceStatus !== 'connected' || !kind || mediaPreflightBusy) return;
+
+    mediaPreflightBusy = true;
+    voiceError = '';
+    voiceMediaNotice = '';
+
+    try {
+      if (kind === 'camera') {
+        await room.localParticipant.setCameraEnabled(
+          true,
+          cameraStartCaptureOptions(mediaPreflightResolution, mediaPreflightFps),
+          cameraStartPublishOptions(mediaPreflightResolution, mediaPreflightFps)
+        );
+
+        saveMediaPreference('cubic.cameraStartResolution', String(mediaPreflightResolution));
+        saveMediaPreference('cubic.cameraStartFps', String(mediaPreflightFps));
+      } else {
+        screenShareFocusDismissed = false;
+
+        await room.localParticipant.setScreenShareEnabled(
+          true,
+          screenStartCaptureOptions(mediaPreflightResolution, mediaPreflightFps),
+          screenStartPublishOptions(mediaPreflightResolution, mediaPreflightFps)
+        );
+
+        saveMediaPreference('cubic.screenShareStartResolution', String(mediaPreflightResolution));
+        saveMediaPreference('cubic.screenShareStartFps', String(mediaPreflightFps));
+        saveMediaPreference(
+          'cubic.screenShareRequestAudio',
+          screenShareRequestAudio ? 'true' : 'false'
+        );
+
+        window.setTimeout(() => {
+          if (voiceRoom !== room || !voiceScreenShareEnabled) return;
+
+          const audioPublication =
+            room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio);
+
+          if (screenShareRequestAudio && (!audioPublication || audioPublication.isMuted)) {
+            voiceMediaNotice =
+              'Screen is live without shared audio. If your browser offers “Share tab/system audio”, enable it in the native picker. Some browsers do not support screen-share audio.';
+          } else if (screenShareRequestAudio && audioPublication) {
+            voiceMediaNotice = 'Shared audio is active.';
+          }
+        }, 600);
+      }
+
+      mediaPreflightKind = null;
+      syncVoiceParticipants();
+    } catch (error) {
+      voiceError =
+        kind === 'camera'
+          ? mediaDeviceErrorMessage(error, 'camera')
+          : screenShareErrorMessage(error);
+      syncVoiceParticipants();
+    } finally {
+      mediaPreflightBusy = false;
+    }
   }
 
   function cameraQualityLabel(): string {
@@ -1399,6 +1711,8 @@
     const nextParticipants = all.map((participant) => {
       const cameraPublication = participant.getTrackPublication(Track.Source.Camera);
       const screenPublication = participant.getTrackPublication(Track.Source.ScreenShare);
+      const screenAudioPublication =
+        participant.getTrackPublication(Track.Source.ScreenShareAudio);
       const cameraEnabled = Boolean(
         cameraPublication &&
         !cameraPublication.isMuted &&
@@ -1415,7 +1729,12 @@
         cameraEnabled,
         videoTrack: cameraPublication?.track ?? null,
         screenShareEnabled,
-        screenShareTrack: screenPublication?.track ?? null
+        screenShareTrack: screenPublication?.track ?? null,
+        screenShareAudioEnabled: Boolean(
+          screenAudioPublication &&
+          !screenAudioPublication.isMuted &&
+          screenAudioPublication.track
+        )
       };
     });
 
@@ -1452,24 +1771,47 @@
 
   function setRemoteAudioDeafened(deafened: boolean) {
     voiceAudioHost
-      ?.querySelectorAll<HTMLMediaElement>('[data-cubic-voice="1"]')
+      ?.querySelectorAll<HTMLMediaElement>(
+        '[data-cubic-voice="1"], [data-cubic-stream-audio="1"]'
+      )
       .forEach((element) => {
         element.muted = deafened;
       });
   }
 
-  function attachVoiceAudio(track: any) {
+  function attachVoiceAudio(track: any, publication: any, participant: any) {
     if (track.kind !== Track.Kind.Audio || !voiceAudioHost) return;
+
     const element = track.attach();
     element.autoplay = true;
     element.muted = voiceDeafened;
     element.setAttribute('playsinline', '');
-    element.dataset.cubicVoice = '1';
+
+    if (publication?.source === Track.Source.ScreenShareAudio) {
+      const identity = participant?.identity ?? 'unknown';
+      element.dataset.cubicStreamAudio = '1';
+      element.dataset.participantIdentity = identity;
+      element.volume = savedStreamVolume(identity) / 100;
+    } else {
+      element.dataset.cubicVoice = '1';
+    }
+
     voiceAudioHost.appendChild(element);
   }
 
+  function detachVoiceAudio(track: any) {
+    const elements = track.detach?.() ?? [];
+    for (const element of elements) {
+      if (element instanceof HTMLElement) element.remove();
+    }
+  }
+
   function clearVoiceAudio() {
-    voiceAudioHost?.querySelectorAll('[data-cubic-voice="1"]').forEach((element) => element.remove());
+    voiceAudioHost
+      ?.querySelectorAll(
+        '[data-cubic-voice="1"], [data-cubic-stream-audio="1"]'
+      )
+      .forEach((element) => element.remove());
   }
 
   async function leaveVoice(endDirect = true) {
@@ -1498,6 +1840,9 @@
     screenShareFocusDismissed = false;
     mediaSettingsOpen = false;
     mediaSettingsNotice = '';
+    mediaPreflightKind = null;
+    voiceMediaNotice = '';
+    streamVolumeMenu = null;
     voiceError = '';
     clearVoiceAudio();
 
@@ -1567,13 +1912,13 @@
       });
       room.on(RoomEvent.LocalTrackUnpublished, resync);
       room.on(RoomEvent.ActiveSpeakersChanged, resync);
-      room.on(RoomEvent.TrackSubscribed, (track) => {
+      room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
         if (voiceRoom !== room) return;
-        attachVoiceAudio(track);
+        attachVoiceAudio(track, publication, participant);
         syncVoiceParticipants();
       });
       room.on(RoomEvent.TrackUnsubscribed, (track) => {
-        track.detach();
+        detachVoiceAudio(track);
         resync();
       });
       room.on(RoomEvent.Reconnecting, () => {
@@ -1700,21 +2045,20 @@
     const room = voiceRoom;
     if (!room || voiceStatus !== 'connected') return;
 
+    const current = room.localParticipant.getTrackPublication(Track.Source.Camera);
+    const enabled = Boolean(current && !current.isMuted && current.track);
+
+    if (!enabled) {
+      openMediaPreflight('camera');
+      return;
+    }
+
     try {
-      const current = room.localParticipant.getTrackPublication(Track.Source.Camera);
-      const enabled = Boolean(current && !current.isMuted && current.track);
-      if (enabled) {
-        await room.localParticipant.setCameraEnabled(false);
-      } else {
-        await room.localParticipant.setCameraEnabled(
-          true,
-          cameraCaptureOptions(),
-          cameraPublishOptions()
-        );
-      }
+      voiceError = '';
+      await room.localParticipant.setCameraEnabled(false);
       syncVoiceParticipants();
-    } catch (e) {
-      voiceError = mediaDeviceErrorMessage(e, 'camera');
+    } catch (error) {
+      voiceError = mediaDeviceErrorMessage(error, 'camera');
       syncVoiceParticipants();
     }
   }
@@ -1728,25 +2072,21 @@
       return;
     }
 
+    const current = room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+    const enabled = Boolean(current && !current.isMuted);
+
+    if (!enabled) {
+      openMediaPreflight('screen-share');
+      return;
+    }
+
     try {
       voiceError = '';
-      const current = room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
-      const enabled = Boolean(current && !current.isMuted);
-
-      if (enabled) {
-        await room.localParticipant.setScreenShareEnabled(false);
-      } else {
-        screenShareFocusDismissed = false;
-        await room.localParticipant.setScreenShareEnabled(
-          true,
-          screenShareCaptureOptions(),
-          screenSharePublishOptions()
-        );
-      }
-
+      voiceMediaNotice = '';
+      await room.localParticipant.setScreenShareEnabled(false);
       syncVoiceParticipants();
-    } catch (e) {
-      voiceError = screenShareErrorMessage(e);
+    } catch (error) {
+      voiceError = screenShareErrorMessage(error);
       syncVoiceParticipants();
     }
   }
@@ -2071,6 +2411,10 @@
                   local={focusedScreenShareParticipant()?.local ?? false}
                   focused={true}
                   onclick={returnToMediaGrid}
+                  oncontextmenu={(event) => {
+                    const participant = focusedScreenShareParticipant();
+                    if (participant) openStreamVolumeMenu(event, participant);
+                  }}
                 />
               </div>
 
@@ -2102,6 +2446,7 @@
                   local={participant.local}
                   focused={false}
                   onclick={() => focusScreenShare(participant.identity)}
+                  oncontextmenu={(event) => openStreamVolumeMenu(event, participant)}
                 />
               {/each}
 
@@ -2639,6 +2984,20 @@
         </div>
       {/if}
 
+      {#if voiceMediaNotice}
+        <div class="voice-media-notice" role="status">
+          {voiceMediaNotice}
+          <button
+            type="button"
+            aria-label="Dismiss media notice"
+            title="Dismiss"
+            onclick={() => voiceMediaNotice = ''}
+          >
+            <Icon name="x" size={14} />
+          </button>
+        </div>
+      {/if}
+
       {#if voiceError}
         <div class="inline-error voice-error">{voiceError}</div>
         {#if voiceStatus === 'idle'}
@@ -2649,6 +3008,192 @@
       {/if}
 
       <div class="voice-audio-host" bind:this={voiceAudioHost}></div>
+    </section>
+  {/if}
+
+  {#if mediaPreflightKind}
+    <div class="media-preflight-backdrop">
+      <section
+        class="media-preflight"
+        role="dialog"
+        aria-modal="true"
+        aria-label={mediaPreflightKind === 'camera' ? 'Camera quality' : 'Go Live quality'}
+      >
+        <header>
+          <div>
+            <Icon name={mediaPreflightKind === 'camera' ? 'camera' : 'screen-share'} size={20} />
+            <div>
+              <strong>{mediaPreflightKind === 'camera' ? 'Turn on camera' : 'Go Live'}</strong>
+              <small>
+                {mediaPreflightKind === 'camera'
+                  ? 'Choose quality before publishing your camera.'
+                  : 'Choose stream quality before the browser share picker opens.'}
+              </small>
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            title="Close"
+            onclick={closeMediaPreflight}
+            disabled={mediaPreflightBusy}
+          >
+            <Icon name="x" size={17} />
+          </button>
+        </header>
+
+        <div class="media-preflight-section">
+          <span>Resolution</span>
+          <div class="media-preflight-options two">
+            <button
+              type="button"
+              class:active={mediaPreflightResolution === 720}
+              onclick={() => setPreflightResolution(720)}
+            >
+              720p
+            </button>
+            <button
+              type="button"
+              class:active={mediaPreflightResolution === 1080}
+              onclick={() => setPreflightResolution(1080)}
+            >
+              1080p
+            </button>
+          </div>
+        </div>
+
+        <div class="media-preflight-section">
+          <span>Frame rate</span>
+          <div class="media-preflight-options">
+            {#if mediaPreflightKind === 'screen-share'}
+              <button
+                type="button"
+                class:active={mediaPreflightFps === 15}
+                onclick={() => setPreflightFps(15)}
+              >
+                15 FPS
+              </button>
+            {:else}
+              <button
+                type="button"
+                class:active={mediaPreflightFps === 24}
+                onclick={() => setPreflightFps(24)}
+              >
+                24 FPS
+              </button>
+            {/if}
+            <button
+              type="button"
+              class:active={mediaPreflightFps === 30}
+              onclick={() => setPreflightFps(30)}
+            >
+              30 FPS
+            </button>
+            <button
+              type="button"
+              class:active={mediaPreflightFps === 60}
+              onclick={() => setPreflightFps(60)}
+            >
+              60 FPS
+            </button>
+          </div>
+        </div>
+
+        {#if mediaPreflightKind === 'screen-share'}
+          <label class="media-preflight-audio">
+            <input type="checkbox" bind:checked={screenShareRequestAudio} />
+            <div>
+              <strong>Request shared audio</strong>
+              <small>
+                Your browser decides whether tab/system audio is available. If the native picker offers
+                a Share audio checkbox, enable it there too.
+              </small>
+            </div>
+          </label>
+        {/if}
+
+        <div class="media-preflight-summary">
+          <strong>{mediaPreflightResolution}p · {mediaPreflightFps} FPS</strong>
+          <small>
+            {mediaPreflightKind === 'screen-share' && mediaPreflightResolution === 1080 && mediaPreflightFps === 60
+              ? 'Up to ~8 Mbps'
+              : mediaPreflightKind === 'screen-share' && mediaPreflightFps === 60
+                ? 'Up to ~5 Mbps'
+                : mediaPreflightKind === 'camera' && mediaPreflightResolution === 1080 && mediaPreflightFps === 60
+                  ? 'Up to ~6 Mbps'
+                  : 'Adaptive bitrate'}
+          </small>
+        </div>
+
+        <footer>
+          <button type="button" onclick={closeMediaPreflight} disabled={mediaPreflightBusy}>
+            Cancel
+          </button>
+          <button
+            class="primary"
+            type="button"
+            onclick={confirmMediaPreflight}
+            disabled={mediaPreflightBusy}
+          >
+            {mediaPreflightBusy
+              ? 'Starting…'
+              : mediaPreflightKind === 'screen-share'
+                ? 'Go Live'
+                : 'Turn on'}
+          </button>
+        </footer>
+      </section>
+    </div>
+  {/if}
+
+  {#if streamVolumeMenu}
+    <button
+      class="stream-volume-dismiss"
+      type="button"
+      aria-label="Close stream volume menu"
+      onclick={closeStreamVolumeMenu}
+      oncontextmenu={(event) => {
+        event.preventDefault();
+        closeStreamVolumeMenu();
+      }}
+    ></button>
+
+    <section
+      class="stream-volume-menu"
+      style={`left:${streamVolumeMenu.x}px;top:${streamVolumeMenu.y}px`}
+      aria-label={`${streamVolumeMenu.name}'s stream volume`}
+    >
+      <header>
+        <div>
+          <strong>{streamVolumeMenu.name}'s stream</strong>
+          <small>{streamVolumeMenu.audioAvailable ? 'Stream volume' : 'No shared audio track'}</small>
+        </div>
+        <span>{streamVolumeMenu.volume}%</span>
+      </header>
+
+      <input
+        type="range"
+        min="0"
+        max="100"
+        step="1"
+        value={streamVolumeMenu.volume}
+        disabled={!streamVolumeMenu.audioAvailable}
+        aria-label="Stream volume"
+        oninput={onStreamVolumeInput}
+      />
+
+      <button
+        type="button"
+        onclick={toggleStreamVolumeMute}
+        disabled={!streamVolumeMenu.audioAvailable}
+      >
+        <Icon name={streamVolumeMenu.volume === 0 ? 'volume' : 'volume-off'} size={17} />
+        {streamVolumeMenu.volume === 0 ? 'Unmute stream' : 'Mute stream'}
+      </button>
+
+      {#if !streamVolumeMenu.audioAvailable}
+        <p>The sender's browser/source did not publish screen-share audio.</p>
+      {/if}
     </section>
   {/if}
 
