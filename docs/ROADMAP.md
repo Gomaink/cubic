@@ -110,3 +110,21 @@ Group invitations, group avatar storage boundary and transaction-scoped membersh
 ### Alpha.4 completed
 
 Alpha.4 is functionally complete and validated. The next milestone is alpha.5, focused on realtime voice using self-hosted LiveKit/WebRTC, while keeping the existing Cubic identity, conversation membership and permission model as the authorization boundary.
+
+### Alpha.5 voice core status
+
+The first alpha.5 slice introduces self-hosted LiveKit voice for direct and group conversations. After LAN/HTTPS validation, remaining alpha.5 work is ringing/call lifecycle, TURN/fallback hardening and voice UX polish before camera/screen sharing.
+
+### Alpha.5 ringing/call lifecycle status
+
+Voice transport is validated and DM ringing/call lifecycle is now implemented. Remaining alpha.5 work is hardening around long-lived/disconnected calls, TURN/fallback deployment, and final voice UX regression testing before alpha.5 closeout.
+
+### Alpha.5 history/deafen status
+
+Message history pagination UX, jump-to-latest behavior, Deafen, and a second Onyx UI refinement are implemented. The next alpha.5 checkpoint is long-lived voice/TURN hardening and final regression testing before closeout.
+
+### Alpha.5 completed
+
+Alpha.5 is functionally complete and validated.
+
+The next milestone is alpha.6: camera and screen sharing on the existing self-hosted LiveKit transport, including participant video tiles, screen-share publishing, fullscreen/focus UX and quality controls. Internet/NAT traversal hardening remains a deployment task alongside alpha.6 rather than a redesign of the voice layer.

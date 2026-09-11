@@ -32,6 +32,33 @@ services:
     networks:
       - cubic
 
+  livekit:
+    image: livekit/livekit-server:v1.13.5
+    restart: unless-stopped
+    environment:
+      LIVEKIT_CONFIG: |
+        port: 7880
+        log_level: info
+        rtc:
+          tcp_port: 7881
+          udp_port: 7882
+          use_external_ip: ${LIVEKIT_USE_EXTERNAL_IP:-false}
+          advertise_internal_ip: ${LIVEKIT_ADVERTISE_INTERNAL_IP:-true}
+          allow_tcp_fallback: true
+          node_ip: ${LIVEKIT_NODE_IP:-192.168.15.172}
+        keys:
+          ${LIVEKIT_API_KEY:-CUBICDEVKEY}: ${LIVEKIT_API_SECRET:-cubic-development-secret-change-me-0123456789}
+        turn:
+          enabled: ${LIVEKIT_TURN_ENABLED:-false}
+          udp_port: 3478
+    ports:
+      - "${LIVEKIT_SIGNAL_PORT:-7880}:7880"
+      - "${LIVEKIT_RTC_TCP_PORT:-7881}:7881/tcp"
+      - "${LIVEKIT_RTC_UDP_PORT:-7882}:7882/udp"
+      - "${LIVEKIT_TURN_UDP_PORT:-3478}:3478/udp"
+    networks:
+      - cubic
+
   api:
     build:
       context: .
@@ -50,6 +77,9 @@ services:
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-true}
       MEDIA_ROOT: ${MEDIA_ROOT:-/data/media}
       GROUP_AVATAR_MAX_BYTES: ${GROUP_AVATAR_MAX_BYTES:-2097152}
+      LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-ws://localhost:7880}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-CUBICDEVKEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-cubic-development-secret-change-me-0123456789}
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -11,6 +11,8 @@ import { userRoutes } from './routes/users.js';
 import { socialRoutes } from './routes/social.js';
 import { conversationRoutes } from './routes/conversations.js';
 import { groupRoutes } from './routes/groups.js';
+import { voiceRoutes } from './routes/voice.js';
+import { callHistoryRoutes } from './routes/call-history.js';
 import { createRealtimeEvents, type RealtimeEvents } from './realtime/events.js';
 import { LocalMediaStore } from './media/local.js';
 
@@ -24,6 +26,9 @@ export interface CreateAppOptions {
   registrationEnabled: boolean;
   mediaRoot?: string;
   groupAvatarMaxBytes?: number;
+  livekitPublicUrl: string;
+  livekitApiKey: string;
+  livekitApiSecret: string;
   logger?: boolean;
   realtimeEvents?: RealtimeEvents;
 }
@@ -108,6 +113,21 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     realtimeEvents,
     mediaStore,
     groupAvatarMaxBytes: options.groupAvatarMaxBytes ?? 2 * 1024 * 1024
+  });
+
+  await app.register(voiceRoutes, {
+    prefix: '/api/v1/voice',
+    database: options.database,
+    cookieName: options.cookieName,
+    livekitPublicUrl: options.livekitPublicUrl,
+    livekitApiKey: options.livekitApiKey,
+    livekitApiSecret: options.livekitApiSecret
+  });
+
+  await app.register(callHistoryRoutes, {
+    prefix: '/api/v1/calls',
+    database: options.database,
+    cookieName: options.cookieName
   });
 
   return app;

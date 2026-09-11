@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { io, type Socket } from 'socket.io-client';
+  import { Room, RoomEvent, Track } from 'livekit-client';
+  import Icon from '$lib/ui/Icon.svelte';
 
   let { data } = $props();
   let loggingOut = $state(false);
@@ -29,6 +31,59 @@
   let avatarUploading = $state(false);
   let avatarError = $state('');
   let avatarInput: HTMLInputElement | null = null;
+
+  type VoiceParticipantView = {
+    identity: string;
+    name: string;
+    muted: boolean;
+    speaking: boolean;
+    local: boolean;
+  };
+
+  let voiceRoom: Room | null = null;
+  let voiceConversationId = $state<string | null>(null);
+  let voiceConversationTitle = $state('');
+  let voiceStatus = $state<'idle' | 'connecting' | 'connected' | 'reconnecting'>('idle');
+  let voiceParticipants = $state<VoiceParticipantView[]>([]);
+  let voiceMuted = $state(false);
+  let voiceError = $state('');
+  let voiceAudioHost: HTMLDivElement | null = null;
+
+  const MESSAGE_PAGE_SIZE = 50;
+  const HISTORY_TOP_THRESHOLD = 120;
+  const LATEST_THRESHOLD = 120;
+
+  let messagesViewport: HTMLDivElement | null = null;
+  let historyCursor = $state<string | null>(null);
+  let historyHasMore = $state(false);
+  let historyLoading = $state(false);
+  let atLatest = $state(true);
+  let unreadNewMessages = $state(0);
+
+  let voiceDeafened = $state(false);
+  let voiceMutedBeforeDeafen = false;
+
+  type DirectCallWire = {
+    id: string;
+    conversationId: string;
+    callerId: string;
+    calleeId: string;
+    callerDisplayName: string;
+    callerUsername: string;
+    state: 'ringing' | 'accepted' | 'declined' | 'cancelled' | 'ended' | 'missed';
+    createdAt: string;
+    acceptedAt: string | null;
+    actorId: string | null;
+    joinSocketIds: string[];
+  };
+
+  type CallUiState = 'idle' | 'calling' | 'ringing' | 'connecting' | 'in-call' | 'rejoin';
+
+  let directCall = $state<DirectCallWire | null>(null);
+  let callUiState = $state<CallUiState>('idle');
+  let callActionBusy = $state(false);
+  let callNotice = $state('');
+  let callNoticeTimer: ReturnType<typeof setTimeout> | undefined;
 
   async function api(path: string, init: RequestInit = {}) {
     const headers = new Headers(init.headers ?? {});
@@ -114,23 +169,193 @@
     });
   }
 
-  function upsertMessage(message: any) {
+
+  function messageSenderName(message: any): string {
+    if (message.senderId === data.user.id) return data.user.displayName;
+    return message.senderDisplayName ?? message.senderUsername ?? 'Member';
+  }
+
+  function messageSenderInitial(message: any): string {
+    return messageSenderName(message).slice(0, 1).toUpperCase() || '?';
+  }
+
+  function isMessageContinuation(index: number): boolean {
+    if (index <= 0) return false;
+    const current = chatMessages[index];
+    const previous = chatMessages[index - 1];
+    if (!current || !previous || current.senderId !== previous.senderId) return false;
+
+    const currentAt = new Date(current.createdAt);
+    const previousAt = new Date(previous.createdAt);
+    if (currentAt.toDateString() !== previousAt.toDateString()) return false;
+
+    return currentAt.getTime() - previousAt.getTime() <= 7 * 60 * 1000;
+  }
+
+  function showMessageDateDivider(index: number): boolean {
+    if (index === 0) return true;
+    const current = chatMessages[index];
+    const previous = chatMessages[index - 1];
+    if (!current || !previous) return false;
+
+    return new Date(current.createdAt).toDateString() !==
+      new Date(previous.createdAt).toDateString();
+  }
+
+  function formatMessageDay(value: string): string {
+    const date = new Date(value);
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+
+    if (date.toDateString() === today.toDateString()) return 'Today';
+    if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+
+    return date.toLocaleDateString([], {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: date.getFullYear() === today.getFullYear() ? undefined : 'numeric'
+    });
+  }
+
+  function formatMessageTime(value: string): string {
+    return new Date(value).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  function sortMessages(items: any[]): any[] {
+    return [...items].sort((a: any, b: any) => {
+      const byTime = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      return byTime || String(a.id).localeCompare(String(b.id));
+    });
+  }
+
+  function mergeMessages(...pages: any[][]): any[] {
+    const byId = new Map<string, any>();
+    for (const pageItems of pages) {
+      for (const message of pageItems) byId.set(message.id, message);
+    }
+    return sortMessages(Array.from(byId.values()));
+  }
+
+  function upsertMessage(message: any): boolean {
     const index = chatMessages.findIndex((item: any) => item.id === message.id);
     if (index >= 0) {
       chatMessages[index] = message;
       chatMessages = [...chatMessages];
-      return;
+      return false;
     }
-    chatMessages = [...chatMessages, message].sort(
-      (a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    );
+    chatMessages = sortMessages([...chatMessages, message]);
+    return true;
+  }
+
+  function isNearLatest(): boolean {
+    const viewport = messagesViewport;
+    if (!viewport) return true;
+    return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= LATEST_THRESHOLD;
+  }
+
+  async function scrollToLatest(behavior: ScrollBehavior = 'auto') {
+    await tick();
+    const viewport = messagesViewport;
+    if (!viewport) return;
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+    atLatest = true;
+    unreadNewMessages = 0;
+  }
+
+  async function loadLatestHistory(conversationId: string) {
+    historyLoading = true;
+    historyCursor = null;
+    historyHasMore = false;
+    unreadNewMessages = 0;
+    atLatest = true;
+
+    try {
+      const payload = await api(
+        `/api/v1/conversations/${conversationId}/messages?limit=${MESSAGE_PAGE_SIZE}`
+      );
+      if (activeConversation?.id !== conversationId) return;
+
+      chatMessages = mergeMessages(payload.messages ?? [], chatMessages);
+      historyCursor = payload.nextCursor ?? null;
+      historyHasMore = Boolean(payload.nextCursor);
+      await scrollToLatest();
+    } finally {
+      if (activeConversation?.id === conversationId) historyLoading = false;
+    }
+  }
+
+  async function loadOlderMessages() {
+    const conversationId = activeConversation?.id;
+    const cursor = historyCursor;
+    const viewport = messagesViewport;
+    if (!conversationId || !cursor || !viewport || historyLoading || !historyHasMore) return;
+
+    historyLoading = true;
+    const previousHeight = viewport.scrollHeight;
+    const previousTop = viewport.scrollTop;
+
+    try {
+      const payload = await api(
+        `/api/v1/conversations/${conversationId}/messages?limit=${MESSAGE_PAGE_SIZE}&before=${encodeURIComponent(cursor)}`
+      );
+      if (activeConversation?.id !== conversationId) return;
+
+      chatMessages = mergeMessages(payload.messages ?? [], chatMessages);
+      historyCursor = payload.nextCursor ?? null;
+      historyHasMore = Boolean(payload.nextCursor);
+
+      await tick();
+      const current = messagesViewport;
+      if (current) current.scrollTop = current.scrollHeight - previousHeight + previousTop;
+    } finally {
+      if (activeConversation?.id === conversationId) historyLoading = false;
+    }
+  }
+
+  function handleMessagesScroll() {
+    const viewport = messagesViewport;
+    if (!viewport) return;
+
+    const nowAtLatest = isNearLatest();
+    atLatest = nowAtLatest;
+    if (nowAtLatest) unreadNewMessages = 0;
+
+    if (viewport.scrollTop <= HISTORY_TOP_THRESHOLD && historyHasMore && !historyLoading) {
+      void loadOlderMessages();
+    }
   }
 
   async function syncActiveConversation() {
-    if (!activeConversation) return;
+    const conversationId = activeConversation?.id;
+    if (!conversationId) return;
+
     try {
-      const payload = await api(`/api/v1/conversations/${activeConversation.id}/messages?limit=50`);
-      chatMessages = payload.messages;
+      const wasAtLatest = isNearLatest();
+      const knownIds = new Set(chatMessages.map((message: any) => message.id));
+      const payload = await api(
+        `/api/v1/conversations/${conversationId}/messages?limit=${MESSAGE_PAGE_SIZE}`
+      );
+      if (activeConversation?.id !== conversationId) return;
+
+      const incoming = (payload.messages ?? []).filter((message: any) => !knownIds.has(message.id));
+      chatMessages = mergeMessages(chatMessages, payload.messages ?? []);
+
+      if (historyCursor === null && chatMessages.length <= MESSAGE_PAGE_SIZE) {
+        historyCursor = payload.nextCursor ?? null;
+        historyHasMore = Boolean(payload.nextCursor);
+      }
+
+      if (wasAtLatest) {
+        await scrollToLatest();
+      } else {
+        unreadNewMessages += incoming.filter((message: any) => message.senderId !== data.user.id).length;
+        atLatest = false;
+      }
     } catch {
       // Resume/reconnect will retry.
     }
@@ -194,8 +419,14 @@
     activeConversation = conversation;
     groupPanelOpen = false;
     groupDetails = null;
-    const payload = await api(`/api/v1/conversations/${conversation.id}/messages?limit=50`);
-    chatMessages = payload.messages;
+    chatMessages = [];
+    historyCursor = null;
+    historyHasMore = false;
+    historyLoading = false;
+    unreadNewMessages = 0;
+    atLatest = true;
+
+    await loadLatestHistory(conversation.id);
     if (conversation.kind === 'group') await refreshGroupDetails();
 
     realtimeSocket?.timeout(4000).emit('conversation:join', { conversationId: conversation.id }, () => {});
@@ -206,6 +437,12 @@
     chatMessages = [];
     groupDetails = null;
     groupPanelOpen = false;
+    historyCursor = null;
+    historyHasMore = false;
+    historyLoading = false;
+    unreadNewMessages = 0;
+    atLatest = true;
+    messagesViewport = null;
   }
 
   function createClientMessageId() {
@@ -227,7 +464,10 @@
       const result = await api(`/api/v1/conversations/${conversationId}/messages`, {
         method: 'POST', body: JSON.stringify({ clientMessageId: createClientMessageId(), body })
       });
-      if (activeConversation?.id === conversationId && result?.message) upsertMessage(result.message);
+      if (activeConversation?.id === conversationId && result?.message) {
+        upsertMessage(result.message);
+        await scrollToLatest('smooth');
+      }
       await refreshConversations();
     } catch (e) {
       messageBody = body;
@@ -461,8 +701,419 @@
     } finally { busy = false; }
   }
 
+
+  function socketRequest<T = any>(event: string, payload: unknown = {}): Promise<T> {
+    const socket = realtimeSocket;
+    if (!socket?.connected) return Promise.reject(new Error('Realtime is reconnecting. Try again in a moment.'));
+
+    return new Promise<T>((resolve, reject) => {
+      const timeout = window.setTimeout(() => reject(new Error('Realtime request timed out.')), 6000);
+      socket.emit(event, payload, (result: any) => {
+        window.clearTimeout(timeout);
+        if (!result?.ok) {
+          reject(new Error(result?.error ?? 'Realtime request failed.'));
+          return;
+        }
+        resolve(result as T);
+      });
+    });
+  }
+
+  function conversationForCall(call: DirectCallWire): any {
+    const known = conversations.find((conversation) => conversation.id === call.conversationId);
+    if (known) return known;
+
+    return {
+      id: call.conversationId,
+      kind: 'direct',
+      peer: {
+        id: call.callerId,
+        displayName: call.callerDisplayName,
+        username: call.callerUsername
+      }
+    };
+  }
+
+  function callPeerName(call: DirectCallWire): string {
+    const known = conversations.find((conversation) => conversation.id === call.conversationId);
+    if (known) return conversationName(known);
+    return call.callerId === data.user.id ? 'Friend' : call.callerDisplayName;
+  }
+
+  function showCallNotice(message: string) {
+    callNotice = message;
+    if (callNoticeTimer) clearTimeout(callNoticeTimer);
+    callNoticeTimer = setTimeout(() => {
+      callNotice = '';
+      callNoticeTimer = undefined;
+    }, 3500);
+  }
+
+  async function applyCallEvent(socket: Socket, call: DirectCallWire) {
+    if (['declined', 'cancelled', 'ended', 'missed'].includes(call.state)) {
+      const wasCurrent =
+        directCall?.id === call.id ||
+        (voiceConversationId === call.conversationId && directCall?.conversationId === call.conversationId);
+
+      if (wasCurrent && voiceConversationId === call.conversationId) {
+        await leaveVoice(false);
+      }
+
+      if (directCall?.id === call.id || wasCurrent) {
+        directCall = null;
+        callUiState = 'idle';
+      }
+
+      const message =
+        call.state === 'declined' ? 'Call declined' :
+        call.state === 'cancelled' ? 'Call cancelled' :
+        call.state === 'missed' ? 'No answer' :
+        'Call ended';
+      showCallNotice(message);
+      return;
+    }
+
+    directCall = call;
+
+    if (call.state === 'ringing') {
+      callUiState = call.callerId === data.user.id ? 'calling' : 'ringing';
+      return;
+    }
+
+    const shouldJoin = call.joinSocketIds?.includes(socket.id ?? '') ?? false;
+    if (shouldJoin) {
+      callUiState = 'connecting';
+      await joinVoice(conversationForCall(call));
+      return;
+    }
+
+    callUiState =
+      voiceConversationId === call.conversationId && voiceStatus === 'connected'
+        ? 'in-call'
+        : 'rejoin';
+  }
+
+  async function syncDirectCall(socket: Socket) {
+    try {
+      const result = await socketRequest<{ ok: true; call: DirectCallWire | null }>('call:sync');
+      if (!result.call) {
+        if (!voiceRoom || directCall?.conversationId === voiceConversationId) {
+          directCall = null;
+          callUiState = 'idle';
+        }
+        return;
+      }
+      await applyCallEvent(socket, result.call);
+    } catch {
+      // The normal Socket.IO reconnect loop will retry on the next connect event.
+    }
+  }
+
+  async function startDirectCall(conversation: any) {
+    if (conversation.kind !== 'direct' || callActionBusy) return;
+
+    if (!window.isSecureContext) {
+      voiceError = 'Calls require HTTPS so the browser can safely access your microphone.';
+      return;
+    }
+
+    if (directCall) {
+      showCallNotice('Finish the current call first');
+      return;
+    }
+
+    if (voiceRoom) {
+      if (!confirm(`Leave ${voiceConversationTitle || 'the current voice room'} and call ${conversationName(conversation)}?`)) return;
+      await leaveVoice();
+    }
+
+    callActionBusy = true;
+    voiceError = '';
+
+    try {
+      const result = await socketRequest<{ ok: true; call: DirectCallWire }>('call:start', {
+        conversationId: conversation.id
+      });
+      directCall = result.call;
+      callUiState = 'calling';
+    } catch (e) {
+      callUiState = 'idle';
+      voiceError = e instanceof Error ? e.message : 'Could not start the call.';
+    } finally {
+      callActionBusy = false;
+    }
+  }
+
+  async function acceptDirectCall() {
+    const call = directCall;
+    if (!call || call.state !== 'ringing' || call.calleeId !== data.user.id || callActionBusy) return;
+
+    callActionBusy = true;
+    try {
+      if (voiceRoom && voiceConversationId !== call.conversationId) await leaveVoice();
+      callUiState = 'connecting';
+      await socketRequest('call:accept', { callId: call.id });
+    } catch (e) {
+      callUiState = 'ringing';
+      voiceError = e instanceof Error ? e.message : 'Could not accept the call.';
+    } finally {
+      callActionBusy = false;
+    }
+  }
+
+  async function declineDirectCall() {
+    const call = directCall;
+    if (!call || callActionBusy) return;
+    callActionBusy = true;
+    try {
+      await socketRequest('call:decline', { callId: call.id });
+    } catch (e) {
+      voiceError = e instanceof Error ? e.message : 'Could not decline the call.';
+    } finally {
+      callActionBusy = false;
+    }
+  }
+
+  async function cancelDirectCall() {
+    const call = directCall;
+    if (!call || callActionBusy) return;
+    callActionBusy = true;
+    try {
+      await socketRequest('call:cancel', { callId: call.id });
+    } catch (e) {
+      voiceError = e instanceof Error ? e.message : 'Could not cancel the call.';
+    } finally {
+      callActionBusy = false;
+    }
+  }
+
+  async function endDirectCall() {
+    const call = directCall;
+    if (!call || callActionBusy) return;
+    callActionBusy = true;
+    try {
+      await socketRequest('call:end', { callId: call.id });
+    } catch (e) {
+      voiceError = e instanceof Error ? e.message : 'Could not end the call.';
+    } finally {
+      callActionBusy = false;
+    }
+  }
+
+  async function rejoinDirectCall() {
+    const call = directCall;
+    if (!call || call.state !== 'accepted' || callActionBusy) return;
+    callUiState = 'connecting';
+    await joinVoice(conversationForCall(call));
+  }
+
+  function syncVoiceParticipants() {
+    const room = voiceRoom;
+    if (!room) {
+      voiceParticipants = [];
+      voiceMuted = false;
+      return;
+    }
+
+    const all = [room.localParticipant, ...Array.from(room.remoteParticipants.values())];
+    voiceParticipants = all.map((participant) => ({
+      identity: participant.identity,
+      name: participant.name || (participant.isLocal ? data.user.displayName : 'Member'),
+      muted: !participant.isMicrophoneEnabled,
+      speaking: participant.isSpeaking,
+      local: participant.isLocal
+    }));
+    voiceMuted = !room.localParticipant.isMicrophoneEnabled;
+  }
+
+  function setRemoteAudioDeafened(deafened: boolean) {
+    voiceAudioHost
+      ?.querySelectorAll<HTMLMediaElement>('[data-cubic-voice="1"]')
+      .forEach((element) => {
+        element.muted = deafened;
+      });
+  }
+
+  function attachVoiceAudio(track: any) {
+    if (track.kind !== Track.Kind.Audio || !voiceAudioHost) return;
+    const element = track.attach();
+    element.autoplay = true;
+    element.muted = voiceDeafened;
+    element.setAttribute('playsinline', '');
+    element.dataset.cubicVoice = '1';
+    voiceAudioHost.appendChild(element);
+  }
+
+  function clearVoiceAudio() {
+    voiceAudioHost?.querySelectorAll('[data-cubic-voice="1"]').forEach((element) => element.remove());
+  }
+
+  async function leaveVoice(endDirect = true) {
+    const room = voiceRoom;
+    const activeCall =
+      directCall?.state === 'accepted' && directCall.conversationId === voiceConversationId
+        ? directCall
+        : null;
+
+    if (endDirect && activeCall && realtimeSocket?.connected) {
+      realtimeSocket.emit('call:end', { callId: activeCall.id }, () => {});
+    }
+
+    voiceRoom = null;
+    voiceConversationId = null;
+    voiceConversationTitle = '';
+    voiceStatus = 'idle';
+    voiceParticipants = [];
+    voiceMuted = false;
+    voiceDeafened = false;
+    voiceMutedBeforeDeafen = false;
+    voiceError = '';
+    clearVoiceAudio();
+
+    if (activeCall) {
+      directCall = null;
+      callUiState = 'idle';
+    }
+
+    if (room) await room.disconnect().catch(() => {});
+  }
+
+  async function joinVoice(conversation: any) {
+    voiceError = '';
+
+    if (!window.isSecureContext) {
+      voiceError = 'Voice requires HTTPS on mobile browsers. Open Cubic through its HTTPS hostname.';
+      return;
+    }
+
+    if (voiceConversationId === conversation.id && voiceRoom) return;
+
+    if (voiceRoom && voiceConversationId !== conversation.id) {
+      if (!confirm(`Leave ${voiceConversationTitle || 'the current voice room'} and join ${conversationName(conversation)}?`)) return;
+      await leaveVoice();
+    }
+
+    voiceStatus = 'connecting';
+    voiceConversationId = conversation.id;
+    voiceConversationTitle = conversationName(conversation);
+
+    try {
+      const ticket = await api(`/api/v1/voice/conversations/${conversation.id}/token`, { method: 'POST' });
+      const room = new Room();
+      voiceRoom = room;
+
+      const resync = () => {
+        if (voiceRoom === room) syncVoiceParticipants();
+      };
+
+      room.on(RoomEvent.ParticipantConnected, resync);
+      room.on(RoomEvent.ParticipantDisconnected, resync);
+      room.on(RoomEvent.TrackMuted, resync);
+      room.on(RoomEvent.TrackUnmuted, resync);
+      room.on(RoomEvent.ActiveSpeakersChanged, resync);
+      room.on(RoomEvent.TrackSubscribed, (track) => {
+        if (voiceRoom !== room) return;
+        attachVoiceAudio(track);
+        syncVoiceParticipants();
+      });
+      room.on(RoomEvent.TrackUnsubscribed, (track) => {
+        track.detach();
+        resync();
+      });
+      room.on(RoomEvent.Reconnecting, () => {
+        if (voiceRoom === room) voiceStatus = 'reconnecting';
+      });
+      room.on(RoomEvent.Reconnected, () => {
+        if (voiceRoom === room) {
+          voiceStatus = 'connected';
+          syncVoiceParticipants();
+        }
+      });
+      room.on(RoomEvent.Disconnected, () => {
+        if (voiceRoom === room) {
+          const disconnectedConversationId = voiceConversationId;
+          voiceRoom = null;
+          voiceConversationId = null;
+          voiceConversationTitle = '';
+          voiceStatus = 'idle';
+          voiceParticipants = [];
+          voiceMuted = false;
+          voiceDeafened = false;
+          voiceMutedBeforeDeafen = false;
+          clearVoiceAudio();
+
+          if (directCall?.state === 'accepted' && directCall.conversationId === disconnectedConversationId) {
+            callUiState = 'rejoin';
+          }
+        }
+      });
+
+      await room.connect(ticket.url, ticket.token);
+      if (voiceRoom !== room) {
+        await room.disconnect();
+        return;
+      }
+
+      await room.startAudio().catch(() => {});
+      await room.localParticipant.setMicrophoneEnabled(true);
+      voiceStatus = 'connected';
+      syncVoiceParticipants();
+      if (directCall?.state === 'accepted' && directCall.conversationId === conversation.id) {
+        callUiState = 'in-call';
+      }
+    } catch (e) {
+      const failedRoom = voiceRoom;
+      voiceRoom = null;
+      voiceConversationId = null;
+      voiceConversationTitle = '';
+      voiceStatus = 'idle';
+      voiceParticipants = [];
+      clearVoiceAudio();
+      if (failedRoom) await failedRoom.disconnect().catch(() => {});
+      if (directCall?.state === 'accepted' && directCall.conversationId === conversation.id) {
+        callUiState = 'rejoin';
+      }
+      voiceError = e instanceof Error ? e.message : 'Could not join voice.';
+    }
+  }
+
+  async function toggleVoiceMute() {
+    const room = voiceRoom;
+    if (!room || voiceStatus !== 'connected' || voiceDeafened) return;
+
+    try {
+      await room.localParticipant.setMicrophoneEnabled(!room.localParticipant.isMicrophoneEnabled);
+      syncVoiceParticipants();
+    } catch (e) {
+      voiceError = e instanceof Error ? e.message : 'Could not change microphone state.';
+    }
+  }
+
+  async function toggleVoiceDeafen() {
+    const room = voiceRoom;
+    if (!room || voiceStatus !== 'connected') return;
+
+    try {
+      if (!voiceDeafened) {
+        voiceMutedBeforeDeafen = !room.localParticipant.isMicrophoneEnabled;
+        await room.localParticipant.setMicrophoneEnabled(false);
+        voiceDeafened = true;
+        setRemoteAudioDeafened(true);
+      } else {
+        voiceDeafened = false;
+        setRemoteAudioDeafened(false);
+        await room.localParticipant.setMicrophoneEnabled(!voiceMutedBeforeDeafen);
+        voiceMutedBeforeDeafen = false;
+      }
+      syncVoiceParticipants();
+    } catch (e) {
+      voiceError = e instanceof Error ? e.message : 'Could not change deafen state.';
+    }
+  }
+
   async function logout() {
     loggingOut = true;
+    await leaveVoice();
     realtimeSocket?.disconnect();
     try { await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' }); }
     finally { window.location.assign('/login'); }
@@ -479,11 +1130,23 @@
     socket.on('connect', () => {
       realtimeConnected = true;
       Promise.all([refreshSocial(), refreshGroupInvites(), refreshConversations(), syncActiveConversation(), refreshGroupDetails()]).catch(() => {});
+      syncDirectCall(socket).catch(() => {});
     });
     socket.on('disconnect', () => { realtimeConnected = false; });
     socket.on('connect_error', () => { realtimeConnected = false; });
     socket.on('message:created', (message: any) => {
-      if (activeConversation?.id === message.conversationId) upsertMessage(message);
+      if (activeConversation?.id === message.conversationId) {
+        const shouldFollow = isNearLatest() || message.senderId === data.user.id;
+        const inserted = upsertMessage(message);
+        if (inserted) {
+          if (shouldFollow) {
+            void scrollToLatest(message.senderId === data.user.id ? 'smooth' : 'auto');
+          } else {
+            unreadNewMessages += 1;
+            atLatest = false;
+          }
+        }
+      }
       queueConversationRefresh();
     });
     socket.on('conversation:updated', (event: any) => {
@@ -493,11 +1156,18 @@
       }
     });
     socket.on('conversation:removed', (event: any) => {
+      if (voiceConversationId === event?.conversationId) void leaveVoice();
       if (activeConversation?.id === event?.conversationId) closeConversation();
       refreshConversations().catch(() => {});
     });
     socket.on('group:invites:updated', () => {
       refreshGroupInvites().catch(() => {});
+    });
+    socket.on('call:incoming', (event: DirectCallWire) => {
+      void applyCallEvent(socket, event);
+    });
+    socket.on('call:state', (event: DirectCallWire) => {
+      void applyCallEvent(socket, event);
     });
 
     let resumeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -541,6 +1211,8 @@
 
       realtimeSocket = null;
       socket.disconnect();
+      if (callNoticeTimer) clearTimeout(callNoticeTimer);
+      void leaveVoice();
     };
   });
 </script>
@@ -550,18 +1222,25 @@
 <main class="messenger-shell">
   <aside class="messenger-nav">
     <div class="messenger-brand"><img src="/images/cubic-w-nobg.png" alt="" /><strong>Cubic</strong><span title={realtimeConnected ? 'Realtime connected' : 'Realtime reconnecting'}>{realtimeConnected ? 'LIVE' : 'SYNC'}</span></div>
-    <button class:active={tab === 'chats'} onclick={() => tab = 'chats'}>Chats</button>
-    <button class:active={tab === 'people'} onclick={() => { tab = 'people'; closeConversation(); }}>People {(requests.filter((r) => r.direction === 'incoming').length + groupInvites.length) ? `(${requests.filter((r) => r.direction === 'incoming').length + groupInvites.length})` : ''}</button>
+    <button class="nav-action" class:active={tab === 'chats'} title="Chats" onclick={() => tab = 'chats'}>
+      <Icon name="message" size={20} /><span>Chats</span>
+    </button>
+    <button class="nav-action" class:active={tab === 'people'} title="People" onclick={() => { tab = 'people'; closeConversation(); }}>
+      <Icon name="users" size={20} />
+      <span>People{(requests.filter((r) => r.direction === 'incoming').length + groupInvites.length) ? ` · ${requests.filter((r) => r.direction === 'incoming').length + groupInvites.length}` : ''}</span>
+    </button>
     <div class="messenger-nav-spacer"></div>
     <div class="mini-profile"><span>{data.user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{data.user.displayName}</strong><small>@{data.user.username}</small></div></div>
-    <button onclick={logout} disabled={loggingOut}>{loggingOut ? 'Logging out…' : 'Log out'}</button>
+    <button class="logout-action" title="Log out" aria-label="Log out" onclick={logout} disabled={loggingOut}>
+      <Icon name="logout" size={20} /><span>{loggingOut ? 'Wait…' : 'Log out'}</span>
+    </button>
   </aside>
 
   <section class="conversation-list">
     {#if tab === 'chats'}
       <header class="conversation-list-header">
         <div><small>MESSAGES</small><h1>Conversations</h1></div>
-        <button class="icon-action" type="button" aria-label="New group" title="New group" onclick={openNewGroup}>+</button>
+        <button class="icon-action" type="button" aria-label="New group" title="New group" onclick={openNewGroup}><Icon name="plus" size={19} /></button>
       </header>
       {#if conversations.length === 0}<div class="empty-state">No conversations yet.<br />Add a friend or create a group.</div>{/if}
       {#each conversations as conversation}
@@ -608,7 +1287,7 @@
   <section class="chat-panel" class:open={activeConversation !== null}>
     {#if activeConversation}
       <header class="chat-header">
-        <button class="chat-back" type="button" aria-label="Back to conversations" onclick={closeConversation}>‹</button>
+        <button class="chat-back" type="button" aria-label="Back to conversations" title="Back" onclick={closeConversation}><Icon name="back" size={24} /></button>
         {#if activeConversation.kind === 'group' && (activeConversation.avatarUrl ?? groupDetails?.avatarUrl)}
           <img class="avatar group-avatar avatar-image" src={activeConversation.avatarUrl ?? groupDetails?.avatarUrl} alt="" />
         {:else}
@@ -619,36 +1298,139 @@
           <small>{activeConversation.kind === 'group' ? `${activeConversation.memberCount ?? groupDetails?.members?.length ?? 0} members` : `@${activeConversation.peer?.username ?? ''}`}</small>
         </div>
         {#if activeConversation.kind === 'group'}
-          <button class="chat-meta-button" type="button" onclick={() => { groupPanelOpen = !groupPanelOpen; if (groupPanelOpen) refreshGroupDetails().catch(() => {}); }}>Group</button>
+          <button class="chat-meta-button" type="button" aria-label="Group settings" title="Group settings" onclick={() => { groupPanelOpen = !groupPanelOpen; if (groupPanelOpen) refreshGroupDetails().catch(() => {}); }}>
+            <Icon name="settings" size={19} />
+          </button>
+        {/if}
+        {#if activeConversation.kind === 'direct'}
+          <button
+            class="chat-voice-button"
+            class:active={directCall?.conversationId === activeConversation.id}
+            type="button"
+            aria-label="Start voice call"
+            title={directCall?.conversationId === activeConversation.id ? 'Call active' : 'Start voice call'}
+            onclick={() => startDirectCall(activeConversation)}
+            disabled={callActionBusy || directCall !== null}
+          >
+            <Icon name={directCall?.conversationId === activeConversation.id ? 'phone-out' : 'phone'} size={19} />
+          </button>
+        {:else}
+          <button
+            class="chat-voice-button"
+            class:active={voiceConversationId === activeConversation.id && voiceStatus === 'connected'}
+            type="button"
+            aria-label="Join group voice"
+            title={voiceConversationId === activeConversation.id ? 'Group voice connected' : 'Join group voice'}
+            onclick={() => joinVoice(activeConversation)}
+            disabled={voiceStatus === 'connecting' && voiceConversationId === activeConversation.id}
+          >
+            <Icon name="headphones" size={20} />
+          </button>
         {/if}
       </header>
 
-      <div class="messages">
-        {#if chatMessages.length === 0}
+      <div class="messages-wrap">
+        <div
+          class="messages"
+          bind:this={messagesViewport}
+          onscroll={handleMessagesScroll}
+          aria-busy={historyLoading}
+        >
+          {#if historyLoading && chatMessages.length > 0}
+            <div class="history-loading" role="status">Loading older messages...</div>
+          {/if}
+          {#if historyLoading && chatMessages.length === 0}
+            <div class="message-skeleton-list" aria-hidden="true">
+              {#each [1, 2, 3, 4, 5, 6] as row}
+                <div class="message-skeleton" class:mine={row % 3 === 0}>
+                  <span></span>
+                  <i></i>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        {#if chatMessages.length === 0 && !historyLoading}
           <div class="chat-empty"><strong>No messages yet</strong><span>Send the first message to start the conversation.</span></div>
         {/if}
-        {#each chatMessages as message}
-          <div class="message" class:mine={message.senderId === data.user.id}>
-            {#if activeConversation.kind === 'group' && message.senderId !== data.user.id}
-              <small class="message-author">{message.senderDisplayName ?? message.senderUsername ?? 'Member'}</small>
-            {/if}
-            <div class="message-bubble">{message.deletedAt ? 'Message deleted' : message.body}</div>
-            <small>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small>
-          </div>
+        {#each chatMessages as message, index}
+          {#if showMessageDateDivider(index)}
+            <div class="message-date-divider" aria-label={formatMessageDay(message.createdAt)}>
+              <span>{formatMessageDay(message.createdAt)}</span>
+            </div>
+          {/if}
+
+          <article
+            class="discord-message"
+            class:continuation={isMessageContinuation(index)}
+            class:mine={message.senderId === data.user.id}
+          >
+            <div class="discord-message-gutter">
+              {#if !isMessageContinuation(index)}
+                {#if message.senderAvatarUrl}
+                  <img
+                    class="discord-message-avatar"
+                    src={message.senderAvatarUrl}
+                    alt=""
+                    loading="lazy"
+                  />
+                {:else}
+                  <span class="discord-message-avatar fallback">
+                    {messageSenderInitial(message)}
+                  </span>
+                {/if}
+              {:else}
+                <time class="discord-message-hover-time" datetime={message.createdAt}>
+                  {formatMessageTime(message.createdAt)}
+                </time>
+              {/if}
+            </div>
+
+            <div class="discord-message-content">
+              {#if !isMessageContinuation(index)}
+                <header class="discord-message-header">
+                  <strong>{messageSenderName(message)}</strong>
+                  {#if message.senderId === data.user.id}
+                    <span class="discord-you">you</span>
+                  {/if}
+                  <time datetime={message.createdAt}>{formatMessageTime(message.createdAt)}</time>
+                </header>
+              {/if}
+
+              <div class="discord-message-body" class:deleted={Boolean(message.deletedAt)}>
+                {message.deletedAt ? 'Message deleted' : message.body}
+              </div>
+            </div>
+          </article>
         {/each}
+        </div>
+
+        {#if !atLatest}
+          <button
+            class="jump-latest"
+            type="button"
+            aria-label="Jump to latest messages"
+            title="Jump to latest"
+            onclick={() => scrollToLatest('smooth')}
+          >
+            <Icon name="chevron-down" size={19} />
+            {#if unreadNewMessages > 0}
+              <span>{unreadNewMessages > 99 ? '99+' : unreadNewMessages}</span>
+            {/if}
+          </button>
+        {/if}
       </div>
 
       {#if error}<div class="inline-error chat-error">{error}</div>{/if}
       <form class="composer" onsubmit={(event) => { event.preventDefault(); sendMessage(); }}>
         <input bind:value={messageBody} maxlength="8000" autocomplete="off" placeholder="Message…" />
-        <button type="submit" disabled={!messageBody.trim() || busy}>Send</button>
+        <button type="submit" aria-label="Send message" title="Send" disabled={!messageBody.trim() || busy}><Icon name="send" size={18} /></button>
       </form>
 
       {#if groupPanelOpen && groupDetails}
         <aside class="group-panel" aria-label="Group settings">
           <div class="group-panel-head">
-            <div><small>GROUP</small><h2>{groupDetails.title}</h2></div>
-            <button class="icon-action" type="button" aria-label="Close group settings" onclick={() => groupPanelOpen = false}>×</button>
+            <div><small>GROUP SETTINGS</small><h2>{groupDetails.title}</h2></div>
+            <button class="icon-action" type="button" aria-label="Close group settings" title="Close" onclick={() => groupPanelOpen = false}><Icon name="x" size={18} /></button>
           </div>
 
           {#if groupDetails.currentRole === 'owner' || groupDetails.currentRole === 'admin'}
@@ -689,7 +1471,7 @@
             </div>
             <div class="group-setting-block">
               <label for="group-name">Group name</label>
-              <div class="group-inline-form"><input id="group-name" bind:value={groupRename} maxlength="96" /><button onclick={renameGroup} disabled={busy || !groupRename.trim()}>Save</button></div>
+              <div class="group-inline-form"><input id="group-name" bind:value={groupRename} maxlength="96" /><button title="Save group name" onclick={renameGroup} disabled={busy || !groupRename.trim()}><Icon name="check" size={16} /><span>Save</span></button></div>
             </div>
           {/if}
 
@@ -701,11 +1483,13 @@
                 <div class="group-member-copy"><strong>{member.displayName}</strong><small>@{member.username} · {member.role}</small></div>
                 <div class="group-member-actions">
                   {#if groupDetails.currentRole === 'owner' && member.id !== data.user.id && member.role !== 'owner'}
-                    <button class="quiet" onclick={() => setGroupRole(member.id, member.role === 'admin' ? 'member' : 'admin')}>{member.role === 'admin' ? 'Demote' : 'Admin'}</button>
-                    <button class="quiet" onclick={() => transferGroupOwner(member.id)}>Owner</button>
+                    <button class="quiet" title={member.role === 'admin' ? 'Remove admin role' : 'Make admin'} onclick={() => setGroupRole(member.id, member.role === 'admin' ? 'member' : 'admin')}>
+                      <Icon name="shield" size={15} /><span>{member.role === 'admin' ? 'Demote' : 'Admin'}</span>
+                    </button>
+                    <button class="quiet" title="Transfer ownership" onclick={() => transferGroupOwner(member.id)}><Icon name="crown" size={15} /><span>Owner</span></button>
                   {/if}
                   {#if member.id !== data.user.id && member.role !== 'owner' && (groupDetails.currentRole === 'owner' || (groupDetails.currentRole === 'admin' && member.role === 'member'))}
-                    <button class="danger-button" onclick={() => removeGroupMember(member.id)}>Remove</button>
+                    <button class="danger-button" title="Remove member" onclick={() => removeGroupMember(member.id)}><Icon name="user-minus" size={15} /><span>Remove</span></button>
                   {/if}
                 </div>
               </div>
@@ -720,7 +1504,7 @@
                   <div class="group-member-row">
                     <span class="avatar small-avatar">{invite.user.displayName.slice(0,1).toUpperCase()}</span>
                     <div class="group-member-copy"><strong>{invite.user.displayName}</strong><small>@{invite.user.username} · pending</small></div>
-                    <button class="quiet" onclick={() => cancelGroupInvite(invite.id)} disabled={busy}>Cancel</button>
+                    <button class="quiet" title="Cancel invitation" onclick={() => cancelGroupInvite(invite.id)} disabled={busy}><Icon name="x" size={15} /><span>Cancel</span></button>
                   </div>
                 {/each}
               </div>
@@ -731,7 +1515,7 @@
                 <div class="group-member-row">
                   <span class="avatar small-avatar">{friend.displayName.slice(0,1).toUpperCase()}</span>
                   <div class="group-member-copy"><strong>{friend.displayName}</strong><small>@{friend.username}</small></div>
-                  <button onclick={() => inviteGroupMember(friend.id)} disabled={busy}>Invite</button>
+                  <button title="Invite friend" onclick={() => inviteGroupMember(friend.id)} disabled={busy}><Icon name="user-plus" size={15} /><span>Invite</span></button>
                 </div>
               {/each}
             </div>
@@ -740,9 +1524,9 @@
           <div class="group-setting-block group-danger-zone">
             {#if groupDetails.currentRole === 'owner'}
               <p>Transfer ownership before leaving while other members remain.</p>
-              <button class="danger-button wide" onclick={deleteGroup} disabled={busy}>Delete group</button>
+              <button class="danger-button wide" onclick={deleteGroup} disabled={busy}><Icon name="trash" size={16} /><span>Delete group</span></button>
             {:else}
-              <button class="danger-button wide" onclick={leaveGroup} disabled={busy}>Leave group</button>
+              <button class="danger-button wide" onclick={leaveGroup} disabled={busy}><Icon name="logout" size={16} /><span>Leave group</span></button>
             {/if}
           </div>
         </aside>
@@ -752,10 +1536,130 @@
     {/if}
   </section>
 
+  {#if directCall && callUiState !== 'in-call'}
+    <section class="call-lifecycle-card" aria-live="polite" aria-label="Voice call">
+      <div class="call-lifecycle-copy">
+        <span class="call-lifecycle-avatar">{callPeerName(directCall).slice(0,1).toUpperCase()}</span>
+        <div>
+          <strong>{callPeerName(directCall)}</strong>
+          <small>
+            {callUiState === 'calling' ? 'Calling…' :
+             callUiState === 'ringing' ? 'Incoming voice call' :
+             callUiState === 'connecting' ? 'Connecting…' :
+             'Call in progress'}
+          </small>
+        </div>
+      </div>
+
+      <div class="call-lifecycle-actions">
+        {#if callUiState === 'calling'}
+          <button class="call-cancel" type="button" onclick={cancelDirectCall} disabled={callActionBusy}>
+            <Icon name="phone-off" size={18} /><span>Cancel</span>
+          </button>
+        {:else if callUiState === 'ringing'}
+          <button class="call-decline" type="button" onclick={declineDirectCall} disabled={callActionBusy}>
+            <Icon name="phone-off" size={18} /><span>Decline</span>
+          </button>
+          <button class="call-accept" type="button" onclick={acceptDirectCall} disabled={callActionBusy}>
+            <Icon name="phone-in" size={18} /><span>Accept</span>
+          </button>
+        {:else if callUiState === 'rejoin'}
+          <button class="call-end" type="button" onclick={endDirectCall} disabled={callActionBusy}>
+            <Icon name="phone-off" size={18} /><span>End</span>
+          </button>
+          <button class="call-rejoin" type="button" onclick={rejoinDirectCall} disabled={callActionBusy}>
+            <Icon name="phone" size={18} /><span>Rejoin</span>
+          </button>
+        {:else}
+          <button class="call-end" type="button" onclick={endDirectCall} disabled={callActionBusy}>
+            <Icon name="phone-off" size={18} /><span>End</span>
+          </button>
+        {/if}
+      </div>
+    </section>
+  {/if}
+
+  {#if callNotice}
+    <div class="call-notice" role="status">{callNotice}</div>
+  {/if}
+
+  {#if voiceStatus !== 'idle' || voiceError}
+    <section class="voice-dock" aria-label="Voice room">
+      <div class="voice-dock-head">
+        <span class="voice-dock-icon" aria-hidden="true"><Icon name="headphones" size={20} /></span>
+        <div>
+          <strong>{voiceConversationTitle || 'Voice'}</strong>
+          <small>
+            {voiceStatus === 'connected'
+              ? `${voiceParticipants.length} connected`
+              : voiceStatus === 'reconnecting'
+                ? 'Reconnecting…'
+                : voiceStatus === 'connecting'
+                  ? 'Joining voice…'
+                  : 'Voice unavailable'}
+          </small>
+        </div>
+      </div>
+
+      {#if voiceParticipants.length}
+        <div class="voice-participants">
+          {#each voiceParticipants as participant}
+            <div class="voice-participant" class:speaking={participant.speaking}>
+              <span>{participant.name.slice(0,1).toUpperCase()}</span>
+              <div>
+                <strong>{participant.name}{participant.local ? ' · you' : ''}</strong>
+                <small>{participant.muted ? 'Muted' : participant.speaking ? 'Speaking' : 'Microphone on'}</small>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
+
+      {#if voiceStatus !== 'idle'}
+        <div class="voice-dock-actions">
+          <button
+            type="button"
+            class:active={voiceMuted}
+            title={voiceDeafened ? 'Undeafen before changing microphone state' : (voiceMuted ? 'Unmute' : 'Mute')}
+            onclick={toggleVoiceMute}
+            disabled={voiceStatus !== 'connected' || voiceDeafened}
+          >
+            <Icon name={voiceMuted ? 'mic-off' : 'mic'} size={18} />
+            <span>{voiceMuted ? 'Unmute' : 'Mute'}</span>
+          </button>
+          <button
+            type="button"
+            class:active={voiceDeafened}
+            title={voiceDeafened ? 'Undeafen' : 'Deafen'}
+            onclick={toggleVoiceDeafen}
+            disabled={voiceStatus !== 'connected'}
+          >
+            <Icon name={voiceDeafened ? 'headphones-off' : 'headphones'} size={18} />
+            <span>{voiceDeafened ? 'Undeafen' : 'Deafen'}</span>
+          </button>
+          <button class="voice-leave" type="button" onclick={() => leaveVoice()}>
+            <Icon name="phone-off" size={18} /><span>Leave</span>
+          </button>
+        </div>
+      {/if}
+
+      {#if voiceError}
+        <div class="inline-error voice-error">{voiceError}</div>
+        {#if voiceStatus === 'idle'}
+          <div class="voice-dock-actions">
+            <button type="button" onclick={() => voiceError = ''}>Dismiss</button>
+          </div>
+        {/if}
+      {/if}
+
+      <div class="voice-audio-host" bind:this={voiceAudioHost}></div>
+    </section>
+  {/if}
+
   {#if newGroupOpen}
     <div class="modal-backdrop">
       <section class="group-create-modal" role="dialog" aria-modal="true" aria-labelledby="new-group-title">
-        <div class="group-panel-head"><div><small>NEW</small><h2 id="new-group-title">Create group</h2></div><button class="icon-action" type="button" aria-label="Close" onclick={() => newGroupOpen = false}>×</button></div>
+        <div class="group-panel-head"><div><small>NEW</small><h2 id="new-group-title">Create group</h2></div><button class="icon-action" type="button" aria-label="Close" title="Close" onclick={() => newGroupOpen = false}><Icon name="x" size={18} /></button></div>
         <label for="new-group-name">Group name</label>
         <input id="new-group-name" bind:value={newGroupTitle} maxlength="96" placeholder="Weekend crew" />
         <strong class="modal-section-title">Choose friends</strong>

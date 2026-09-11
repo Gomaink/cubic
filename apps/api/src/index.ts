@@ -17,6 +17,9 @@ const app = await createApp({
   registrationEnabled: env.REGISTRATION_ENABLED,
   mediaRoot: env.MEDIA_ROOT,
   groupAvatarMaxBytes: env.GROUP_AVATAR_MAX_BYTES,
+  livekitPublicUrl: env.LIVEKIT_PUBLIC_URL,
+  livekitApiKey: env.LIVEKIT_API_KEY,
+  livekitApiSecret: env.LIVEKIT_API_SECRET,
   realtimeEvents,
   logger: env.NODE_ENV !== 'test'
 });

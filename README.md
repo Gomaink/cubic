@@ -29,7 +29,7 @@ Cubic is being rebuilt as a fast, lightweight and self-hosted messenger with a r
 - Argon2id
 - Docker Compose
 
-Socket.IO is now wired into the authenticated session boundary for realtime messaging. LiveKit remains deferred to the voice/media milestone.
+Socket.IO is now wired into the authenticated session boundary for realtime messaging. LiveKit is now wired into the authenticated conversation boundary for direct/group voice; camera and screen sharing arrive in alpha.6.
 
 ## Repository layout
 
@@ -139,3 +139,7 @@ v2 development lives on `refactor/v2` until it is ready to replace `main`.
 ## Release plan
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+## Current alpha milestone
+
+`v2.0.0-alpha.5` completes the voice layer: authenticated LiveKit rooms, direct-call ringing lifecycle, group voice, mute/deafen, persisted call history, incremental message history and the unified message stream. Alpha.6 moves to camera and screen sharing.

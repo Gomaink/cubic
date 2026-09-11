@@ -102,3 +102,58 @@ Completed Cubic v2.0.0-alpha.4 Groups & Permissions.
 - Fixed media-volume ownership for the non-root API runtime.
 - Fixed iOS avatar picker/resume behavior and visible upload error handling.
 - Verified avatar replacement/removal does not leave orphan files.
+
+## v2.0.0-alpha.5 (in progress)
+
+Alpha.5 voice core slice:
+- self-hosted LiveKit SFU service
+- server-authoritative voice token endpoint
+- conversation membership authorization
+- microphone-only publish grants
+- direct and group voice rooms
+- mute/unmute, leave, participants and active-speaker UI
+- mobile secure-context guard and LiveKit reconnect state
+
+### Alpha.5 ringing/call lifecycle slice
+
+- Added authenticated DM call lifecycle over Socket.IO: calling, ringing, accept, decline, cancel, connected and end.
+- Added a 45-second unanswered-call timeout.
+- Added single-process busy-call coordination and reconnect state sync.
+- Kept group voice Discord-like: members join an existing group voice room instead of ringing every member.
+- Added an icon-led Onyx-inspired UI pass for navigation, chat actions and voice controls.
+- Fixed the messenger viewport regression so message history scrolls inside the message panel instead of the entire page.
+
+### Alpha.5 message history/deafen slice
+
+- Added latest-first conversation opening with incremental older-history loading using the existing message cursor API.
+- Preserved scroll position while prepending older pages.
+- Added jump-to-latest behavior with a realtime new-message counter when reading older history.
+- Added Discord-style Deafen: incoming voice audio is silenced and the microphone is muted, with the previous microphone state restored on undeafen.
+- Refined the voice status panel and group settings toward the Onyx visual direction and removed green connection dots.
+- Extended the local SVG icon set for voice/history/group-management actions.
+
+### Alpha.5 hardening / message stream
+- Persisted direct-call history and participant timing in PostgreSQL.
+- Added cursor-paginated authenticated call-history API.
+- Added stale active-call recovery after API restart.
+- Added opt-in embedded TURN/UDP and external-candidate configuration without changing the validated LAN defaults.
+- Reworked DM/group message rendering into one left-aligned Discord-style stream with avatar, sender, timestamp, compact continuations and day separators.
+
+## v2.0.0-alpha.5
+
+Completed Cubic v2.0.0-alpha.5 Voice.
+
+- Added self-hosted LiveKit/WebRTC voice for direct and group conversations.
+- Added server-authoritative LiveKit token issuance scoped to authenticated conversation membership.
+- Added direct-call lifecycle: calling, ringing, accept, decline, cancel, timeout/missed and end.
+- Added group voice rooms with direct join behavior.
+- Added mute/unmute, deafen/undeafen, participant presence and active-speaker feedback.
+- Added mobile/HTTPS voice support and reconnect handling.
+- Added persistent `calls` and `call_participants` data through migration 0003.
+- Added call duration, participant join/leave timing and authenticated paginated call-history API.
+- Added stale active-call recovery after API restart.
+- Added opt-in LiveKit TURN/UDP and external-candidate deployment knobs while preserving the validated LAN defaults.
+- Fixed messenger viewport ownership so only message history scrolls.
+- Added 50-message cursor pagination, anchored history prepend, open-at-latest behavior and jump-to-latest with new-message count.
+- Reworked DM and group message rendering into one left-aligned Discord-style stream with avatar, display name, timestamps, compact continuations and day separators.
+- Continued the Onyx-inspired UI pass with flatter surfaces and more icon-led controls.

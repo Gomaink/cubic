@@ -189,3 +189,46 @@ export const messages = pgTable(
     index('messages_sender_idx').on(table.senderId)
   ]
 );
+
+export const calls = pgTable(
+  'calls',
+  {
+    id: uuid('id').primaryKey(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    kind: varchar('kind', { length: 16 }).notNull().default('direct'),
+    initiatedBy: uuid('initiated_by').references(() => users.id, { onDelete: 'set null' }),
+    status: varchar('status', { length: 16 }).notNull().default('ringing'),
+    startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    answeredAt: timestamp('answered_at', { withTimezone: true, mode: 'date' }),
+    endedAt: timestamp('ended_at', { withTimezone: true, mode: 'date' }),
+    endedBy: uuid('ended_by').references(() => users.id, { onDelete: 'set null' })
+  },
+  (table) => [
+    index('calls_conversation_started_idx').on(table.conversationId, table.startedAt),
+    index('calls_initiated_by_started_idx').on(table.initiatedBy, table.startedAt),
+    index('calls_status_idx').on(table.status)
+  ]
+);
+
+export const callParticipants = pgTable(
+  'call_participants',
+  {
+    callId: uuid('call_id')
+      .notNull()
+      .references(() => calls.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: varchar('role', { length: 16 }).notNull().default('member'),
+    invitedAt: timestamp('invited_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    joinedAt: timestamp('joined_at', { withTimezone: true, mode: 'date' }),
+    leftAt: timestamp('left_at', { withTimezone: true, mode: 'date' })
+  },
+  (table) => [
+    uniqueIndex('call_participants_call_user_uq').on(table.callId, table.userId),
+    index('call_participants_user_idx').on(table.userId),
+    index('call_participants_call_idx').on(table.callId)
+  ]
+);

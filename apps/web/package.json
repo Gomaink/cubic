@@ -1,6 +1,6 @@
 {
   "name": "@cubic/web",
-  "version": "2.0.0-alpha.4",
+  "version": "2.0.0-alpha.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "http-proxy": "^1.18.1",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^4.8.1",
+    "livekit-client": "^2.22.3"
   }
 }

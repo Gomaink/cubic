@@ -1,4 +1,4 @@
-export const CUBIC_VERSION = '2.0.0-alpha.4' as const;
+export const CUBIC_VERSION = '2.0.0-alpha.5' as const;
 export const CUBIC_NAME = 'Cubic' as const;
 
 export type HealthStatus = 'ok' | 'degraded';
