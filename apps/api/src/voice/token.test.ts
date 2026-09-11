@@ -13,7 +13,7 @@ test('voiceRoomName is deterministic', () => {
   );
 });
 
-test('voice token is scoped to one room and microphone publishing', async () => {
+test('media token is scoped to one room and approved media publishing', async () => {
   const ticket = await createVoiceJoinToken({
     apiKey,
     apiSecret,
@@ -31,6 +31,11 @@ test('voice token is scoped to one room and microphone publishing', async () => 
   assert.equal(claims.video?.room, ticket.roomName);
   assert.equal(claims.video?.canSubscribe, true);
   assert.equal(claims.video?.canPublishData, false);
-  assert.deepEqual(claims.video?.canPublishSources, ['microphone']);
+  assert.deepEqual(claims.video?.canPublishSources, [
+    'microphone',
+    'camera',
+    'screen_share',
+    'screen_share_audio'
+  ]);
   assert.equal(claims.attributes?.cubicUserId, '22222222-2222-4222-8222-222222222222');
 });

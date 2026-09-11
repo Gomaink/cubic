@@ -3,6 +3,8 @@
   import { io, type Socket } from 'socket.io-client';
   import { Room, RoomEvent, Track } from 'livekit-client';
   import Icon from '$lib/ui/Icon.svelte';
+  import VideoTile from '$lib/ui/VideoTile.svelte';
+  import ScreenShareTile from '$lib/ui/ScreenShareTile.svelte';
 
   let { data } = $props();
   let loggingOut = $state(false);
@@ -38,6 +40,10 @@
     muted: boolean;
     speaking: boolean;
     local: boolean;
+    cameraEnabled: boolean;
+    videoTrack: any | null;
+    screenShareEnabled: boolean;
+    screenShareTrack: any | null;
   };
 
   let voiceRoom: Room | null = null;
@@ -62,6 +68,28 @@
 
   let voiceDeafened = $state(false);
   let voiceMutedBeforeDeafen = false;
+  let voiceCameraEnabled = $state(false);
+  let voiceScreenShareEnabled = $state(false);
+
+  type CameraQualityPreset = 'data-saver' | 'balanced' | 'smooth' | 'high';
+  type ScreenShareQualityPreset = 'text' | 'balanced' | 'smooth' | 'motion';
+
+  let mediaSettingsOpen = $state(false);
+  let mediaSettingsBusy = $state(false);
+  let mediaSettingsNotice = $state('');
+  let audioInputDevices = $state<MediaDeviceInfo[]>([]);
+  let videoInputDevices = $state<MediaDeviceInfo[]>([]);
+  let audioOutputDevices = $state<MediaDeviceInfo[]>([]);
+  let selectedAudioInput = $state('');
+  let selectedVideoInput = $state('');
+  let selectedAudioOutput = $state('');
+  let audioOutputSupported = $state(false);
+  let cameraQuality = $state<CameraQualityPreset>('balanced');
+  let screenShareQuality = $state<ScreenShareQualityPreset>('text');
+  let focusedVideoIdentity = $state<string | null>(null);
+  let focusedScreenShareIdentity = $state<string | null>(null);
+  let screenShareFocusDismissed = false;
+  let videoStageElement: HTMLElement | null = null;
 
   type DirectCallWire = {
     id: string;
@@ -907,23 +935,519 @@
     await joinVoice(conversationForCall(call));
   }
 
+
+  function loadMediaPreferences() {
+    if (typeof localStorage === 'undefined') return;
+
+    const savedCameraQuality = localStorage.getItem('cubic.cameraQuality');
+    const savedShareQuality = localStorage.getItem('cubic.screenShareQuality');
+
+    if (savedCameraQuality === 'data-saver' || savedCameraQuality === 'balanced' || savedCameraQuality === 'smooth' || savedCameraQuality === 'high') {
+      cameraQuality = savedCameraQuality;
+    }
+    if (savedShareQuality === 'text' || savedShareQuality === 'balanced' || savedShareQuality === 'smooth' || savedShareQuality === 'motion') {
+      screenShareQuality = savedShareQuality;
+    }
+
+    selectedAudioInput = localStorage.getItem('cubic.audioInput') ?? '';
+    selectedVideoInput = localStorage.getItem('cubic.videoInput') ?? '';
+    selectedAudioOutput = localStorage.getItem('cubic.audioOutput') ?? '';
+
+    audioOutputSupported =
+      typeof HTMLMediaElement !== 'undefined' &&
+      'setSinkId' in HTMLMediaElement.prototype;
+  }
+
+  function saveMediaPreference(key: string, value: string) {
+    if (typeof localStorage === 'undefined') return;
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  }
+
+  function deviceLabel(device: MediaDeviceInfo, index: number, fallback: string): string {
+    return device.label || `${fallback} ${index + 1}`;
+  }
+
+  function cameraQualityLabel(): string {
+    if (cameraQuality === 'data-saver') return 'Data saver · 360p 24fps';
+    if (cameraQuality === 'smooth') return 'Smooth · 720p 60fps';
+    if (cameraQuality === 'high') return 'High · 1080p 30fps';
+    return 'Balanced · 720p 30fps';
+  }
+
+  function screenShareQualityLabel(): string {
+    if (screenShareQuality === 'motion') return 'Motion · 720p 60fps';
+    if (screenShareQuality === 'smooth') return 'Smooth · 1080p 60fps';
+    if (screenShareQuality === 'balanced') return 'Balanced · 1080p 30fps';
+    return 'Text · 1080p 15fps';
+  }
+
+  function cameraCaptureOptions(): any {
+    const deviceId = selectedVideoInput
+      ? { exact: selectedVideoInput }
+      : undefined;
+
+    if (cameraQuality === 'data-saver') {
+      return {
+        deviceId,
+        resolution: { width: 640, height: 360 },
+        frameRate: 24
+      };
+    }
+
+    if (cameraQuality === 'smooth') {
+      return {
+        deviceId,
+        resolution: { width: 1280, height: 720 },
+        frameRate: 60
+      };
+    }
+
+    if (cameraQuality === 'high') {
+      return {
+        deviceId,
+        resolution: { width: 1920, height: 1080 },
+        frameRate: 30
+      };
+    }
+
+    return {
+      deviceId,
+      resolution: { width: 1280, height: 720 },
+      frameRate: 30
+    };
+  }
+
+  function cameraPublishOptions(): any {
+    if (cameraQuality === 'data-saver') {
+      return {
+        simulcast: true,
+        videoEncoding: { maxBitrate: 600_000, maxFramerate: 24 },
+        degradationPreference: 'maintain-framerate'
+      };
+    }
+
+    if (cameraQuality === 'smooth') {
+      return {
+        simulcast: true,
+        videoEncoding: { maxBitrate: 3_000_000, maxFramerate: 60 },
+        degradationPreference: 'maintain-framerate'
+      };
+    }
+
+    if (cameraQuality === 'high') {
+      return {
+        simulcast: true,
+        videoEncoding: { maxBitrate: 3_500_000, maxFramerate: 30 },
+        degradationPreference: 'maintain-resolution'
+      };
+    }
+
+    return {
+      simulcast: true,
+      videoEncoding: { maxBitrate: 1_500_000, maxFramerate: 30 },
+      degradationPreference: 'maintain-framerate'
+    };
+  }
+
+  function screenShareCaptureOptions(): any {
+    if (screenShareQuality === 'motion') {
+      return {
+        audio: true,
+        contentHint: 'motion',
+        resolution: { width: 1280, height: 720, frameRate: 60 }
+      };
+    }
+
+    if (screenShareQuality === 'smooth') {
+      return {
+        audio: true,
+        contentHint: 'motion',
+        resolution: { width: 1920, height: 1080, frameRate: 60 }
+      };
+    }
+
+    if (screenShareQuality === 'balanced') {
+      return {
+        audio: true,
+        contentHint: 'detail',
+        resolution: { width: 1920, height: 1080, frameRate: 30 }
+      };
+    }
+
+    return {
+      audio: true,
+      contentHint: 'text',
+      resolution: { width: 1920, height: 1080, frameRate: 15 }
+    };
+  }
+
+  function screenSharePublishOptions(): any {
+    if (screenShareQuality === 'motion') {
+      return {
+        simulcast: true,
+        screenShareEncoding: { maxBitrate: 5_000_000, maxFramerate: 60 },
+        degradationPreference: 'maintain-framerate'
+      };
+    }
+
+    if (screenShareQuality === 'smooth') {
+      return {
+        simulcast: true,
+        screenShareEncoding: { maxBitrate: 8_000_000, maxFramerate: 60 },
+        degradationPreference: 'balanced'
+      };
+    }
+
+    if (screenShareQuality === 'balanced') {
+      return {
+        simulcast: true,
+        screenShareEncoding: { maxBitrate: 4_500_000, maxFramerate: 30 },
+        degradationPreference: 'maintain-resolution'
+      };
+    }
+
+    return {
+      simulcast: true,
+      screenShareEncoding: { maxBitrate: 2_500_000, maxFramerate: 15 },
+      degradationPreference: 'maintain-resolution'
+    };
+  }
+
+  async function refreshMediaDevices() {
+    mediaSettingsNotice = '';
+
+    try {
+      const devices = await Room.getLocalDevices(undefined, false);
+      audioInputDevices = devices.filter((device) => device.kind === 'audioinput');
+      videoInputDevices = devices.filter((device) => device.kind === 'videoinput');
+      audioOutputDevices = devices.filter((device) => device.kind === 'audiooutput');
+
+      const room = voiceRoom;
+      if (room) {
+        selectedAudioInput = room.getActiveDevice('audioinput') || selectedAudioInput;
+        selectedVideoInput = room.getActiveDevice('videoinput') || selectedVideoInput;
+        if (audioOutputSupported) {
+          selectedAudioOutput = room.getActiveDevice('audiooutput') || selectedAudioOutput;
+        }
+      }
+
+      if (selectedAudioInput && !audioInputDevices.some((device) => device.deviceId === selectedAudioInput)) {
+        selectedAudioInput = '';
+        saveMediaPreference('cubic.audioInput', '');
+      }
+      if (selectedVideoInput && !videoInputDevices.some((device) => device.deviceId === selectedVideoInput)) {
+        selectedVideoInput = '';
+        saveMediaPreference('cubic.videoInput', '');
+      }
+      if (
+        selectedAudioOutput &&
+        audioOutputSupported &&
+        !audioOutputDevices.some((device) => device.deviceId === selectedAudioOutput)
+      ) {
+        selectedAudioOutput = '';
+        saveMediaPreference('cubic.audioOutput', '');
+      }
+    } catch (error) {
+      mediaSettingsNotice =
+        error instanceof Error ? error.message : 'Could not list media devices.';
+    }
+  }
+
+  async function showMediaSettings() {
+    mediaSettingsOpen = true;
+    await refreshMediaDevices();
+  }
+
+  function hideMediaSettings() {
+    mediaSettingsOpen = false;
+    mediaSettingsNotice = '';
+  }
+
+  async function switchMediaDevice(
+    kind: 'audioinput' | 'videoinput' | 'audiooutput',
+    deviceId: string
+  ) {
+    const room = voiceRoom;
+    if (!room || voiceStatus !== 'connected') return;
+
+    if (kind === 'audiooutput' && !audioOutputSupported) {
+      mediaSettingsNotice = 'Audio output selection is not supported by this browser.';
+      return;
+    }
+
+    mediaSettingsBusy = true;
+    mediaSettingsNotice = '';
+
+    try {
+      const switched = await room.switchActiveDevice(kind, deviceId);
+      if (!switched) {
+        throw new Error('The browser could not switch to that device.');
+      }
+
+      if (kind === 'audioinput') {
+        selectedAudioInput = deviceId;
+        saveMediaPreference('cubic.audioInput', deviceId);
+      } else if (kind === 'videoinput') {
+        selectedVideoInput = deviceId;
+        saveMediaPreference('cubic.videoInput', deviceId);
+      } else {
+        selectedAudioOutput = deviceId;
+        saveMediaPreference('cubic.audioOutput', deviceId);
+      }
+
+      await refreshMediaDevices();
+    } catch (error) {
+      mediaSettingsNotice =
+        error instanceof Error ? error.message : 'Could not switch media device.';
+    } finally {
+      mediaSettingsBusy = false;
+    }
+  }
+
+  async function onAudioInputChange(event: Event) {
+    const value = (event.currentTarget as HTMLSelectElement).value;
+    await switchMediaDevice('audioinput', value);
+  }
+
+  async function onVideoInputChange(event: Event) {
+    const value = (event.currentTarget as HTMLSelectElement).value;
+    await switchMediaDevice('videoinput', value);
+  }
+
+  async function onAudioOutputChange(event: Event) {
+    const value = (event.currentTarget as HTMLSelectElement).value;
+    await switchMediaDevice('audiooutput', value);
+  }
+
+  async function setCameraQualityPreset(next: CameraQualityPreset) {
+    if (cameraQuality === next || mediaSettingsBusy) return;
+
+    const previous = cameraQuality;
+    cameraQuality = next;
+    saveMediaPreference('cubic.cameraQuality', next);
+    mediaSettingsNotice = '';
+
+    const room = voiceRoom;
+    if (!room || voiceStatus !== 'connected') return;
+
+    const publication = room.localParticipant.getTrackPublication(Track.Source.Camera);
+    const track = publication?.track;
+    if (!track) return;
+
+    const wasEnabled = voiceCameraEnabled;
+    mediaSettingsBusy = true;
+    try {
+      await room.localParticipant.unpublishTrack(track, true);
+
+      if (wasEnabled) {
+        await room.localParticipant.setCameraEnabled(
+          true,
+          cameraCaptureOptions(),
+          cameraPublishOptions()
+        );
+      }
+
+      syncVoiceParticipants();
+      mediaSettingsNotice = wasEnabled
+        ? `Camera quality changed to ${cameraQualityLabel()}.`
+        : `Camera quality set to ${cameraQualityLabel()}.`;
+    } catch (error) {
+      cameraQuality = previous;
+      saveMediaPreference('cubic.cameraQuality', previous);
+      voiceError = mediaDeviceErrorMessage(error, 'camera');
+      syncVoiceParticipants();
+    } finally {
+      mediaSettingsBusy = false;
+    }
+  }
+
+  function setScreenShareQualityPreset(next: ScreenShareQualityPreset) {
+    screenShareQuality = next;
+    saveMediaPreference('cubic.screenShareQuality', next);
+    mediaSettingsNotice = voiceScreenShareEnabled
+      ? `Screen-share quality changed to ${screenShareQualityLabel()}. It will apply the next time you start sharing.`
+      : `Screen-share quality set to ${screenShareQualityLabel()}.`;
+  }
+
+  function mediaStageVisible(): boolean {
+    if (!activeConversation || voiceConversationId !== activeConversation.id) return false;
+    return voiceParticipants.some((participant) => participant.cameraEnabled) ||
+      activeScreenShares().length > 0;
+  }
+
+
+
+  function mediaDeviceErrorMessage(
+    error: unknown,
+    kind: 'microphone' | 'camera'
+  ): string {
+    const label = kind === 'camera' ? 'Camera' : 'Microphone';
+    const lowerLabel = kind === 'camera' ? 'camera' : 'microphone';
+
+    const errorName =
+      error && typeof error === 'object' && 'name' in error
+        ? String((error as { name?: unknown }).name ?? '')
+        : '';
+
+    const rawMessage =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'string'
+          ? error
+          : '';
+
+    const normalizedMessage = rawMessage.toLowerCase();
+
+    if (
+      errorName === 'NotFoundError' ||
+      errorName === 'DevicesNotFoundError' ||
+      normalizedMessage.includes('object can not be found') ||
+      normalizedMessage.includes('requested device not found')
+    ) {
+      return `No ${lowerLabel} was found on this device.`;
+    }
+
+    if (
+      errorName === 'NotAllowedError' ||
+      errorName === 'PermissionDeniedError' ||
+      errorName === 'SecurityError' ||
+      normalizedMessage.includes('not allowed by the user agent') ||
+      normalizedMessage.includes('permission denied')
+    ) {
+      return `${label} access is blocked. Allow ${lowerLabel} access for cubic.goma.ink in your browser/site permissions and check the operating-system privacy settings.`;
+    }
+
+    if (
+      errorName === 'NotReadableError' ||
+      errorName === 'TrackStartError'
+    ) {
+      return `${label} is unavailable or already being used by another application.`;
+    }
+
+    if (errorName === 'OverconstrainedError') {
+      return `${label} is present, but the browser could not satisfy the requested capture settings.`;
+    }
+
+    if (errorName === 'AbortError') {
+      return `${label} capture was interrupted. Try again.`;
+    }
+
+    return rawMessage || `Could not access the ${lowerLabel}.`;
+  }
+
+  function screenShareSupported(): boolean {
+    return typeof navigator !== 'undefined' &&
+      Boolean(navigator.mediaDevices && 'getDisplayMedia' in navigator.mediaDevices);
+  }
+
+  function screenShareErrorMessage(error: unknown): string {
+    const errorName =
+      error && typeof error === 'object' && 'name' in error
+        ? String((error as { name?: unknown }).name ?? '')
+        : '';
+    const rawMessage = error instanceof Error ? error.message : '';
+
+    if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
+      return 'Screen sharing was cancelled or blocked by the browser.';
+    }
+    if (errorName === 'InvalidStateError') {
+      return 'Click Share again from the active browser tab to start screen sharing.';
+    }
+    if (errorName === 'NotFoundError') {
+      return 'No shareable screen, window, or tab was found.';
+    }
+    if (errorName === 'NotReadableError') {
+      return 'The selected screen or window could not be captured by the operating system.';
+    }
+    if (errorName === 'TypeError') {
+      return 'Screen sharing is not available with this browser configuration.';
+    }
+    if (errorName === 'AbortError') {
+      return 'Screen sharing was cancelled.';
+    }
+
+    return rawMessage || 'Could not start screen sharing.';
+  }
+
+  function activeScreenShares(): VoiceParticipantView[] {
+    return voiceParticipants.filter((participant) => participant.screenShareEnabled);
+  }
+
+  function focusedScreenShareParticipant(): VoiceParticipantView | null {
+    if (!focusedScreenShareIdentity) return null;
+    return voiceParticipants.find(
+      (participant) =>
+        participant.identity === focusedScreenShareIdentity && participant.screenShareEnabled
+    ) ?? null;
+  }
+
   function syncVoiceParticipants() {
     const room = voiceRoom;
     if (!room) {
       voiceParticipants = [];
       voiceMuted = false;
+      voiceCameraEnabled = false;
+      voiceScreenShareEnabled = false;
+      focusedVideoIdentity = null;
+      focusedScreenShareIdentity = null;
+      screenShareFocusDismissed = false;
       return;
     }
 
     const all = [room.localParticipant, ...Array.from(room.remoteParticipants.values())];
-    voiceParticipants = all.map((participant) => ({
-      identity: participant.identity,
-      name: participant.name || (participant.isLocal ? data.user.displayName : 'Member'),
-      muted: !participant.isMicrophoneEnabled,
-      speaking: participant.isSpeaking,
-      local: participant.isLocal
-    }));
+    const nextParticipants = all.map((participant) => {
+      const cameraPublication = participant.getTrackPublication(Track.Source.Camera);
+      const screenPublication = participant.getTrackPublication(Track.Source.ScreenShare);
+      const cameraEnabled = Boolean(
+        cameraPublication &&
+        !cameraPublication.isMuted &&
+        cameraPublication.track
+      );
+      const screenShareEnabled = Boolean(screenPublication && !screenPublication.isMuted);
+
+      return {
+        identity: participant.identity,
+        name: participant.name || (participant.isLocal ? data.user.displayName : 'Member'),
+        muted: !participant.isMicrophoneEnabled,
+        speaking: participant.isSpeaking,
+        local: participant.isLocal,
+        cameraEnabled,
+        videoTrack: cameraPublication?.track ?? null,
+        screenShareEnabled,
+        screenShareTrack: screenPublication?.track ?? null
+      };
+    });
+
+    voiceParticipants = nextParticipants;
     voiceMuted = !room.localParticipant.isMicrophoneEnabled;
+
+    const localCamera = room.localParticipant.getTrackPublication(Track.Source.Camera);
+    voiceCameraEnabled = Boolean(localCamera && !localCamera.isMuted && localCamera.track);
+
+    const localScreen = room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+    voiceScreenShareEnabled = Boolean(localScreen && !localScreen.isMuted);
+
+    if (
+      focusedVideoIdentity &&
+      !nextParticipants.some((participant) => participant.identity === focusedVideoIdentity)
+    ) {
+      focusedVideoIdentity = null;
+    }
+
+    const activeShares = nextParticipants.filter((participant) => participant.screenShareEnabled);
+    if (activeShares.length === 0) {
+      focusedScreenShareIdentity = null;
+      screenShareFocusDismissed = false;
+    } else if (
+      focusedScreenShareIdentity &&
+      !activeShares.some((participant) => participant.identity === focusedScreenShareIdentity)
+    ) {
+      focusedScreenShareIdentity = screenShareFocusDismissed ? null : activeShares[0].identity;
+    } else if (!focusedScreenShareIdentity && !screenShareFocusDismissed) {
+      focusedScreenShareIdentity = activeShares[0].identity;
+      focusedVideoIdentity = null;
+    }
   }
 
   function setRemoteAudioDeafened(deafened: boolean) {
@@ -967,6 +1491,13 @@
     voiceMuted = false;
     voiceDeafened = false;
     voiceMutedBeforeDeafen = false;
+    voiceCameraEnabled = false;
+    voiceScreenShareEnabled = false;
+    focusedVideoIdentity = null;
+    focusedScreenShareIdentity = null;
+    screenShareFocusDismissed = false;
+    mediaSettingsOpen = false;
+    mediaSettingsNotice = '';
     voiceError = '';
     clearVoiceAudio();
 
@@ -975,7 +1506,15 @@
       callUiState = 'idle';
     }
 
-    if (room) await room.disconnect().catch(() => {});
+    if (room) {
+      if (room.localParticipant.getTrackPublication(Track.Source.ScreenShare)) {
+        await room.localParticipant.setScreenShareEnabled(false).catch(() => {});
+      }
+      if (room.localParticipant.getTrackPublication(Track.Source.Camera)) {
+        await room.localParticipant.setCameraEnabled(false).catch(() => {});
+      }
+      await room.disconnect().catch(() => {});
+    }
   }
 
   async function joinVoice(conversation: any) {
@@ -999,7 +1538,10 @@
 
     try {
       const ticket = await api(`/api/v1/voice/conversations/${conversation.id}/token`, { method: 'POST' });
-      const room = new Room();
+      const room = new Room({
+        adaptiveStream: true,
+        dynacast: true
+      });
       voiceRoom = room;
 
       const resync = () => {
@@ -1010,6 +1552,20 @@
       room.on(RoomEvent.ParticipantDisconnected, resync);
       room.on(RoomEvent.TrackMuted, resync);
       room.on(RoomEvent.TrackUnmuted, resync);
+      room.on(RoomEvent.TrackPublished, (publication) => {
+        if (publication.source === Track.Source.ScreenShare) {
+          screenShareFocusDismissed = false;
+        }
+        resync();
+      });
+      room.on(RoomEvent.TrackUnpublished, resync);
+      room.on(RoomEvent.LocalTrackPublished, (publication) => {
+        if (publication.source === Track.Source.ScreenShare) {
+          screenShareFocusDismissed = false;
+        }
+        resync();
+      });
+      room.on(RoomEvent.LocalTrackUnpublished, resync);
       room.on(RoomEvent.ActiveSpeakersChanged, resync);
       room.on(RoomEvent.TrackSubscribed, (track) => {
         if (voiceRoom !== room) return;
@@ -1040,6 +1596,13 @@
           voiceMuted = false;
           voiceDeafened = false;
           voiceMutedBeforeDeafen = false;
+          voiceCameraEnabled = false;
+          voiceScreenShareEnabled = false;
+          focusedVideoIdentity = null;
+          focusedScreenShareIdentity = null;
+          screenShareFocusDismissed = false;
+          mediaSettingsOpen = false;
+          mediaSettingsNotice = '';
           clearVoiceAudio();
 
           if (directCall?.state === 'accepted' && directCall.conversationId === disconnectedConversationId) {
@@ -1055,9 +1618,30 @@
       }
 
       await room.startAudio().catch(() => {});
-      await room.localParticipant.setMicrophoneEnabled(true);
+
+      let microphoneWarning = '';
+      try {
+        await room.localParticipant.setMicrophoneEnabled(
+          true,
+          selectedAudioInput
+            ? { deviceId: { exact: selectedAudioInput } }
+            : undefined
+        );
+      } catch (microphoneError) {
+        microphoneWarning =
+          `Joined muted — ${mediaDeviceErrorMessage(microphoneError, 'microphone')}`;
+      }
+
       voiceStatus = 'connected';
       syncVoiceParticipants();
+
+      if (selectedAudioOutput && audioOutputSupported) {
+        room.switchActiveDevice('audiooutput', selectedAudioOutput).catch(() => {});
+      }
+
+      if (microphoneWarning) {
+        voiceError = microphoneWarning;
+      }
       if (directCall?.state === 'accepted' && directCall.conversationId === conversation.id) {
         callUiState = 'in-call';
       }
@@ -1085,7 +1669,8 @@
       await room.localParticipant.setMicrophoneEnabled(!room.localParticipant.isMicrophoneEnabled);
       syncVoiceParticipants();
     } catch (e) {
-      voiceError = e instanceof Error ? e.message : 'Could not change microphone state.';
+      voiceError = mediaDeviceErrorMessage(e, 'microphone');
+      syncVoiceParticipants();
     }
   }
 
@@ -1111,6 +1696,94 @@
     }
   }
 
+  async function toggleVoiceCamera() {
+    const room = voiceRoom;
+    if (!room || voiceStatus !== 'connected') return;
+
+    try {
+      const current = room.localParticipant.getTrackPublication(Track.Source.Camera);
+      const enabled = Boolean(current && !current.isMuted && current.track);
+      if (enabled) {
+        await room.localParticipant.setCameraEnabled(false);
+      } else {
+        await room.localParticipant.setCameraEnabled(
+          true,
+          cameraCaptureOptions(),
+          cameraPublishOptions()
+        );
+      }
+      syncVoiceParticipants();
+    } catch (e) {
+      voiceError = mediaDeviceErrorMessage(e, 'camera');
+      syncVoiceParticipants();
+    }
+  }
+
+  async function toggleScreenShare() {
+    const room = voiceRoom;
+    if (!room || voiceStatus !== 'connected') return;
+
+    if (!screenShareSupported()) {
+      voiceError = 'Screen sharing is not available in this browser.';
+      return;
+    }
+
+    try {
+      voiceError = '';
+      const current = room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+      const enabled = Boolean(current && !current.isMuted);
+
+      if (enabled) {
+        await room.localParticipant.setScreenShareEnabled(false);
+      } else {
+        screenShareFocusDismissed = false;
+        await room.localParticipant.setScreenShareEnabled(
+          true,
+          screenShareCaptureOptions(),
+          screenSharePublishOptions()
+        );
+      }
+
+      syncVoiceParticipants();
+    } catch (e) {
+      voiceError = screenShareErrorMessage(e);
+      syncVoiceParticipants();
+    }
+  }
+
+  function focusScreenShare(identity: string) {
+    focusedScreenShareIdentity = identity;
+    focusedVideoIdentity = null;
+    screenShareFocusDismissed = false;
+  }
+
+  function returnToMediaGrid() {
+    focusedScreenShareIdentity = null;
+    focusedVideoIdentity = null;
+    screenShareFocusDismissed = activeScreenShares().length > 0;
+  }
+
+  function toggleVideoFocus(identity: string) {
+    focusedScreenShareIdentity = null;
+    screenShareFocusDismissed = activeScreenShares().length > 0;
+    focusedVideoIdentity = focusedVideoIdentity === identity ? null : identity;
+  }
+
+  async function fullscreenVideoStage() {
+    const element = videoStageElement;
+    if (!element) return;
+
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if (element.requestFullscreen) {
+        await element.requestFullscreen();
+      }
+    } catch {
+      // Fullscreen is optional; the video grid remains usable without it.
+    }
+  }
+
   async function logout() {
     loggingOut = true;
     await leaveVoice();
@@ -1120,6 +1793,7 @@
   }
 
   onMount(() => {
+    loadMediaPreferences();
     Promise.all([refreshSocial(), refreshGroupInvites(), refreshConversations()]).catch((e) => error = e.message);
 
     const socket = io({
@@ -1196,10 +1870,15 @@
       if (document.visibilityState === 'visible') resumeRealtime();
     };
 
+    const onMediaDeviceChange = () => {
+      if (mediaSettingsOpen) refreshMediaDevices().catch(() => {});
+    };
+
     window.addEventListener('pageshow', resumeRealtime);
     window.addEventListener('focus', resumeRealtime);
     window.addEventListener('online', resumeRealtime);
     document.addEventListener('visibilitychange', onVisibilityChange);
+    navigator.mediaDevices?.addEventListener?.('devicechange', onMediaDeviceChange);
 
     return () => {
       if (resumeTimer) clearTimeout(resumeTimer);
@@ -1208,6 +1887,7 @@
       window.removeEventListener('focus', resumeRealtime);
       window.removeEventListener('online', resumeRealtime);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      navigator.mediaDevices?.removeEventListener?.('devicechange', onMediaDeviceChange);
 
       realtimeSocket = null;
       socket.disconnect();
@@ -1328,6 +2008,118 @@
           </button>
         {/if}
       </header>
+
+      {#if voiceStatus !== 'idle' && mediaStageVisible()}
+        <section
+          class="video-stage"
+          class:presentation-mode={Boolean(focusedScreenShareParticipant())}
+          bind:this={videoStageElement}
+          aria-label="Call media"
+        >
+          <header class="video-stage-head">
+            <Icon name={focusedScreenShareParticipant() ? 'screen-share' : 'camera'} size={18} />
+            <div>
+              <strong>
+                {focusedScreenShareParticipant()
+                  ? `${focusedScreenShareParticipant()?.name}${focusedScreenShareParticipant()?.local ? ' · you' : ''} is sharing`
+                  : (voiceConversationTitle || conversationName(activeConversation))}
+              </strong>
+              <small>
+                {voiceParticipants.length} connected ·
+                {voiceParticipants.filter((participant) => participant.cameraEnabled).length} camera{voiceParticipants.filter((participant) => participant.cameraEnabled).length === 1 ? '' : 's'} ·
+                {activeScreenShares().length} share{activeScreenShares().length === 1 ? '' : 's'}
+              </small>
+            </div>
+            {#if focusedVideoIdentity || focusedScreenShareIdentity}
+              <button
+                class="video-stage-action"
+                type="button"
+                title="Return to grid"
+                aria-label="Return to grid"
+                onclick={returnToMediaGrid}
+              >
+                <Icon name="users" size={18} />
+              </button>
+            {/if}
+            <button
+              class="video-stage-action"
+              class:active={mediaSettingsOpen}
+              type="button"
+              title="Voice & video settings"
+              aria-label="Voice and video settings"
+              onclick={showMediaSettings}
+            >
+              <Icon name="settings" size={18} />
+            </button>
+            <button
+              class="video-stage-action"
+              type="button"
+              title="Fullscreen"
+              aria-label="Fullscreen media"
+              onclick={fullscreenVideoStage}
+            >
+              <Icon name="maximize" size={18} />
+            </button>
+          </header>
+
+          {#if focusedScreenShareParticipant()}
+            <div class="presentation-layout">
+              <div class="presentation-main">
+                <ScreenShareTile
+                  track={focusedScreenShareParticipant()?.screenShareTrack}
+                  name={focusedScreenShareParticipant()?.name ?? 'Member'}
+                  local={focusedScreenShareParticipant()?.local ?? false}
+                  focused={true}
+                  onclick={returnToMediaGrid}
+                />
+              </div>
+
+              <div class="presentation-filmstrip" aria-label="Call participants">
+                {#each voiceParticipants as participant (participant.identity)}
+                  <VideoTile
+                    track={participant.videoTrack}
+                    name={participant.name}
+                    local={participant.local}
+                    speaking={participant.speaking}
+                    cameraEnabled={participant.cameraEnabled}
+                    focused={false}
+                    onclick={() => toggleVideoFocus(participant.identity)}
+                  />
+                {/each}
+              </div>
+            </div>
+          {:else}
+            <div
+              class="video-grid"
+              class:has-focus={Boolean(focusedVideoIdentity)}
+              class:participants-1={voiceParticipants.length === 1 && activeScreenShares().length === 0}
+              class:participants-2={voiceParticipants.length + activeScreenShares().length === 2}
+            >
+              {#each activeScreenShares() as participant (`share-${participant.identity}`)}
+                <ScreenShareTile
+                  track={participant.screenShareTrack}
+                  name={participant.name}
+                  local={participant.local}
+                  focused={false}
+                  onclick={() => focusScreenShare(participant.identity)}
+                />
+              {/each}
+
+              {#each voiceParticipants as participant (participant.identity)}
+                <VideoTile
+                  track={participant.videoTrack}
+                  name={participant.name}
+                  local={participant.local}
+                  speaking={participant.speaking}
+                  cameraEnabled={participant.cameraEnabled}
+                  focused={focusedVideoIdentity === participant.identity}
+                  onclick={() => toggleVideoFocus(participant.identity)}
+                />
+              {/each}
+            </div>
+          {/if}
+        </section>
+      {/if}
 
       <div class="messages-wrap">
         <div
@@ -1599,9 +2391,187 @@
                   : 'Voice unavailable'}
           </small>
         </div>
+        {#if voiceStatus !== 'idle'}
+          <button
+            class="voice-settings-button"
+            class:active={mediaSettingsOpen}
+            type="button"
+            title="Voice & video settings"
+            aria-label="Voice and video settings"
+            onclick={() => mediaSettingsOpen ? hideMediaSettings() : showMediaSettings()}
+          >
+            <Icon name="settings" size={17} />
+          </button>
+        {/if}
       </div>
 
-      {#if voiceParticipants.length}
+      {#if mediaSettingsOpen}
+        <section class="media-settings-panel" aria-label="Voice and video settings">
+          <header class="media-settings-head">
+            <div>
+              <strong>Voice & Video</strong>
+              <small>Changes are saved on this browser.</small>
+            </div>
+            <button type="button" title="Close settings" aria-label="Close settings" onclick={hideMediaSettings}>
+              <Icon name="x" size={17} />
+            </button>
+          </header>
+
+          <div class="media-settings-section">
+            <span class="media-settings-label">Input devices</span>
+
+            <label>
+              <span>Microphone</span>
+              <select
+                value={selectedAudioInput}
+                onchange={onAudioInputChange}
+                disabled={mediaSettingsBusy || audioInputDevices.length === 0}
+              >
+                {#if audioInputDevices.length === 0}
+                  <option value="">No microphone detected</option>
+                {/if}
+                {#each audioInputDevices as device, index}
+                  <option value={device.deviceId}>{deviceLabel(device, index, 'Microphone')}</option>
+                {/each}
+              </select>
+            </label>
+
+            <label>
+              <span>Camera</span>
+              <select
+                value={selectedVideoInput}
+                onchange={onVideoInputChange}
+                disabled={mediaSettingsBusy || videoInputDevices.length === 0}
+              >
+                {#if videoInputDevices.length === 0}
+                  <option value="">No camera detected</option>
+                {/if}
+                {#each videoInputDevices as device, index}
+                  <option value={device.deviceId}>{deviceLabel(device, index, 'Camera')}</option>
+                {/each}
+              </select>
+            </label>
+
+            <label>
+              <span>Output device</span>
+              <select
+                value={selectedAudioOutput}
+                onchange={onAudioOutputChange}
+                disabled={mediaSettingsBusy || !audioOutputSupported || audioOutputDevices.length === 0}
+              >
+                {#if !audioOutputSupported}
+                  <option value="">Browser default · selection unsupported</option>
+                {:else if audioOutputDevices.length === 0}
+                  <option value="">Browser default</option>
+                {/if}
+                {#each audioOutputDevices as device, index}
+                  <option value={device.deviceId}>{deviceLabel(device, index, 'Speaker')}</option>
+                {/each}
+              </select>
+            </label>
+          </div>
+
+          <div class="media-settings-section">
+            <div class="media-settings-section-head">
+              <span class="media-settings-label">Camera quality</span>
+              <small>{cameraQualityLabel()}</small>
+            </div>
+            <div class="media-quality-options" aria-label="Camera quality">
+              <button
+                type="button"
+                class:active={cameraQuality === 'data-saver'}
+                onclick={() => setCameraQualityPreset('data-saver')}
+                disabled={mediaSettingsBusy}
+              >
+                Data saver
+                <small>360p · 24</small>
+              </button>
+              <button
+                type="button"
+                class:active={cameraQuality === 'balanced'}
+                onclick={() => setCameraQualityPreset('balanced')}
+                disabled={mediaSettingsBusy}
+              >
+                Balanced
+                <small>720p · 30</small>
+              </button>
+              <button
+                type="button"
+                class:active={cameraQuality === 'smooth'}
+                onclick={() => setCameraQualityPreset('smooth')}
+                disabled={mediaSettingsBusy}
+              >
+                Smooth
+                <small>720p · 60</small>
+              </button>
+              <button
+                type="button"
+                class:active={cameraQuality === 'high'}
+                onclick={() => setCameraQualityPreset('high')}
+                disabled={mediaSettingsBusy}
+              >
+                High
+                <small>1080p · 30</small>
+              </button>
+            </div>
+          </div>
+
+          <div class="media-settings-section">
+            <div class="media-settings-section-head">
+              <span class="media-settings-label">Screen share</span>
+              <small>{screenShareQualityLabel()}</small>
+            </div>
+            <div class="media-quality-options" aria-label="Screen share quality">
+              <button
+                type="button"
+                class:active={screenShareQuality === 'text'}
+                onclick={() => setScreenShareQualityPreset('text')}
+              >
+                Text
+                <small>1080p · 15</small>
+              </button>
+              <button
+                type="button"
+                class:active={screenShareQuality === 'balanced'}
+                onclick={() => setScreenShareQualityPreset('balanced')}
+              >
+                Balanced
+                <small>1080p · 30</small>
+              </button>
+              <button
+                type="button"
+                class:active={screenShareQuality === 'smooth'}
+                onclick={() => setScreenShareQualityPreset('smooth')}
+              >
+                Smooth
+                <small>1080p · 60</small>
+              </button>
+              <button
+                type="button"
+                class:active={screenShareQuality === 'motion'}
+                onclick={() => setScreenShareQualityPreset('motion')}
+              >
+                Motion
+                <small>720p · 60</small>
+              </button>
+            </div>
+          </div>
+
+          <div class="media-adaptive-row">
+            <Icon name="check" size={16} />
+            <div>
+              <strong>Adaptive bandwidth</strong>
+              <small>Adaptive Stream + Dynacast are enabled for this call.</small>
+            </div>
+          </div>
+
+          {#if mediaSettingsNotice}
+            <div class="media-settings-notice" role="status">{mediaSettingsNotice}</div>
+          {/if}
+        </section>
+      {/if}
+
+      {#if voiceParticipants.length && !mediaStageVisible()}
         <div class="voice-participants">
           {#each voiceParticipants as participant}
             <div class="voice-participant" class:speaking={participant.speaking}>
@@ -1637,7 +2607,33 @@
             <Icon name={voiceDeafened ? 'headphones-off' : 'headphones'} size={18} />
             <span>{voiceDeafened ? 'Undeafen' : 'Deafen'}</span>
           </button>
-          <button class="voice-leave" type="button" onclick={() => leaveVoice()}>
+          <button
+            type="button"
+            class:camera-active={voiceCameraEnabled}
+            title={voiceCameraEnabled ? 'Turn camera off' : 'Turn camera on'}
+            aria-label={voiceCameraEnabled ? 'Turn camera off' : 'Turn camera on'}
+            onclick={toggleVoiceCamera}
+            disabled={voiceStatus !== 'connected'}
+          >
+            <Icon name={voiceCameraEnabled ? 'camera-off' : 'camera'} size={18} />
+            <span>{voiceCameraEnabled ? 'Camera off' : 'Camera'}</span>
+          </button>
+          <button
+            type="button"
+            class:screen-share-active={voiceScreenShareEnabled}
+            title={!screenShareSupported()
+              ? 'Screen sharing is not available in this browser'
+              : voiceScreenShareEnabled
+                ? 'Stop sharing'
+                : 'Share your screen'}
+            aria-label={voiceScreenShareEnabled ? 'Stop sharing screen' : 'Share screen'}
+            onclick={toggleScreenShare}
+            disabled={voiceStatus !== 'connected' || !screenShareSupported()}
+          >
+            <Icon name={voiceScreenShareEnabled ? 'screen-share-off' : 'screen-share'} size={18} />
+            <span>{voiceScreenShareEnabled ? 'Stop share' : 'Share'}</span>
+          </button>
+          <button class="voice-leave" type="button" title="Disconnect" aria-label="Disconnect from call" onclick={() => leaveVoice()}>
             <Icon name="phone-off" size={18} /><span>Leave</span>
           </button>
         </div>

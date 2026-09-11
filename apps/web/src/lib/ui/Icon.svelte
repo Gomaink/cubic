@@ -15,6 +15,11 @@
     | 'send'
     | 'mic'
     | 'mic-off'
+    | 'camera'
+    | 'camera-off'
+    | 'maximize'
+    | 'screen-share'
+    | 'screen-share-off'
     | 'check'
     | 'x'
     | 'chevron-down'
@@ -74,6 +79,16 @@
     <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" />
   {:else if name === 'mic-off'}
     <path d="m3 3 18 18M9 9v2a3 3 0 0 0 4.7 2.5M15 11V6a3 3 0 0 0-5.8-1M5 11a7 7 0 0 0 11.8 5.1M19 11a7 7 0 0 1-.7 3M12 18v3M9 21h6" />
+  {:else if name === 'camera' || name === 'camera-off'}
+    <rect x="3" y="6" width="13" height="12" rx="2" />
+    <path d="m16 10 5-3v10l-5-3" />
+    {#if name === 'camera-off'}<path d="M3 3l18 18" />{/if}
+  {:else if name === 'maximize'}
+    <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5" />
+  {:else if name === 'screen-share' || name === 'screen-share-off'}
+    <rect x="3" y="4" width="18" height="13" rx="2" />
+    <path d="M8 21h8M12 17v4M9 10l3-3 3 3M12 7v6" />
+    {#if name === 'screen-share-off'}<path d="M3 3l18 18" />{/if}
   {:else if name === 'check'}
     <path d="m5 12 4 4L19 6" />
   {:else if name === 'x'}

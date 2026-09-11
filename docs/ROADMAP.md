@@ -128,3 +128,18 @@ Message history pagination UX, jump-to-latest behavior, Deafen, and a second Ony
 Alpha.5 is functionally complete and validated.
 
 The next milestone is alpha.6: camera and screen sharing on the existing self-hosted LiveKit transport, including participant video tiles, screen-share publishing, fullscreen/focus UX and quality controls. Internet/NAT traversal hardening remains a deployment task alongside alpha.6 rather than a redesign of the voice layer.
+
+### Alpha.6 video core status
+
+The first alpha.6 slice adds camera publication and participant video grids to the existing
+LiveKit transport. The next slice introduces screen sharing and presentation/focus UX,
+followed by device/quality controls and final alpha.6 hardening.
+
+### Alpha.6 screen share status
+
+Screen sharing and presentation mode are implemented on the existing LiveKit room. The remaining alpha.6 work is device selection, quality/bitrate controls, responsive/presentation polish and final regression/closeout.
+
+### Alpha.6 device/quality status
+
+Device selection, media quality presets, adaptive delivery and final media UI polish complete the
+functional alpha.6 scope. After regression testing, the milestone can move directly to closeout/tag.

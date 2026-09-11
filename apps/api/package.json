@@ -1,6 +1,6 @@
 {
   "name": "@cubic/api",
-  "version": "2.0.0-alpha.5",
+  "version": "2.0.0-alpha.6",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -13,8 +13,8 @@
     "import:v1-users": "node dist/cli/import-v1-users.js"
   },
   "dependencies": {
-    "@cubic/database": "2.0.0-alpha.5",
-    "@cubic/shared": "2.0.0-alpha.5",
+    "@cubic/database": "2.0.0-alpha.6",
+    "@cubic/shared": "2.0.0-alpha.6",
     "@fastify/cookie": "^11.1.2",
     "@fastify/cors": "^11.3.0",
     "@fastify/rate-limit": "^11.2.0",

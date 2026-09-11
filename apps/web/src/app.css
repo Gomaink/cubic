@@ -2360,3 +2360,844 @@ body { background: var(--cubic-onyx-0); }
     margin-right: 10px;
   }
 }
+
+/* Cubic alpha.6 video core */
+.video-stage {
+  --video-stage-bg: #0b0c0e;
+  flex: 0 0 auto;
+  min-height: 220px;
+  max-height: min(56dvh, 620px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-bottom: 1px solid #1f2023;
+  background: var(--video-stage-bg);
+  overflow: hidden;
+}
+
+.video-stage-head {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 7px;
+  border-bottom: 1px solid #1f2023;
+  color: #b5bac1;
+}
+
+.video-stage-head > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.video-stage-head strong,
+.video-stage-head small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-stage-head strong {
+  color: #f2f3f5;
+  font-size: .82rem;
+  font-weight: 650;
+}
+
+.video-stage-head small {
+  margin-top: 1px;
+  color: #80848e;
+  font-size: .68rem;
+}
+
+.video-stage-action {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #b5bac1;
+  cursor: pointer;
+}
+
+.video-stage-action:hover {
+  background: #2b2d31;
+  color: #f2f3f5;
+}
+
+.video-grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+  grid-auto-rows: minmax(180px, 1fr);
+  gap: 8px;
+  padding: 8px;
+  overflow: auto;
+}
+
+.video-grid.participants-1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.video-grid.participants-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.video-grid.has-focus {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.video-grid.has-focus .video-tile:not(.focused) {
+  display: none;
+}
+
+.video-tile {
+  position: relative;
+  min-width: 0;
+  min-height: 170px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: #1e1f22;
+  color: #f2f3f5;
+  overflow: hidden;
+  cursor: pointer;
+  isolation: isolate;
+}
+
+.video-tile:hover {
+  background: #232428;
+}
+
+.video-tile.speaking {
+  box-shadow: inset 0 0 0 2px #23a55a;
+}
+
+.video-tile video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  background: #0b0c0e;
+}
+
+.video-tile video.mirrored {
+  transform: scaleX(-1);
+}
+
+.video-placeholder {
+  width: 100%;
+  height: 100%;
+  min-height: 170px;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 50% 44%, rgba(88,101,242,.12), transparent 34%),
+    #1e1f22;
+}
+
+.video-placeholder > span {
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #5865f2;
+  color: #fff;
+  font-size: 1.65rem;
+  font-weight: 700;
+  user-select: none;
+}
+
+.video-tile-label {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 2;
+  max-width: calc(100% - 16px);
+  padding: 4px 7px;
+  border-radius: 4px;
+  background: rgba(17,18,20,.78);
+  color: #f2f3f5;
+  backdrop-filter: blur(5px);
+}
+
+.video-tile-label strong {
+  display: block;
+  overflow: hidden;
+  font-size: .72rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-dock-actions {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+.voice-dock-actions .camera-active {
+  color: #fff !important;
+  background: #4e5058 !important;
+}
+
+@media (max-width: 760px) {
+  .video-stage {
+    min-height: 190px;
+    max-height: 44dvh;
+  }
+
+  .video-grid,
+  .video-grid.participants-2 {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: minmax(155px, 1fr);
+  }
+
+  .video-tile,
+  .video-placeholder {
+    min-height: 155px;
+  }
+
+  .video-stage-head {
+    min-height: 40px;
+  }
+
+  .voice-dock-actions {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .voice-dock-actions button span {
+    display: none;
+  }
+}
+
+/* Cubic alpha.6 call-stage layout hotfix
+   The chat panel can have header + video stage + messages + error + composer.
+   Flex column sizing keeps message count from creating implicit grid tracks. */
+.chat-panel {
+  display: flex !important;
+  flex-direction: column !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+
+.chat-panel > .chat-header {
+  flex: 0 0 auto !important;
+  min-width: 0 !important;
+}
+
+.chat-panel > .video-stage {
+  flex: 0 0 clamp(190px, 34dvh, 520px) !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: hidden !important;
+}
+
+.chat-panel > .messages-wrap {
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  overflow: hidden !important;
+}
+
+.chat-panel > .chat-error,
+.chat-panel > .inline-error.chat-error {
+  flex: 0 0 auto !important;
+}
+
+.chat-panel > .composer {
+  flex: 0 0 auto !important;
+  min-width: 0 !important;
+}
+
+.video-stage > .video-grid {
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: auto !important;
+}
+
+@media (min-width: 681px) and (max-height: 760px) {
+  .chat-panel > .video-stage {
+    flex-basis: clamp(160px, 29dvh, 260px) !important;
+  }
+
+  .video-grid {
+    grid-auto-rows: minmax(110px, 1fr) !important;
+  }
+
+  .video-tile,
+  .video-placeholder {
+    min-height: 110px !important;
+  }
+
+  .voice-dock {
+    max-height: calc(100dvh - 32px) !important;
+    overflow-y: auto !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .chat-panel {
+    height: calc(100dvh - 64px) !important;
+    max-height: calc(100dvh - 64px) !important;
+  }
+
+  .chat-panel > .video-stage {
+    flex-basis: clamp(170px, 32dvh, 280px) !important;
+  }
+
+  .chat-panel > .messages-wrap {
+    flex-basis: 0 !important;
+  }
+}
+
+/* Cubic alpha.6 screen share + presentation mode */
+.screen-share-tile {
+  position: relative;
+  min-width: 0;
+  min-height: 170px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: #090a0c;
+  color: #f2f3f5;
+  overflow: hidden;
+  cursor: pointer;
+  isolation: isolate;
+}
+
+.screen-share-tile:hover,
+.screen-share-tile.focused {
+  box-shadow: inset 0 0 0 1px #3f4147;
+}
+
+.screen-share-tile video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  background: #050506;
+}
+
+.screen-share-loading {
+  width: 100%;
+  height: 100%;
+  min-height: 170px;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #111214;
+  color: #949ba4;
+  font-size: .78rem;
+  text-align: center;
+}
+
+.screen-share-label {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 2;
+  max-width: calc(100% - 16px);
+  padding: 5px 7px;
+  border-radius: 4px;
+  background: rgba(17,18,20,.82);
+  backdrop-filter: blur(5px);
+}
+
+.screen-share-label strong,
+.screen-share-label small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screen-share-label strong {
+  color: #f2f3f5;
+  font-size: .72rem;
+  font-weight: 650;
+}
+
+.screen-share-label small {
+  margin-top: 1px;
+  color: #b5bac1;
+  font-size: .62rem;
+}
+
+.chat-panel > .video-stage.presentation-mode {
+  flex-basis: clamp(300px, 54dvh, 720px) !important;
+}
+
+.presentation-layout {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 112px;
+  gap: 8px;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.presentation-main {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.presentation-main > .screen-share-tile {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.presentation-filmstrip {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(150px, 220px);
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.presentation-filmstrip .video-tile,
+.presentation-filmstrip .video-placeholder {
+  width: 100%;
+  min-height: 104px !important;
+  height: 104px;
+}
+
+.presentation-filmstrip .video-placeholder > span {
+  width: 44px;
+  height: 44px;
+  font-size: 1rem;
+}
+
+.video-grid > .screen-share-tile {
+  min-height: 170px;
+}
+
+.video-grid.has-focus > .screen-share-tile {
+  display: none;
+}
+
+.voice-dock-actions {
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+}
+
+.voice-dock-actions .screen-share-active {
+  color: #fff !important;
+  background: #5865f2 !important;
+}
+
+@media (min-width: 681px) and (max-height: 760px) {
+  .chat-panel > .video-stage.presentation-mode {
+    flex-basis: clamp(230px, 48dvh, 390px) !important;
+  }
+
+  .presentation-layout {
+    grid-template-rows: minmax(0, 1fr) 86px;
+  }
+
+  .presentation-filmstrip {
+    grid-auto-columns: minmax(120px, 170px);
+  }
+
+  .presentation-filmstrip .video-tile,
+  .presentation-filmstrip .video-placeholder {
+    min-height: 78px !important;
+    height: 78px;
+  }
+}
+
+@media (max-width: 680px) {
+  .chat-panel > .video-stage.presentation-mode {
+    flex-basis: clamp(230px, 46dvh, 390px) !important;
+  }
+
+  .presentation-layout {
+    grid-template-rows: minmax(0, 1fr) 78px;
+    gap: 6px;
+    padding: 6px;
+  }
+
+  .presentation-filmstrip {
+    grid-auto-columns: 112px;
+    gap: 6px;
+  }
+
+  .presentation-filmstrip .video-tile,
+  .presentation-filmstrip .video-placeholder {
+    min-height: 72px !important;
+    height: 72px;
+  }
+
+  .presentation-filmstrip .video-tile-label {
+    display: none;
+  }
+
+  .voice-dock-actions {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Cubic alpha.6 device / quality / final media polish */
+.voice-dock {
+  overflow: visible !important;
+}
+
+.voice-dock-head > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.voice-settings-button {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #949ba4;
+  cursor: pointer;
+}
+
+.voice-settings-button:hover,
+.voice-settings-button.active {
+  background: #2b2d31;
+  color: #f2f3f5;
+}
+
+.video-stage-action.active {
+  background: #2b2d31;
+  color: #f2f3f5;
+}
+
+/* When cameras or screen shares are visible, the media stage already represents
+   the participant list. Keep the floating dock focused on controls. */
+.video-stage + .messages-wrap {
+  min-height: 0;
+}
+
+.media-settings-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 90;
+  width: min(372px, calc(100vw - 16px));
+  max-height: min(620px, calc(100dvh - 110px));
+  padding: 0;
+  border: 1px solid #2b2d31;
+  border-radius: 8px;
+  background: #111214;
+  box-shadow: 0 18px 48px rgba(0,0,0,.5);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.media-settings-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border-bottom: 1px solid #232428;
+  background: #111214;
+}
+
+.media-settings-head > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.media-settings-head strong,
+.media-settings-head small {
+  display: block;
+}
+
+.media-settings-head strong {
+  color: #f2f3f5;
+  font-size: .84rem;
+  font-weight: 700;
+}
+
+.media-settings-head small {
+  margin-top: 2px;
+  color: #80848e;
+  font-size: .66rem;
+}
+
+.media-settings-head > button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #949ba4;
+  cursor: pointer;
+}
+
+.media-settings-head > button:hover {
+  background: #2b2d31;
+  color: #f2f3f5;
+}
+
+.media-settings-section {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border-bottom: 1px solid #232428;
+}
+
+.media-settings-label {
+  color: #b5bac1;
+  font-size: .65rem;
+  font-weight: 750;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.media-settings-section > label {
+  display: grid;
+  gap: 5px;
+}
+
+.media-settings-section > label > span {
+  color: #dbdee1;
+  font-size: .72rem;
+  font-weight: 600;
+}
+
+.media-settings-section select {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 34px 0 10px;
+  border: 1px solid #1e1f22;
+  border-radius: 4px;
+  background: #1e1f22;
+  color: #dbdee1;
+  font: inherit;
+  font-size: .72rem;
+  outline: none;
+}
+
+.media-settings-section select:focus {
+  border-color: #5865f2;
+}
+
+.media-settings-section select:disabled {
+  opacity: .55;
+}
+
+.media-settings-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.media-settings-section-head small {
+  color: #80848e;
+  font-size: .64rem;
+  text-align: right;
+}
+
+.media-quality-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.media-quality-options button {
+  min-width: 0;
+  min-height: 50px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 2px;
+  padding: 6px 4px;
+  border: 1px solid #2b2d31;
+  border-radius: 5px;
+  background: #1e1f22;
+  color: #b5bac1;
+  font: inherit;
+  font-size: .68rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.media-quality-options button small {
+  color: #80848e;
+  font-size: .58rem;
+  font-weight: 500;
+}
+
+.media-quality-options button:hover:not(:disabled) {
+  background: #2b2d31;
+  color: #f2f3f5;
+}
+
+.media-quality-options button.active {
+  border-color: #5865f2;
+  background: rgba(88,101,242,.14);
+  color: #f2f3f5;
+}
+
+.media-quality-options button.active small {
+  color: #b5bac1;
+}
+
+.media-quality-options button:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+.media-adaptive-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 12px;
+  color: #23a55a;
+}
+
+.media-adaptive-row > div {
+  min-width: 0;
+}
+
+.media-adaptive-row strong,
+.media-adaptive-row small {
+  display: block;
+}
+
+.media-adaptive-row strong {
+  color: #dbdee1;
+  font-size: .72rem;
+}
+
+.media-adaptive-row small {
+  margin-top: 2px;
+  color: #80848e;
+  font-size: .63rem;
+  line-height: 1.35;
+}
+
+.media-settings-notice {
+  margin: 0 12px 12px;
+  padding: 8px 9px;
+  border-radius: 4px;
+  background: #1e1f22;
+  color: #b5bac1;
+  font-size: .66rem;
+  line-height: 1.4;
+}
+
+/* Final presentation polish: give the canvas more visual priority without
+   letting it own the entire conversation. */
+.presentation-main > .screen-share-tile,
+.video-grid > .screen-share-tile,
+.video-grid > .video-tile {
+  border: 1px solid #1f2023;
+}
+
+.presentation-filmstrip {
+  scrollbar-width: thin;
+  scrollbar-color: #3f4147 #111214;
+}
+
+.presentation-filmstrip .video-tile {
+  border-radius: 6px;
+}
+
+.video-stage-head {
+  background: #0b0c0e;
+}
+
+@media (max-width: 680px) {
+  .media-settings-panel {
+    position: fixed;
+    right: 8px;
+    left: 8px;
+    bottom: calc(max(8px, env(safe-area-inset-bottom)) + 66px);
+    width: auto;
+    max-height: min(66dvh, 560px);
+  }
+
+  .media-quality-options {
+    gap: 4px;
+  }
+
+  .media-quality-options button {
+    min-height: 46px;
+    font-size: .64rem;
+  }
+}
+
+
+/* Cubic alpha.6 icon-only call controls + 60fps media presets */
+.voice-dock-actions {
+  display: flex !important;
+  grid-template-columns: none !important;
+  justify-content: center;
+  align-items: center;
+  gap: 8px !important;
+}
+
+.voice-dock-actions > button:has(svg) {
+  flex: 0 0 40px !important;
+  width: 40px !important;
+  min-width: 40px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  display: grid !important;
+  place-items: center;
+  padding: 0 !important;
+  border-radius: 8px !important;
+}
+
+.voice-dock-actions > button:has(svg) > span {
+  display: none !important;
+}
+
+.voice-dock-actions .voice-leave {
+  margin-left: 3px;
+}
+
+.media-quality-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+@media (max-width: 420px) {
+  .voice-dock-actions {
+    gap: 6px !important;
+  }
+
+  .voice-dock-actions > button:has(svg) {
+    flex-basis: 38px !important;
+    width: 38px !important;
+    min-width: 38px !important;
+    height: 38px !important;
+    min-height: 38px !important;
+  }
+}

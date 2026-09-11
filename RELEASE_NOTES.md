@@ -82,3 +82,21 @@ Validated flows include direct and group voice, bidirectional audio, mute/unmute
 The alpha.5 schema baseline includes migration `0003`, adding `calls` and `call_participants`.
 
 TURN/UDP support is present as an opt-in deployment control but remains disabled by default. Internet/NAT traversal validation is intentionally treated as deployment hardening instead of a blocker for the alpha.5 tag.
+
+## Alpha.6 Video Core
+
+The first alpha.6 slice layers camera video on top of the validated LiveKit voice rooms.
+Direct and group calls can publish camera tracks, render a responsive participant grid,
+focus a participant and open the video stage fullscreen. Screen sharing remains denied
+until the next slice.
+
+## Alpha.6 Screen Share + Presentation
+
+Screen sharing now layers onto the existing camera/voice room. A new share becomes the presentation focus, while participant camera tiles move into a filmstrip. Users can return to the media grid without stopping the share, focus any active share again, and use fullscreen on the stage. Shared audio is requested when the browser/source supports it.
+
+## Alpha.6 Device / Quality
+
+The final functional alpha.6 slice adds browser-persisted device selection and camera/screen-share
+quality presets, along with LiveKit Adaptive Stream and Dynacast. Audio-only calls now remain compact,
+while calls with camera or screen sharing use the media stage without duplicating the participant
+list in the floating dock.

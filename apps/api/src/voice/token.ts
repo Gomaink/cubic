@@ -45,7 +45,12 @@ export async function createVoiceJoinToken(
     canSubscribe: true,
     canPublish: true,
     canPublishData: false,
-    canPublishSources: [TrackSource.MICROPHONE]
+    canPublishSources: [
+      TrackSource.MICROPHONE,
+      TrackSource.CAMERA,
+      TrackSource.SCREEN_SHARE,
+      TrackSource.SCREEN_SHARE_AUDIO
+    ]
   });
 
   return {

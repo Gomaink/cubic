@@ -157,3 +157,27 @@ Completed Cubic v2.0.0-alpha.5 Voice.
 - Added 50-message cursor pagination, anchored history prepend, open-at-latest behavior and jump-to-latest with new-message count.
 - Reworked DM and group message rendering into one left-aligned Discord-style stream with avatar, display name, timestamps, compact continuations and day separators.
 - Continued the Onyx-inspired UI pass with flatter surfaces and more icon-led controls.
+
+### Alpha.6 video core
+- Enabled LiveKit camera publication while keeping screen sharing denied.
+- Added camera on/off controls to the existing voice dock.
+- Added responsive participant video tiles for direct and group calls.
+- Added camera-off placeholders, active-speaker indication, focus mode and fullscreen stage.
+- Added explicit camera cleanup on leave/disconnect.
+- Preserved the alpha.5 voice/call/history/message architecture.
+
+### Alpha.6 screen share + presentation
+- Enabled LiveKit screen-share video/audio grants.
+- Added browser screen/window/tab sharing with optional shared audio.
+- Added automatic presentation focus, participant filmstrip, grid return and fullscreen coexistence.
+- Added graceful unsupported/cancelled screen-share handling.
+- Added automatic cleanup when the browser or user stops sharing.
+
+### Alpha.6 device / quality
+- Added live microphone, camera and supported audio-output selection.
+- Added persistent camera and screen-share quality presets.
+- Enabled Adaptive Stream and Dynacast for new LiveKit rooms.
+- Added bitrate/FPS-oriented camera and screen-share profiles.
+- Hid the large media stage for audio-only calls.
+- Reduced participant duplication between the media stage and floating voice dock.
+- Added an Onyx-style Voice & Video settings panel.
