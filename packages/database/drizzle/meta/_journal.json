@@ -36,6 +36,13 @@
       "when": 1789128927869,
       "tag": "0004_shiny_khan",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789234652300,
+      "tag": "0005_little_maddog",
+      "breakpoints": true
     }
   ]
 }

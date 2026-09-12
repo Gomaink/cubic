@@ -27,6 +27,9 @@
     | 'chevron-down'
     | 'upload'
     | 'trash'
+    | 'reply'
+    | 'edit'
+    | 'more'
     | 'crown'
     | 'shield'
     | 'user-plus'
@@ -108,6 +111,14 @@
     <path d="M12 16V4M7 9l5-5 5 5M5 20h14" />
   {:else if name === 'trash'}
     <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
+  {:else if name === 'reply'}
+    <path d="m9 17-6-5 6-5v3h4a7 7 0 0 1 7 7v1a8 8 0 0 0-7-5H9v4Z" />
+  {:else if name === 'edit'}
+    <path d="M13.5 6.5 17.5 10.5M4 20l4.5-1 10-10a2.8 2.8 0 0 0-4-4l-10 10L4 20Z" />
+  {:else if name === 'more'}
+    <circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+    <circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" />
   {:else if name === 'crown'}
     <path d="m4 8 4 4 4-7 4 7 4-4-2 10H6L4 8Z" />
   {:else if name === 'shield'}

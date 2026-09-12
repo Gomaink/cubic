@@ -583,6 +583,14 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     io.to(conversationRoom(event.conversationId)).emit('message:created', event.message);
   });
 
+  const unsubscribeMessageUpdated = options.events.onMessageUpdated((event) => {
+    io.to(conversationRoom(event.conversationId)).emit('message:updated', event.message);
+  });
+
+  const unsubscribeMessageDeleted = options.events.onMessageDeleted((event) => {
+    io.to(conversationRoom(event.conversationId)).emit('message:deleted', event.message);
+  });
+
   const unsubscribeOpened = options.events.onConversationOpened((event) => {
     for (const userId of event.userIds) {
       const room = userRoom(userId);
@@ -620,6 +628,8 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
       for (const timer of ringTimers.values()) clearTimeout(timer);
       ringTimers.clear();
       unsubscribeMessage();
+      unsubscribeMessageUpdated();
+      unsubscribeMessageDeleted();
       unsubscribeOpened();
       unsubscribeChanged();
       unsubscribeRemoved();

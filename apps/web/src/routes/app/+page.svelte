@@ -6,6 +6,7 @@
   import VideoTile from '$lib/ui/VideoTile.svelte';
   import ScreenShareTile from '$lib/ui/ScreenShareTile.svelte';
   import MessageAttachments from '$lib/ui/MessageAttachments.svelte';
+  import MessageActions from '$lib/ui/MessageActions.svelte';
 
   let { data } = $props();
   let loggingOut = $state(false);
@@ -19,6 +20,7 @@
   let activeConversation = $state<any | null>(null);
   let chatMessages = $state<any[]>([]);
   let messageBody = $state('');
+  let messageInput = $state<HTMLInputElement | null>(null);
   let busy = $state(false);
   let error = $state('');
   let realtimeConnected = $state(false);
@@ -67,6 +69,25 @@
   let historyLoading = $state(false);
   let atLatest = $state(true);
   let unreadNewMessages = $state(0);
+
+  type ReplyPreview = {
+    id: string;
+    senderId: string;
+    senderUsername: string;
+    senderDisplayName: string;
+    body: string;
+    deletedAt: string | null;
+    attachmentKind: 'image' | 'video' | 'file' | null;
+  };
+
+  let replyingTo = $state<ReplyPreview | null>(null);
+  let editingMessageId = $state<string | null>(null);
+  let draftBeforeEdit = '';
+  let actionMenuMessageId = $state<string | null>(null);
+  let deleteCandidate = $state<any | null>(null);
+  let deleteDialog = $state<HTMLDialogElement | null>(null);
+  let highlightedMessageId = $state<string | null>(null);
+  let highlightTimer: ReturnType<typeof setTimeout> | null = null;
 
   let voiceDeafened = $state(false);
   let voiceMutedBeforeDeafen = false;
@@ -235,6 +256,7 @@
     if (index <= 0) return false;
     const current = chatMessages[index];
     const previous = chatMessages[index - 1];
+    if (current?.replyTo) return false;
     if (!current || !previous || current.senderId !== previous.senderId) return false;
 
     const currentAt = new Date(current.createdAt);
@@ -302,6 +324,17 @@
     }
     chatMessages = sortMessages([...chatMessages, message]);
     return true;
+  }
+
+  function applyChangedMessage(message: any) {
+    upsertMessage(message);
+    const parentPreview = replyPreviewFromMessage(message);
+    chatMessages = chatMessages.map((item: any) =>
+      item.id !== message.id && item.replyTo?.id === message.id
+        ? { ...item, replyTo: parentPreview }
+        : item
+    );
+    if (replyingTo?.id === message.id) replyingTo = parentPreview;
   }
 
   function isNearLatest(): boolean {
@@ -468,6 +501,7 @@
   }
 
   async function selectConversation(conversation: any) {
+    deleteDialog?.close();
     activeConversation = conversation;
     groupPanelOpen = false;
     groupDetails = null;
@@ -477,6 +511,10 @@
     historyLoading = false;
     unreadNewMessages = 0;
     atLatest = true;
+    replyingTo = null;
+    editingMessageId = null;
+    actionMenuMessageId = null;
+    deleteCandidate = null;
 
     await loadLatestHistory(conversation.id);
     if (conversation.kind === 'group') await refreshGroupDetails();
@@ -495,6 +533,10 @@
     unreadNewMessages = 0;
     atLatest = true;
     messagesViewport = null;
+    replyingTo = null;
+    editingMessageId = null;
+    actionMenuMessageId = null;
+    deleteCandidate = null;
   }
 
 
@@ -532,6 +574,100 @@
 
   function attachmentsOf(message: any): MessageAttachment[] {
     return Array.isArray(message?.attachments) ? message.attachments : [];
+  }
+
+  function replyPreviewFromMessage(message: any): ReplyPreview {
+    const firstAttachment = attachmentsOf(message)[0];
+    const attachmentKind = firstAttachment?.contentType?.startsWith('image/')
+      ? 'image'
+      : firstAttachment?.contentType?.startsWith('video/')
+        ? 'video'
+        : firstAttachment
+          ? 'file'
+          : null;
+    return {
+      id: message.id,
+      senderId: message.senderId,
+      senderUsername: message.senderUsername ?? '',
+      senderDisplayName: messageSenderName(message),
+      body: message.deletedAt ? '' : message.body.slice(0, 160),
+      deletedAt: message.deletedAt ?? null,
+      attachmentKind: message.deletedAt ? null : attachmentKind
+    };
+  }
+
+  function replyPreviewLabel(preview: ReplyPreview): string {
+    if (preview.deletedAt) return 'Message deleted';
+    if (preview.body?.trim()) return preview.body.trim();
+    if (preview.attachmentKind === 'image') return 'Photo';
+    if (preview.attachmentKind === 'video') return 'Video';
+    if (preview.attachmentKind === 'file') return 'File';
+    return 'Message';
+  }
+
+  async function startReply(message: any) {
+    replyingTo = replyPreviewFromMessage(message);
+    editingMessageId = null;
+    actionMenuMessageId = null;
+    await tick();
+    messageInput?.focus();
+  }
+
+  async function startEdit(message: any) {
+    draftBeforeEdit = messageBody;
+    editingMessageId = message.id;
+    replyingTo = null;
+    actionMenuMessageId = null;
+    messageBody = message.body;
+    await tick();
+    messageInput?.focus();
+    messageInput?.setSelectionRange(messageBody.length, messageBody.length);
+  }
+
+  async function cancelEdit() {
+    editingMessageId = null;
+    messageBody = draftBeforeEdit;
+    draftBeforeEdit = '';
+    await tick();
+    messageInput?.focus();
+  }
+
+  function scrollToReplyTarget(messageId: string) {
+    const target = document.getElementById(`message-${messageId}`);
+    if (!target) {
+      error = 'The replied-to message is not currently loaded.';
+      return;
+    }
+    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    highlightedMessageId = messageId;
+    if (highlightTimer) clearTimeout(highlightTimer);
+    highlightTimer = setTimeout(() => {
+      highlightedMessageId = null;
+      highlightTimer = null;
+    }, 1600);
+  }
+
+  async function requestDelete(message: any) {
+    deleteCandidate = message;
+    actionMenuMessageId = null;
+    await tick();
+    deleteDialog?.showModal();
+    deleteDialog?.querySelector<HTMLButtonElement>('.cubic-message-delete-cancel')?.focus();
+  }
+
+  function closeDeleteDialog() {
+    const messageId = deleteCandidate?.id;
+    deleteDialog?.close();
+    void tick().then(() => {
+      const article = messageId ? document.getElementById(`message-${messageId}`) : null;
+      const controls = article?.querySelectorAll<HTMLButtonElement>(
+        '[aria-label="Delete message"], [aria-label="Message actions"]'
+      );
+      const visible = controls
+        ? Array.from(controls).find((control) => control.offsetParent !== null)
+        : null;
+      (visible ?? messageInput)?.focus();
+    });
   }
 
   function currentStagedAttachments(): StagedAttachment[] {
@@ -807,6 +943,19 @@
     );
   }
 
+  function currentEditingMessage(): any | null {
+    return editingMessageId
+      ? chatMessages.find((item: any) => item.id === editingMessageId) ?? null
+      : null;
+  }
+
+  function composerSubmitDisabled(): boolean {
+    if (busy) return true;
+    const editing = currentEditingMessage();
+    if (editing) return !messageBody.trim() && attachmentsOf(editing).length === 0;
+    return stagedUploadPending() || (!messageBody.trim() && stagedReadyIds().length === 0);
+  }
+
   function createClientMessageId() {
     if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
     const bytes = new Uint8Array(16);
@@ -832,6 +981,7 @@
     }
 
     const conversationId = activeConversation.id;
+    const replyToMessageId = replyingTo?.id ?? null;
     const sentStagedLocalIds = new Set(
       currentStagedAttachments()
         .filter((item) => item.status === 'ready')
@@ -850,7 +1000,8 @@
           body: JSON.stringify({
             clientMessageId: createClientMessageId(),
             body,
-            attachmentIds
+            attachmentIds,
+            replyToMessageId
           })
         }
       );
@@ -871,6 +1022,7 @@
         result?.message
       ) {
         upsertMessage(result.message);
+        replyingTo = null;
         await scrollToLatest('smooth');
       }
 
@@ -881,6 +1033,66 @@
         e instanceof Error
           ? e.message
           : 'Could not send message.';
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function saveEditedMessage() {
+    const conversationId = activeConversation?.id;
+    const message = chatMessages.find((item: any) => item.id === editingMessageId);
+    const body = messageBody.trim();
+    if (!conversationId || !message || busy || (!body && attachmentsOf(message).length === 0)) return;
+
+    busy = true;
+    error = '';
+    try {
+      const result = await api(
+        `/api/v1/conversations/${conversationId}/messages/${message.id}`,
+        { method: 'PATCH', body: JSON.stringify({ body }) }
+      );
+      if (activeConversation?.id === conversationId && result?.message) {
+        applyChangedMessage(result.message);
+      }
+      editingMessageId = null;
+      messageBody = draftBeforeEdit;
+      draftBeforeEdit = '';
+      await tick();
+      messageInput?.focus();
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Could not edit message.';
+    } finally {
+      busy = false;
+    }
+  }
+
+  function submitComposer() {
+    if (editingMessageId) {
+      void saveEditedMessage();
+    } else {
+      void sendMessage();
+    }
+  }
+
+  async function confirmDeleteMessage() {
+    const conversationId = activeConversation?.id;
+    const message = deleteCandidate;
+    if (!conversationId || !message || busy) return;
+
+    busy = true;
+    error = '';
+    try {
+      const result = await api(
+        `/api/v1/conversations/${conversationId}/messages/${message.id}`,
+        { method: 'DELETE' }
+      );
+      if (activeConversation?.id === conversationId && result?.message) {
+        applyChangedMessage(result.message);
+      }
+      closeDeleteDialog();
+      await refreshConversations();
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Could not delete message.';
     } finally {
       busy = false;
     }
@@ -2523,6 +2735,25 @@
       }
       queueConversationRefresh();
     });
+    socket.on('message:updated', (message: any) => {
+      if (activeConversation?.id === message.conversationId) {
+        applyChangedMessage(message);
+      }
+      queueConversationRefresh();
+    });
+    socket.on('message:deleted', (message: any) => {
+      if (activeConversation?.id === message.conversationId) {
+        applyChangedMessage(message);
+        if (editingMessageId === message.id) {
+          editingMessageId = null;
+          messageBody = draftBeforeEdit;
+          draftBeforeEdit = '';
+        }
+        if (actionMenuMessageId === message.id) actionMenuMessageId = null;
+        if (deleteCandidate?.id === message.id) closeDeleteDialog();
+      }
+      queueConversationRefresh();
+    });
     socket.on('conversation:updated', (event: any) => {
       queueConversationRefresh();
       if (activeConversation?.id === event?.conversationId && activeConversation.kind === 'group') {
@@ -2857,9 +3088,11 @@
           {/if}
 
           <article
+            id={`message-${message.id}`}
             class="discord-message"
             class:continuation={isMessageContinuation(index)}
             class:mine={message.senderId === data.user.id}
+            class:cubic-message-highlight={highlightedMessageId === message.id}
           >
             <div class="discord-message-gutter">
               {#if !isMessageContinuation(index)}
@@ -2893,14 +3126,41 @@
                 </header>
               {/if}
 
+              {#if message.replyTo}
+                <button
+                  class="cubic-message-reply-preview"
+                  type="button"
+                  aria-label={`Go to message from ${message.replyTo.senderDisplayName}`}
+                  title="Go to replied-to message"
+                  onclick={() => scrollToReplyTarget(message.replyTo.id)}
+                >
+                  <strong>{message.replyTo.senderDisplayName}</strong>
+                  <span>{replyPreviewLabel(message.replyTo)}</span>
+                </button>
+              {/if}
+
               <div class="discord-message-body" class:deleted={Boolean(message.deletedAt)}>
                 {message.deletedAt ? 'Message deleted' : message.body}
+                {#if !message.deletedAt && message.editedAt}
+                  <span class="cubic-message-edited">(edited)</span>
+                {/if}
               </div>
 
               {#if !message.deletedAt && attachmentsOf(message).length > 0}
                 <MessageAttachments attachments={attachmentsOf(message)} />
               {/if}
             </div>
+
+            {#if !message.deletedAt}
+              <MessageActions
+                own={message.senderId === data.user.id}
+                open={actionMenuMessageId === message.id}
+                onreply={() => void startReply(message)}
+                onedit={() => void startEdit(message)}
+                ondelete={() => void requestDelete(message)}
+                ontoggle={() => actionMenuMessageId = actionMenuMessageId === message.id ? null : message.id}
+              />
+            {/if}
           </article>
         {/each}
         </div>
@@ -2922,6 +3182,35 @@
       </div>
 
       {#if error}<div class="inline-error chat-error">{error}</div>{/if}
+
+      {#if editingMessageId || replyingTo}
+        <div class="cubic-message-composer-banner" aria-live="polite">
+          {#if editingMessageId}
+            <Icon name="edit" size={16} />
+            <span><strong>Editing message</strong><small>Attachments will stay unchanged.</small></span>
+            <button type="button" aria-label="Cancel editing" title="Cancel editing" onclick={() => void cancelEdit()}>
+              <Icon name="x" size={16} />
+            </button>
+          {:else if replyingTo}
+            <Icon name="reply" size={16} />
+            <span>
+              <strong>Replying to {replyingTo.senderDisplayName}</strong>
+              <small>{replyPreviewLabel(replyingTo)}</small>
+            </span>
+            <button
+              type="button"
+              aria-label="Cancel reply"
+              title="Cancel reply"
+              onclick={() => {
+                replyingTo = null;
+                void tick().then(() => messageInput?.focus());
+              }}
+            >
+              <Icon name="x" size={16} />
+            </button>
+          {/if}
+        </div>
+      {/if}
 
       {#if currentStagedAttachments().length > 0}
         <div
@@ -2994,15 +3283,19 @@
         class="composer cubic-attachment-composer"
         onsubmit={(event) => {
           event.preventDefault();
-          sendMessage();
+          submitComposer();
         }}
-        onpaste={handleAttachmentPaste}
+        onpaste={(event) => {
+          if (!editingMessageId) handleAttachmentPaste(event);
+        }}
         ondragover={(event) => {
-          if (event.dataTransfer?.types.includes('Files')) {
+          if (!editingMessageId && event.dataTransfer?.types.includes('Files')) {
             event.preventDefault();
           }
         }}
-        ondrop={handleAttachmentDrop}
+        ondrop={(event) => {
+          if (!editingMessageId) handleAttachmentDrop(event);
+        }}
       >
         <input
           class="cubic-attachment-input"
@@ -3024,8 +3317,8 @@
           class="cubic-attachment-picker"
           type="button"
           aria-label="Add attachment"
-          title="Add attachment"
-          disabled={busy || stagedUploadPending()}
+          title={editingMessageId ? 'Attachments cannot be changed while editing' : 'Add attachment'}
+          disabled={busy || Boolean(editingMessageId) || stagedUploadPending()}
           onclick={() => attachmentInput?.click()}
         >
           <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
@@ -3041,25 +3334,47 @@
         </button>
 
         <input
+          bind:this={messageInput}
           bind:value={messageBody}
           maxlength="8000"
           autocomplete="off"
-          placeholder="Message…"
+          placeholder={editingMessageId ? 'Edit message…' : 'Message…'}
         />
 
         <button
           type="submit"
-          aria-label="Send message"
-          title={stagedUploadPending() ? 'Wait for attachments to finish uploading' : 'Send'}
-          disabled={
-            busy ||
-            stagedUploadPending() ||
-            (!messageBody.trim() && stagedReadyIds().length === 0)
-          }
+          aria-label={editingMessageId ? 'Save message' : 'Send message'}
+          title={editingMessageId ? 'Save edit' : stagedUploadPending() ? 'Wait for attachments to finish uploading' : 'Send'}
+          disabled={composerSubmitDisabled()}
         >
-          <Icon name="send" size={18} />
+          <Icon name={editingMessageId ? 'check' : 'send'} size={18} />
         </button>
       </form>
+
+      {#if deleteCandidate}
+        <dialog
+          class="cubic-message-delete-dialog"
+          bind:this={deleteDialog}
+          aria-labelledby="cubic-message-delete-title"
+          oncancel={(event) => {
+            event.preventDefault();
+            closeDeleteDialog();
+          }}
+          onclose={() => {
+            deleteCandidate = null;
+            deleteDialog = null;
+          }}
+        >
+          <h2 id="cubic-message-delete-title">Delete message?</h2>
+          <p>This message will be shown as deleted. Replies to it will remain in the conversation.</p>
+          <div>
+            <button class="cubic-message-delete-cancel" type="button" disabled={busy} onclick={closeDeleteDialog}>Cancel</button>
+            <button class="danger" type="button" disabled={busy} onclick={() => void confirmDeleteMessage()}>
+              {busy ? 'Deleting…' : 'Delete'}
+            </button>
+          </div>
+        </dialog>
+      {/if}
 
       {#if groupPanelOpen && groupDetails}
         <aside class="group-panel" aria-label="Group settings">

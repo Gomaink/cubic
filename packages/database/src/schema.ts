@@ -1,4 +1,5 @@
 import {
+  type AnyPgColumn,
   boolean,
   index,
   integer,
@@ -178,6 +179,10 @@ export const messages = pgTable(
     conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
     senderId: uuid('sender_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
     clientMessageId: uuid('client_message_id').notNull(),
+    replyToMessageId: uuid('reply_to_message_id').references(
+      (): AnyPgColumn => messages.id,
+      { onDelete: 'set null' }
+    ),
     body: text('body').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     editedAt: timestamp('edited_at', { withTimezone: true, mode: 'date' }),
@@ -186,7 +191,8 @@ export const messages = pgTable(
   (table) => [
     uniqueIndex('messages_sender_client_uq').on(table.senderId, table.clientMessageId),
     index('messages_conversation_created_idx').on(table.conversationId, table.createdAt),
-    index('messages_sender_idx').on(table.senderId)
+    index('messages_sender_idx').on(table.senderId),
+    index('messages_reply_to_idx').on(table.replyToMessageId)
   ]
 );
 

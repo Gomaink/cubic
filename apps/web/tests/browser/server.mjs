@@ -25,7 +25,7 @@ function reset() {
   messages = Array.from({ length: 80 }, (_, index) => ({
     id: `message-${index}`, conversationId: dm, senderId: peer.id, senderDisplayName: peer.displayName,
     createdAt: new Date(Date.UTC(2026, 8, 1, 12, index)).toISOString(),
-    body: `History message ${index}`, attachments: [], deletedAt: null
+    body: `History message ${index}`, attachments: [], editedAt: null, deletedAt: null, replyTo: null
   }));
   messages[70].attachments = [attachment('single.png')];
   messages[71].attachments = Array.from({ length: 3 }, (_, i) => attachment(`gallery-${i}.png`));
@@ -73,8 +73,13 @@ const server = createServer(async (request, response) => {
     const conversationId = url.pathname.split('/')[4];
     if (request.method === 'POST') {
       const payload = JSON.parse((await body()).toString());
+      const target = messages.find((item) => item.id === payload.replyToMessageId);
       const message = { id: randomUUID(), conversationId, senderId: user.id, createdAt: new Date().toISOString(), body: payload.body,
-        attachments: payload.attachmentIds.map((id) => staged.get(id)), clientMessageId: payload.clientMessageId };
+        editedAt: null, deletedAt: null, attachments: payload.attachmentIds.map((id) => staged.get(id)), clientMessageId: payload.clientMessageId,
+        replyTo: target ? { id: target.id, senderId: target.senderId, senderUsername: target.senderUsername ?? peer.username,
+          senderDisplayName: target.senderDisplayName ?? peer.displayName, body: target.deletedAt ? '' : target.body,
+          deletedAt: target.deletedAt, attachmentKind: target.deletedAt ? null : target.attachments[0]?.contentType?.startsWith('image/') ? 'image'
+            : target.attachments[0]?.contentType?.startsWith('video/') ? 'video' : target.attachments.length ? 'file' : null } : null };
       messages.push(message);
       io.emit('message:created', message);
       return json({ message }, 201);
@@ -83,6 +88,24 @@ const server = createServer(async (request, response) => {
     const filtered = messages.filter((message) => message.conversationId === conversationId && (!before || message.createdAt < before));
     const page = filtered.slice(-50);
     return json({ messages: page, nextCursor: filtered.length > 50 ? page[0].createdAt : null });
+  }
+  const messageAction = /^\/api\/v1\/conversations\/([^/]+)\/messages\/([^/]+)$/.exec(url.pathname);
+  if (messageAction && request.method === 'PATCH') {
+    const payload = JSON.parse((await body()).toString());
+    const message = messages.find((item) => item.conversationId === messageAction[1] && item.id === messageAction[2]);
+    if (!message) return json({ error: 'Message not found.' }, 404);
+    message.body = payload.body.trim();
+    message.editedAt = new Date().toISOString();
+    io.emit('message:updated', message);
+    return json({ message });
+  }
+  if (messageAction && request.method === 'DELETE') {
+    const message = messages.find((item) => item.conversationId === messageAction[1] && item.id === messageAction[2]);
+    if (!message) return json({ error: 'Message not found.' }, 404);
+    message.body = '';
+    message.deletedAt = new Date().toISOString();
+    io.emit('message:deleted', message);
+    return json({ message });
   }
   if (url.pathname.endsWith('/attachments') && request.method === 'POST') {
     const upload = (await body()).toString();

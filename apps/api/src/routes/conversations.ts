@@ -8,11 +8,16 @@ import type { RealtimeEvents, RealtimeMessage } from '../realtime/events.js';
 
 const directBodySchema = z.object({ userId: z.string().uuid() });
 const conversationParamsSchema = z.object({ id: z.string().uuid() });
+const messageParamsSchema = z.object({
+  id: z.string().uuid(),
+  messageId: z.string().uuid()
+});
 const messagesQuerySchema = z.object({ before: z.string().datetime().optional(), limit: z.coerce.number().int().min(1).max(100).default(50) });
 const messageBodySchema = z.object({
   clientMessageId: z.string().uuid(),
   body: z.string().trim().max(8000).default(''),
-  attachmentIds: z.array(z.string().uuid()).max(10).default([])
+  attachmentIds: z.array(z.string().uuid()).max(10).default([]),
+  replyToMessageId: z.string().uuid().nullable().optional()
 }).superRefine((value, ctx) => {
   if (!value.body && value.attachmentIds.length === 0) {
     ctx.addIssue({
@@ -29,6 +34,7 @@ const messageBodySchema = z.object({
     });
   }
 });
+const messageEditSchema = z.object({ body: z.string().trim().max(8000) });
 
 function orderedPair(a: string, b: string): [string, string] { return a < b ? [a, b] : [b, a]; }
 
@@ -40,7 +46,7 @@ async function isMember(database: Database, conversationId: string, userId: stri
   return Boolean(rows[0]);
 }
 
-type AttachmentDto = {
+export type AttachmentDto = {
   id: string;
   conversationId: string;
   messageId: string | null;
@@ -52,6 +58,16 @@ type AttachmentDto = {
   height: number | null;
   createdAt: string;
   url: string;
+};
+
+export type ReplyPreviewDto = {
+  id: string;
+  senderId: string;
+  senderUsername: string;
+  senderDisplayName: string;
+  body: string;
+  deletedAt: string | null;
+  attachmentKind: 'image' | 'video' | 'file' | null;
 };
 
 function attachmentDto(row: any): AttachmentDto {
@@ -103,6 +119,144 @@ async function attachmentsForMessages(
   }
 
   return byMessage;
+}
+
+async function replyPreviewsForMessages(
+  database: Database,
+  replyToMessageIds: Array<string | null | undefined>
+): Promise<Map<string, ReplyPreviewDto>> {
+  const ids = [...new Set(replyToMessageIds.filter((id): id is string => Boolean(id)))];
+  const previews = new Map<string, ReplyPreviewDto>();
+  if (ids.length === 0) return previews;
+
+  const result = await database.pool.query(
+    `select
+       parent.id,
+       parent.sender_id,
+       parent.body,
+       parent.deleted_at,
+       sender.username as sender_username,
+       sender.display_name as sender_display_name,
+       first_attachment.content_type as attachment_content_type
+     from messages parent
+     join users sender on sender.id = parent.sender_id
+     left join lateral (
+       select a.content_type
+       from attachments a
+       where a.message_id = parent.id
+       order by a.created_at asc, a.id asc
+       limit 1
+     ) first_attachment on true
+     where parent.id = any($1::uuid[])`,
+    [ids]
+  );
+
+  for (const row of result.rows) {
+    const attachmentKind = row.attachment_content_type?.startsWith('image/')
+      ? 'image'
+      : row.attachment_content_type?.startsWith('video/')
+        ? 'video'
+        : row.attachment_content_type
+          ? 'file'
+          : null;
+    previews.set(row.id, {
+      id: row.id,
+      senderId: row.sender_id,
+      senderUsername: row.sender_username,
+      senderDisplayName: row.sender_display_name,
+      body: row.deleted_at ? '' : row.body.slice(0, 160),
+      deletedAt: row.deleted_at ? new Date(row.deleted_at).toISOString() : null,
+      attachmentKind: row.deleted_at ? null : attachmentKind
+    });
+  }
+
+  return previews;
+}
+
+type MessageRow = {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  clientMessageId: string;
+  replyToMessageId: string | null;
+  body: string;
+  createdAt: Date;
+  editedAt: Date | null;
+  deletedAt: Date | null;
+  senderUsername?: string;
+  senderDisplayName?: string;
+  senderAvatarUrl?: string | null;
+};
+
+function messageDto(
+  row: MessageRow,
+  attachmentsByMessage: Map<string, AttachmentDto[]>,
+  replyPreviews: Map<string, ReplyPreviewDto>
+): RealtimeMessage {
+  return {
+    ...row,
+    createdAt: row.createdAt.toISOString(),
+    editedAt: row.editedAt?.toISOString() ?? null,
+    deletedAt: row.deletedAt?.toISOString() ?? null,
+    attachments: attachmentsByMessage.get(row.id) ?? [],
+    replyTo: row.replyToMessageId
+      ? replyPreviews.get(row.replyToMessageId) ?? null
+      : null
+  };
+}
+
+async function serializeMessages(
+  database: Database,
+  rows: MessageRow[]
+): Promise<RealtimeMessage[]> {
+  const [attachmentsByMessage, replyPreviews] = await Promise.all([
+    attachmentsForMessages(database, rows.map((row) => row.id)),
+    replyPreviewsForMessages(database, rows.map((row) => row.replyToMessageId))
+  ]);
+  return rows.map((row) => messageDto(row, attachmentsByMessage, replyPreviews));
+}
+
+async function fetchMessage(
+  database: Database,
+  conversationId: string,
+  messageId: string
+): Promise<MessageRow | null> {
+  const result = await database.pool.query(
+    `select
+       m.id,
+       m.conversation_id,
+       m.sender_id,
+       m.client_message_id,
+       m.reply_to_message_id,
+       m.body,
+       m.created_at,
+       m.edited_at,
+       m.deleted_at,
+       u.username as sender_username,
+       u.display_name as sender_display_name,
+       u.avatar_url as sender_avatar_url
+     from messages m
+     join users u on u.id = m.sender_id
+     where m.id = $1 and m.conversation_id = $2
+     limit 1`,
+    [messageId, conversationId]
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    senderId: row.sender_id,
+    clientMessageId: row.client_message_id,
+    replyToMessageId: row.reply_to_message_id,
+    body: row.body,
+    createdAt: new Date(row.created_at),
+    editedAt: row.edited_at ? new Date(row.edited_at) : null,
+    deletedAt: row.deleted_at ? new Date(row.deleted_at) : null,
+    senderUsername: row.sender_username,
+    senderDisplayName: row.sender_display_name,
+    senderAvatarUrl: row.sender_avatar_url
+  };
 }
 
 export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> = async (app, options) => {
@@ -199,26 +353,18 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     if (query.data.before) conditions.push(lt(messages.createdAt, new Date(query.data.before)));
     const rows = await options.database.db.select({
       id: messages.id, conversationId: messages.conversationId, senderId: messages.senderId, clientMessageId: messages.clientMessageId,
-      body: messages.body, createdAt: messages.createdAt, editedAt: messages.editedAt, deletedAt: messages.deletedAt,
+      replyToMessageId: messages.replyToMessageId, body: messages.body, createdAt: messages.createdAt,
+      editedAt: messages.editedAt, deletedAt: messages.deletedAt,
       senderUsername: users.username, senderDisplayName: users.displayName, senderAvatarUrl: users.avatarUrl
     }).from(messages).innerJoin(users, eq(messages.senderId, users.id))
       .where(and(...conditions)).orderBy(desc(messages.createdAt), desc(messages.id)).limit(query.data.limit + 1);
 
     const hasMore = rows.length > query.data.limit;
     const page = rows.slice(0, query.data.limit).reverse();
-    const attachmentsByMessage = await attachmentsForMessages(
-      options.database,
-      page.map((row) => row.id)
-    );
+    const serialized = await serializeMessages(options.database, page);
 
     return reply.send({
-      messages: page.map((row) => ({
-        ...row,
-        createdAt: row.createdAt.toISOString(),
-        editedAt: row.editedAt?.toISOString() ?? null,
-        deletedAt: row.deletedAt?.toISOString() ?? null,
-        attachments: attachmentsByMessage.get(row.id) ?? []
-      })),
+      messages: serialized,
       nextCursor: hasMore && page[0] ? page[0].createdAt.toISOString() : null
     });
   });
@@ -242,21 +388,29 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
       .where(and(eq(messages.senderId, me), eq(messages.clientMessageId, parsed.data.clientMessageId))).limit(1);
 
     if (existing[0]) {
-      const attachmentsByMessage = await attachmentsForMessages(
+      const existingMessage = await fetchMessage(
         options.database,
-        [existing[0].id]
+        existing[0].conversationId,
+        existing[0].id
       );
+      if (!existingMessage) throw new Error('Failed to load existing message.');
+      const [serialized] = await serializeMessages(options.database, [existingMessage]);
 
       return reply.send({
-        message: {
-          ...existing[0],
-          createdAt: existing[0].createdAt.toISOString(),
-          editedAt: existing[0].editedAt?.toISOString() ?? null,
-          deletedAt: existing[0].deletedAt?.toISOString() ?? null,
-          attachments: attachmentsByMessage.get(existing[0].id) ?? []
-        },
+        message: serialized,
         duplicate: true
       });
+    }
+
+    if (parsed.data.replyToMessageId) {
+      const target = await fetchMessage(
+        options.database,
+        params.data.id,
+        parsed.data.replyToMessageId
+      );
+      if (!target) {
+        return reply.code(400).send({ error: 'Reply target not found in this conversation.' });
+      }
     }
 
     const now = new Date();
@@ -273,14 +427,16 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
            conversation_id,
            sender_id,
            client_message_id,
+           reply_to_message_id,
            body,
            created_at
-         ) values ($1, $2, $3, $4, $5)
+         ) values ($1, $2, $3, $4, $5, $6)
          returning *`,
         [
           params.data.id,
           me,
           parsed.data.clientMessageId,
+          parsed.data.replyToMessageId ?? null,
           parsed.data.body,
           now
         ]
@@ -349,24 +505,29 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
       client.release();
     }
 
-    const message = {
+    const createdRow: MessageRow = {
       id: created.id,
       conversationId: created.conversation_id,
       senderId: created.sender_id,
       clientMessageId: created.client_message_id,
+      replyToMessageId: created.reply_to_message_id,
       body: created.body,
-      createdAt: new Date(created.created_at).toISOString(),
-      editedAt: created.edited_at
-        ? new Date(created.edited_at).toISOString()
-        : null,
-      deletedAt: created.deleted_at
-        ? new Date(created.deleted_at).toISOString()
-        : null,
+      createdAt: new Date(created.created_at),
+      editedAt: created.edited_at ? new Date(created.edited_at) : null,
+      deletedAt: created.deleted_at ? new Date(created.deleted_at) : null,
       senderUsername: request.auth.user.username,
       senderDisplayName: request.auth.user.displayName,
-      senderAvatarUrl: request.auth.user.avatarUrl,
-      attachments: boundAttachmentRows.map(attachmentDto)
-    } satisfies RealtimeMessage & { attachments: AttachmentDto[] };
+      senderAvatarUrl: request.auth.user.avatarUrl
+    };
+    const replyPreviews = await replyPreviewsForMessages(
+      options.database,
+      [createdRow.replyToMessageId]
+    );
+    const message = messageDto(
+      createdRow,
+      new Map([[createdRow.id, boundAttachmentRows.map(attachmentDto)]]),
+      replyPreviews
+    );
 
     options.realtimeEvents?.emitMessageCreated({
       conversationId: params.data.id,
@@ -374,5 +535,90 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     });
 
     return reply.code(201).send({ message, duplicate: false });
+  });
+
+  app.patch('/:id/messages/:messageId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = messageParamsSchema.safeParse(request.params);
+    const parsed = messageEditSchema.safeParse(request.body);
+    if (!params.success || !parsed.success) return reply.code(400).send({ error: 'Invalid message.' });
+
+    const me = request.auth.user.id;
+    if (!(await isMember(options.database, params.data.id, me))) {
+      return reply.code(404).send({ error: 'Conversation not found.' });
+    }
+
+    const current = await fetchMessage(options.database, params.data.id, params.data.messageId);
+    if (!current) return reply.code(404).send({ error: 'Message not found.' });
+    if (current.senderId !== me) return reply.code(403).send({ error: 'You can only edit your own messages.' });
+    if (current.deletedAt) return reply.code(409).send({ error: 'Deleted messages cannot be edited.' });
+
+    if (!parsed.data.body) {
+      const attachment = await options.database.pool.query(
+        'select 1 from attachments where message_id = $1 limit 1',
+        [current.id]
+      );
+      if (!attachment.rowCount) {
+        return reply.code(400).send({ error: 'Message body is required.' });
+      }
+    }
+
+    const updatedAt = new Date();
+    const updated = await options.database.pool.query(
+      `update messages
+          set body = $1, edited_at = $2
+        where id = $3
+          and conversation_id = $4
+          and sender_id = $5
+          and deleted_at is null
+      returning id`,
+      [parsed.data.body, updatedAt, current.id, params.data.id, me]
+    );
+    if (!updated.rowCount) return reply.code(409).send({ error: 'Message can no longer be edited.' });
+
+    const changed = await fetchMessage(options.database, params.data.id, current.id);
+    if (!changed) throw new Error('Failed to load edited message.');
+    const [message] = await serializeMessages(options.database, [changed]);
+    if (!message) throw new Error('Failed to serialize edited message.');
+
+    options.realtimeEvents?.emitMessageUpdated({ conversationId: params.data.id, message });
+    return reply.send({ message });
+  });
+
+  app.delete('/:id/messages/:messageId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = messageParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid message.' });
+
+    const me = request.auth.user.id;
+    if (!(await isMember(options.database, params.data.id, me))) {
+      return reply.code(404).send({ error: 'Conversation not found.' });
+    }
+
+    const current = await fetchMessage(options.database, params.data.id, params.data.messageId);
+    if (!current) return reply.code(404).send({ error: 'Message not found.' });
+    if (current.senderId !== me) return reply.code(403).send({ error: 'You can only delete your own messages.' });
+    if (current.deletedAt) return reply.code(409).send({ error: 'Message is already deleted.' });
+
+    const deletedAt = new Date();
+    const deleted = await options.database.pool.query(
+      `update messages
+          set body = '', deleted_at = $1
+        where id = $2
+          and conversation_id = $3
+          and sender_id = $4
+          and deleted_at is null
+      returning id`,
+      [deletedAt, current.id, params.data.id, me]
+    );
+    if (!deleted.rowCount) return reply.code(409).send({ error: 'Message is already deleted.' });
+
+    const changed = await fetchMessage(options.database, params.data.id, current.id);
+    if (!changed) throw new Error('Failed to load deleted message.');
+    const [message] = await serializeMessages(options.database, [changed]);
+    if (!message) throw new Error('Failed to serialize deleted message.');
+
+    options.realtimeEvents?.emitMessageDeleted({ conversationId: params.data.id, message });
+    return reply.send({ message });
   });
 };
