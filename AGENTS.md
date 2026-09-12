@@ -285,3 +285,243 @@ When a task is complete, report:
 - any uncertainty or known limitation
 
 Never claim something was tested when it was not.
+
+# Cubic Product Direction
+
+Cubic is evolving into a complete open-source, self-hosted Discord-like
+realtime communication platform.
+
+Long-term product concepts:
+
+- Direct Messages
+- Servers
+- Server Members
+- Categories
+- Text Channels
+- Voice Channels
+- Roles
+- Permission Overrides
+- Presence
+- Invites
+- Moderation
+
+The current group-conversation model is transitional.
+
+Future architecture MUST NOT deepen the assumption that:
+
+    group === conversation
+
+A Server is not a Conversation.
+
+The intended long-term model is approximately:
+
+User
+
+Direct Conversation
+  -> Messages
+
+Server
+  -> Server Members
+  -> Roles
+  -> Categories
+  -> Channels
+       -> Text Channel
+            -> messaging/conversation layer
+       -> Voice Channel
+            -> realtime voice presence / LiveKit room
+
+Existing messaging capabilities must remain reusable by both:
+- DMs
+- future text channels
+
+Existing voice/video infrastructure must remain reusable by:
+- current calls
+- future voice channels
+
+Do not implement server-like functionality by continually expanding the
+legacy group model when a reusable server/channel abstraction is more
+appropriate.
+
+# Security Philosophy
+
+Cubic security must never depend on source-code secrecy.
+
+Assume that an attacker:
+- can read the complete Cubic source code
+- knows every public route
+- understands the database schema
+- understands authentication/session architecture
+- understands permission evaluation logic
+
+The system must remain secure under those assumptions.
+
+Security through obscurity is not an acceptable control.
+
+Authentication, authorization, permissions, cryptographic decisions and
+data isolation must be enforced explicitly and server-side.
+
+Security is a first-class architectural requirement, alongside correctness,
+realtime behavior, performance and UX.
+
+# Credential and Token Security
+
+Cubic must specifically avoid reusable token-grabber-style account compromise.
+
+There must be no long-lived reusable Cubic bearer credential exposed to
+frontend JavaScript.
+
+Preferred browser authentication architecture:
+
+- server-side sessions
+- cryptographically random session identifiers
+- HttpOnly cookies
+- Secure cookies in production
+- appropriate SameSite policy
+- server-side expiration
+- server-side revocation
+
+Do not store primary authentication credentials in:
+- localStorage
+- sessionStorage
+- IndexedDB
+- client-readable cookies
+- query strings
+- URLs
+- frontend source/state intended for persistence
+
+Never log:
+- passwords
+- session secrets
+- authentication cookies
+- API secrets
+- LiveKit secrets
+- password-reset secrets
+
+Logout must invalidate the session server-side.
+
+Future account security must support:
+- active session listing
+- individual session/device revocation
+- revoke all other sessions
+- idle expiration
+- absolute expiration
+- session rotation after authentication/security-sensitive transitions
+
+# WebSocket Authentication
+
+Realtime connections must derive identity from an authenticated Cubic session.
+
+Never trust a client-provided userId, role, membership or permission claim.
+
+Do not introduce a persistent JavaScript-readable bearer token solely for
+Socket.IO/WebSocket authentication.
+
+# LiveKit Security
+
+LiveKit credentials are capabilities, not Cubic account credentials.
+
+LiveKit access tokens must:
+- be issued only after Cubic authorization
+- have minimal grants
+- be scoped to the relevant room/channel
+- have short lifetimes where practical
+- never grant access to the Cubic account itself
+
+Compromise of a LiveKit token must not imply compromise of a Cubic session.
+
+# Authorization
+
+Knowing a UUID is never authorization.
+
+Every protected object access must verify appropriate authorization,
+including:
+- messages
+- attachments
+- conversations
+- future servers
+- future channels
+- future roles
+- future voice rooms
+
+Client-side visibility checks are UX only and never replace server-side
+authorization.
+
+Future server/channel permissions must be evaluated centrally rather than
+reimplemented ad hoc in individual routes.
+
+# XSS and User Content
+
+Treat all user-provided content as hostile.
+
+Do not render raw user input as HTML.
+
+Do not introduce {@html ...} for messages, usernames, bios, filenames or
+other user-controlled data without an explicit security design and robust
+sanitization.
+
+If Markdown/rich text is added later:
+- use a constrained parser
+- sanitize generated HTML
+- disallow dangerous protocols/elements/attributes
+- add security regression tests
+
+Maintain and progressively strengthen Content-Security-Policy.
+
+# Upload Security
+
+Never trust:
+- filename
+- extension
+- client-provided MIME type
+
+Uploaded files must have:
+- size limits
+- server-side authorization
+- controlled storage paths
+- path traversal protection
+- defensive content-type handling
+- authenticated delivery where content is private
+
+UUID knowledge must never bypass attachment authorization.
+
+# Dependency Security
+
+Avoid unnecessary dependencies.
+
+A dependency must not be added merely to save a small amount of code.
+
+Security maintenance should include:
+- Dependabot
+- dependency review
+- CodeQL/SAST where appropriate
+- secret scanning
+- lockfile review
+- explicit audit of production vs development vulnerabilities
+
+Never blindly run:
+
+    npm audit fix --force
+
+Evaluate upgrades and compatibility individually.
+
+# Security Development Rule
+
+Features involving any of the following require explicit threat analysis:
+
+- authentication
+- authorization
+- sessions
+- permissions
+- user-generated HTML/content
+- file uploads
+- realtime communication
+- server/channel membership
+- invites
+- moderation
+- secrets
+- cryptographic material
+- account recovery
+- third-party capability tokens
+
+Negative authorization tests are mandatory for security-sensitive features.
+
