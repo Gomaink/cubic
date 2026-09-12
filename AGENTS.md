@@ -525,3 +525,64 @@ Features involving any of the following require explicit threat analysis:
 
 Negative authorization tests are mandatory for security-sensitive features.
 
+
+# Cubic Long-Term UI Direction
+
+Cubic is not intended to use a Teams-style application navigation model.
+
+The long-term desktop information architecture is:
+
+    Server/DM Rail
+        |
+        +-- Context Sidebar
+        |     |
+        |     +-- DM list, OR
+        |     +-- Server categories/channels
+        |     +-- Expandable voice participant trees
+        |
+        +-- Main Content
+        |     |
+        |     +-- Text channel / DM
+        |     +-- Voice/media experience
+        |
+        +-- Optional Member Sidebar
+
+For server contexts, prefer a hierarchical model:
+
+    Server
+      Category
+        Text Channel
+        Voice Channel
+          Participants
+
+The user must be able to see voice-channel participants before joining.
+
+Voice-channel participant trees must support expand/collapse.
+
+Server members should be accessible through an optional right-side member
+panel on desktop and a responsive drawer/screen on mobile.
+
+The primary global rail should eventually represent DMs and Servers rather
+than application modules such as Chats / People / Logout.
+
+Logout must not be treated as a primary navigation destination.
+
+User profile/status/settings should eventually live in a compact user panel
+near the bottom of the contextual sidebar.
+
+The visual design must remain Cubic's own identity.
+
+Use Discord as an information-architecture and interaction reference, not as
+a visual design to copy.
+
+Avoid deepening the current Teams-like:
+
+    App Navigation -> Conversation Cards -> Conversation
+
+layout in new architecture.
+
+Future server UI should instead converge toward:
+
+    DM/Server Rail -> Channels -> Content -> Optional Members
+
+Mobile remains first-class and must not simply shrink the desktop layout.
