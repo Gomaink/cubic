@@ -1586,7 +1586,7 @@ a {
 }
 .composer input {
   height: 44px !important;
-  padding: 0 52px 0 14px !important;
+  padding: 0 var(--cubic-attachment-input-end, 52px) 0 14px !important;
   border: 1px solid transparent !important;
   border-radius: 8px !important;
   background: #1e1f24 !important;
@@ -3506,7 +3506,29 @@ body { background: var(--cubic-onyx-0); }
 }
 
 .composer.cubic-attachment-composer {
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  --cubic-attachment-input-end: 14px;
+  grid-template-columns: 38px minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 8px;
+}
+
+.composer.cubic-attachment-composer > button {
+  position: static;
+  width: 38px;
+  height: 38px;
+  min-width: 0;
+}
+
+.composer.cubic-attachment-composer > input:not([type="file"]) {
+  width: 100%;
+  min-width: 0;
+}
+
+/* The viewport scrolls; message rows must keep their full content height. */
+.cubic-attachment-message-stream > .discord-message,
+.cubic-attachment-message-stream > .message-date-divider,
+.cubic-attachment-message-stream > .history-loading {
+  flex-shrink: 0;
 }
 
 .cubic-attachment-picker {
@@ -3535,6 +3557,10 @@ body { background: var(--cubic-onyx-0); }
 }
 
 .cubic-attachment-staging {
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: 25dvh;
+  overflow-y: auto;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 260px));
   gap: 8px;
@@ -3638,6 +3664,8 @@ body { background: var(--cubic-onyx-0); }
 }
 
 .cubic-message-attachments {
+  width: 100%;
+  min-width: 0;
   max-width: min(520px, 100%);
   display: grid;
   gap: 5px;

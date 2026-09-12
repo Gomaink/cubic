@@ -5,6 +5,7 @@
   import Icon from '$lib/ui/Icon.svelte';
   import VideoTile from '$lib/ui/VideoTile.svelte';
   import ScreenShareTile from '$lib/ui/ScreenShareTile.svelte';
+  import MessageAttachments from '$lib/ui/MessageAttachments.svelte';
 
   let { data } = $props();
   let loggingOut = $state(false);
@@ -2827,7 +2828,7 @@
 
       <div class="messages-wrap">
         <div
-          class="messages"
+          class="messages cubic-attachment-message-stream"
           bind:this={messagesViewport}
           onscroll={handleMessagesScroll}
           aria-busy={historyLoading}
@@ -2848,7 +2849,7 @@
         {#if chatMessages.length === 0 && !historyLoading}
           <div class="chat-empty"><strong>No messages yet</strong><span>Send the first message to start the conversation.</span></div>
         {/if}
-        {#each chatMessages as message, index}
+        {#each chatMessages as message, index (message.id)}
           {#if showMessageDateDivider(index)}
             <div class="message-date-divider" aria-label={formatMessageDay(message.createdAt)}>
               <span>{formatMessageDay(message.createdAt)}</span>
@@ -2897,41 +2898,7 @@
               </div>
 
               {#if !message.deletedAt && attachmentsOf(message).length > 0}
-                <div class="cubic-message-attachments">
-                  {#each attachmentsOf(message) as attachment (attachment.id)}
-                    <a
-                      class="cubic-message-attachment"
-                      href={attachment.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={`Open ${attachment.originalName}`}
-                    >
-                      <span class="cubic-attachment-glyph" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" width="18" height="18">
-                          <path
-                            d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.8"
-                            stroke-linejoin="round"
-                          />
-                          <path
-                            d="M14 2v6h6"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.8"
-                            stroke-linejoin="round"
-                          />
-                        </svg>
-                      </span>
-
-                      <span class="cubic-attachment-copy">
-                        <strong>{attachment.originalName}</strong>
-                        <small>{formatAttachmentSize(attachment.sizeBytes)}</small>
-                      </span>
-                    </a>
-                  {/each}
-                </div>
+                <MessageAttachments attachments={attachmentsOf(message)} />
               {/if}
             </div>
           </article>
