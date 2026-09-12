@@ -29,6 +29,7 @@
     | 'trash'
     | 'reply'
     | 'edit'
+    | 'smile'
     | 'more'
     | 'crown'
     | 'shield'
@@ -115,6 +116,9 @@
     <path d="m9 17-6-5 6-5v3h4a7 7 0 0 1 7 7v1a8 8 0 0 0-7-5H9v4Z" />
   {:else if name === 'edit'}
     <path d="M13.5 6.5 17.5 10.5M4 20l4.5-1 10-10a2.8 2.8 0 0 0-4-4l-10 10L4 20Z" />
+  {:else if name === 'smile'}
+    <circle cx="12" cy="12" r="9" />
+    <path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01" />
   {:else if name === 'more'}
     <circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" />
     <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />

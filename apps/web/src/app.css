@@ -899,6 +899,111 @@ a {
   }
 }
 
+/* Cubic alpha.7 Slice 4 — message reactions */
+.cubic-message-reaction-picker {
+  position: absolute;
+  top: 34px;
+  right: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(6, 38px);
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid #3f4147;
+  border-radius: 9px;
+  background: #1e1f22;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .45);
+}
+
+.cubic-message-actions .cubic-message-reaction-picker button {
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
+  color: #dbdee1;
+  font-size: 1.18rem;
+  line-height: 1;
+}
+
+.cubic-message-actions .cubic-message-reaction-picker button.selected {
+  background: rgba(88, 101, 242, .24);
+  box-shadow: inset 0 0 0 1px rgba(181, 186, 255, .55);
+}
+
+.cubic-message-reactions {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.cubic-message-reactions button {
+  min-width: 42px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid #3f4147;
+  border-radius: 8px;
+  background: #232428;
+  color: #b5bac1;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cubic-message-reactions button:hover,
+.cubic-message-reactions button:focus-visible {
+  border-color: #5865f2;
+  background: #2b2d31;
+  color: #f2f3f5;
+  outline: none;
+}
+
+.cubic-message-reactions button.selected {
+  border-color: #6d78ee;
+  background: rgba(88, 101, 242, .2);
+  color: #f2f3f5;
+}
+
+.cubic-message-reactions button:focus-visible {
+  box-shadow: 0 0 0 2px rgba(181, 186, 255, .45);
+}
+
+.cubic-message-reactions button:disabled {
+  cursor: wait;
+  opacity: .68;
+}
+
+.cubic-message-reactions span {
+  font-size: .95rem;
+  line-height: 1;
+}
+
+.cubic-message-reactions strong {
+  font-size: .72rem;
+  font-weight: 700;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .cubic-message-reaction-picker {
+    top: 42px;
+  }
+}
+
+@media (max-width: 420px) {
+  .cubic-message-reaction-picker {
+    grid-template-columns: repeat(3, 42px);
+  }
+
+  .cubic-message-actions .cubic-message-reaction-picker button {
+    width: 42px;
+    height: 42px;
+  }
+}
+
 /* Cubic alpha.3 messenger */
 .messenger-shell {
   min-height: 100vh;

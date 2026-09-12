@@ -43,6 +43,13 @@
       "when": 1789234652300,
       "tag": "0005_little_maddog",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789238856897,
+      "tag": "0006_bent_dakota_north",
+      "breakpoints": true
     }
   ]
 }

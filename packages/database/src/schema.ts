@@ -231,6 +231,28 @@ export const attachments = pgTable(
   ]
 );
 
+export const messageReactions = pgTable(
+  'message_reactions',
+  {
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    reaction: varchar('reaction', { length: 16 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow()
+  },
+  (table) => [
+    uniqueIndex('message_reactions_message_user_reaction_uq')
+      .on(table.messageId, table.userId, table.reaction),
+    index('message_reactions_message_idx').on(table.messageId),
+    index('message_reactions_user_idx').on(table.userId)
+  ]
+);
+
 export const calls = pgTable(
   'calls',
   {

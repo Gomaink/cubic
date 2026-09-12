@@ -591,6 +591,10 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     io.to(conversationRoom(event.conversationId)).emit('message:deleted', event.message);
   });
 
+  const unsubscribeMessageReactionsChanged = options.events.onMessageReactionsChanged((event) => {
+    io.to(conversationRoom(event.conversationId)).emit('message:reactions', event);
+  });
+
   const unsubscribeOpened = options.events.onConversationOpened((event) => {
     for (const userId of event.userIds) {
       const room = userRoom(userId);
@@ -630,6 +634,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
       unsubscribeMessage();
       unsubscribeMessageUpdated();
       unsubscribeMessageDeleted();
+      unsubscribeMessageReactionsChanged();
       unsubscribeOpened();
       unsubscribeChanged();
       unsubscribeRemoved();

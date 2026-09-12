@@ -22,6 +22,17 @@ export interface RealtimeReplyPreview {
   attachmentKind: 'image' | 'video' | 'file' | null;
 }
 
+export interface RealtimeReaction {
+  reaction: string;
+  count: number;
+  reactedByCurrentUser: boolean;
+}
+
+export interface RealtimeReactionCount {
+  reaction: string;
+  count: number;
+}
+
 export interface RealtimeMessage {
   id: string;
   conversationId: string;
@@ -36,6 +47,7 @@ export interface RealtimeMessage {
   senderAvatarUrl?: string | null;
   attachments: RealtimeAttachment[];
   replyTo: RealtimeReplyPreview | null;
+  reactions: RealtimeReaction[];
 }
 
 export interface MessageCreatedEvent {
@@ -46,6 +58,15 @@ export interface MessageCreatedEvent {
 export interface MessageChangedEvent {
   conversationId: string;
   message: RealtimeMessage;
+}
+
+export interface MessageReactionsChangedEvent {
+  conversationId: string;
+  messageId: string;
+  userId: string;
+  reaction: string;
+  active: boolean;
+  reactions: RealtimeReactionCount[];
 }
 
 export interface ConversationOpenedEvent {
@@ -71,6 +92,7 @@ export interface GroupInvitesChangedEvent {
 type MessageCreatedListener = (event: MessageCreatedEvent) => void;
 type MessageUpdatedListener = (event: MessageChangedEvent) => void;
 type MessageDeletedListener = (event: MessageChangedEvent) => void;
+type MessageReactionsChangedListener = (event: MessageReactionsChangedEvent) => void;
 type ConversationOpenedListener = (event: ConversationOpenedEvent) => void;
 type ConversationChangedListener = (event: ConversationChangedEvent) => void;
 type ConversationRemovedListener = (event: ConversationRemovedEvent) => void;
@@ -80,6 +102,7 @@ export interface RealtimeEvents {
   emitMessageCreated(event: MessageCreatedEvent): void;
   emitMessageUpdated(event: MessageChangedEvent): void;
   emitMessageDeleted(event: MessageChangedEvent): void;
+  emitMessageReactionsChanged(event: MessageReactionsChangedEvent): void;
   emitConversationOpened(event: ConversationOpenedEvent): void;
   emitConversationChanged(event: ConversationChangedEvent): void;
   emitConversationRemoved(event: ConversationRemovedEvent): void;
@@ -87,6 +110,7 @@ export interface RealtimeEvents {
   onMessageCreated(listener: MessageCreatedListener): () => void;
   onMessageUpdated(listener: MessageUpdatedListener): () => void;
   onMessageDeleted(listener: MessageDeletedListener): () => void;
+  onMessageReactionsChanged(listener: MessageReactionsChangedListener): () => void;
   onConversationOpened(listener: ConversationOpenedListener): () => void;
   onConversationChanged(listener: ConversationChangedListener): () => void;
   onConversationRemoved(listener: ConversationRemovedListener): () => void;
@@ -97,6 +121,7 @@ export function createRealtimeEvents(): RealtimeEvents {
   const messageCreatedListeners = new Set<MessageCreatedListener>();
   const messageUpdatedListeners = new Set<MessageUpdatedListener>();
   const messageDeletedListeners = new Set<MessageDeletedListener>();
+  const messageReactionsChangedListeners = new Set<MessageReactionsChangedListener>();
   const conversationOpenedListeners = new Set<ConversationOpenedListener>();
   const conversationChangedListeners = new Set<ConversationChangedListener>();
   const conversationRemovedListeners = new Set<ConversationRemovedListener>();
@@ -111,6 +136,9 @@ export function createRealtimeEvents(): RealtimeEvents {
     },
     emitMessageDeleted(event) {
       for (const listener of messageDeletedListeners) listener(event);
+    },
+    emitMessageReactionsChanged(event) {
+      for (const listener of messageReactionsChangedListeners) listener(event);
     },
     emitConversationOpened(event) {
       for (const listener of conversationOpenedListeners) listener(event);
@@ -135,6 +163,10 @@ export function createRealtimeEvents(): RealtimeEvents {
     onMessageDeleted(listener) {
       messageDeletedListeners.add(listener);
       return () => messageDeletedListeners.delete(listener);
+    },
+    onMessageReactionsChanged(listener) {
+      messageReactionsChangedListeners.add(listener);
+      return () => messageReactionsChangedListeners.delete(listener);
     },
     onConversationOpened(listener) {
       conversationOpenedListeners.add(listener);

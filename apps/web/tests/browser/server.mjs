@@ -25,7 +25,7 @@ function reset() {
   messages = Array.from({ length: 80 }, (_, index) => ({
     id: `message-${index}`, conversationId: dm, senderId: peer.id, senderDisplayName: peer.displayName,
     createdAt: new Date(Date.UTC(2026, 8, 1, 12, index)).toISOString(),
-    body: `History message ${index}`, attachments: [], editedAt: null, deletedAt: null, replyTo: null
+    body: `History message ${index}`, attachments: [], editedAt: null, deletedAt: null, replyTo: null, reactions: []
   }));
   messages[70].attachments = [attachment('single.png')];
   messages[71].attachments = Array.from({ length: 3 }, (_, i) => attachment(`gallery-${i}.png`));
@@ -36,6 +36,8 @@ function reset() {
   messages[76].attachments = [attachment('portrait.png', 'image/png', { width: 600, height: 1800 })];
   messages[77].body = 'Long text '.repeat(90);
   messages[78].attachments = [attachment('mixed-0.png'), attachment('mixed-1.png'), attachment('mixed-video.webm', 'video/webm')];
+  messages[70].reactions = [{ reaction: '👍', count: 2, reactedByCurrentUser: false }];
+  messages[78].reactions = [{ reaction: '❤️', count: 1, reactedByCurrentUser: true }];
 }
 reset();
 
@@ -54,10 +56,21 @@ const server = createServer(async (request, response) => {
   if (url.pathname === '/__test/reset') { reset(); return json({ ok: true }); }
   if (url.pathname === '/__test/video') { videoBytes = await body(); return json({ ok: true }); }
   if (url.pathname === '/__test/realtime') {
-    const message = { ...messages.at(-1), id: randomUUID(), createdAt: new Date().toISOString(), body: 'Realtime attachment', attachments: [attachment('realtime.png')] };
+    const message = { ...messages.at(-1), id: randomUUID(), createdAt: new Date().toISOString(), body: 'Realtime attachment', attachments: [attachment('realtime.png')], reactions: [] };
     messages.push(message);
     io.emit('message:created', message);
     return json(message);
+  }
+  if (url.pathname === '/__test/reaction') {
+    const message = messages.find((item) => item.id === url.searchParams.get('messageId'));
+    if (!message) return json({ error: 'Message not found.' }, 404);
+    const existing = message.reactions.find((item) => item.reaction === '😂');
+    if (existing) existing.count += 1;
+    else message.reactions.push({ reaction: '😂', count: 1, reactedByCurrentUser: false });
+    const event = { conversationId: message.conversationId, messageId: message.id, userId: peer.id,
+      reaction: '😂', active: true, reactions: message.reactions.map(({ reaction, count }) => ({ reaction, count })) };
+    io.emit('message:reactions', event);
+    return json(event);
   }
   if (!request.headers.cookie?.includes('cubic_session=browser-fixture')) return json({ error: 'Authentication required.' }, 401);
   if (url.pathname === '/api/v1/auth/me') return json({ user });
@@ -76,6 +89,7 @@ const server = createServer(async (request, response) => {
       const target = messages.find((item) => item.id === payload.replyToMessageId);
       const message = { id: randomUUID(), conversationId, senderId: user.id, createdAt: new Date().toISOString(), body: payload.body,
         editedAt: null, deletedAt: null, attachments: payload.attachmentIds.map((id) => staged.get(id)), clientMessageId: payload.clientMessageId,
+        reactions: [],
         replyTo: target ? { id: target.id, senderId: target.senderId, senderUsername: target.senderUsername ?? peer.username,
           senderDisplayName: target.senderDisplayName ?? peer.displayName, body: target.deletedAt ? '' : target.body,
           deletedAt: target.deletedAt, attachmentKind: target.deletedAt ? null : target.attachments[0]?.contentType?.startsWith('image/') ? 'image'
@@ -106,6 +120,32 @@ const server = createServer(async (request, response) => {
     message.deletedAt = new Date().toISOString();
     io.emit('message:deleted', message);
     return json({ message });
+  }
+  const reactionAction = /^\/api\/v1\/conversations\/([^/]+)\/messages\/([^/]+)\/reactions$/.exec(url.pathname);
+  if (reactionAction && (request.method === 'PUT' || request.method === 'DELETE')) {
+    const payload = JSON.parse((await body()).toString());
+    const message = messages.find((item) => item.conversationId === reactionAction[1] && item.id === reactionAction[2]);
+    if (!message) return json({ error: 'Message not found.' }, 404);
+    const existing = message.reactions.find((item) => item.reaction === payload.reaction);
+    let changed = false;
+    if (request.method === 'PUT' && !existing?.reactedByCurrentUser) {
+      if (existing) {
+        existing.count += 1;
+        existing.reactedByCurrentUser = true;
+      } else {
+        message.reactions.push({ reaction: payload.reaction, count: 1, reactedByCurrentUser: true });
+      }
+      changed = true;
+    } else if (request.method === 'DELETE' && existing?.reactedByCurrentUser) {
+      existing.count -= 1;
+      existing.reactedByCurrentUser = false;
+      if (existing.count === 0) message.reactions = message.reactions.filter((item) => item !== existing);
+      changed = true;
+    }
+    if (changed) io.emit('message:reactions', { conversationId: message.conversationId, messageId: message.id,
+      userId: user.id, reaction: payload.reaction, active: request.method === 'PUT',
+      reactions: message.reactions.map(({ reaction, count }) => ({ reaction, count })) });
+    return json({ messageId: message.id, reactions: message.reactions, changed });
   }
   if (url.pathname.endsWith('/attachments') && request.method === 'POST') {
     const upload = (await body()).toString();

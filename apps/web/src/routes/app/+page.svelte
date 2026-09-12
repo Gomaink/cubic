@@ -80,10 +80,36 @@
     attachmentKind: 'image' | 'video' | 'file' | null;
   };
 
+  type MessageReaction = {
+    reaction: string;
+    count: number;
+    reactedByCurrentUser: boolean;
+  };
+
+  type MessageReactionEvent = {
+    conversationId: string;
+    messageId: string;
+    userId: string;
+    reaction: string;
+    active: boolean;
+    reactions: Array<{ reaction: string; count: number }>;
+  };
+
+  const REACTION_LABELS: Record<string, string> = {
+    '❤️': 'Heart',
+    '👍': 'Thumbs up',
+    '😂': 'Laughing',
+    '😮': 'Surprised',
+    '😢': 'Sad',
+    '👎': 'Thumbs down'
+  };
+
   let replyingTo = $state<ReplyPreview | null>(null);
   let editingMessageId = $state<string | null>(null);
   let draftBeforeEdit = '';
   let actionMenuMessageId = $state<string | null>(null);
+  let reactionPickerMessageId = $state<string | null>(null);
+  let reactionBusyKey = $state<string | null>(null);
   let deleteCandidate = $state<any | null>(null);
   let deleteDialog = $state<HTMLDialogElement | null>(null);
   let highlightedMessageId = $state<string | null>(null);
@@ -327,14 +353,41 @@
   }
 
   function applyChangedMessage(message: any) {
-    upsertMessage(message);
-    const parentPreview = replyPreviewFromMessage(message);
+    const existing = chatMessages.find((item: any) => item.id === message.id);
+    const selected = new Map(
+      reactionsOf(existing).map((reaction) => [reaction.reaction, reaction.reactedByCurrentUser])
+    );
+    const changed = {
+      ...message,
+      reactions: reactionsOf(message).map((reaction) => ({
+        ...reaction,
+        reactedByCurrentUser: selected.get(reaction.reaction) ?? reaction.reactedByCurrentUser
+      }))
+    };
+    upsertMessage(changed);
+    const parentPreview = replyPreviewFromMessage(changed);
     chatMessages = chatMessages.map((item: any) =>
-      item.id !== message.id && item.replyTo?.id === message.id
+      item.id !== changed.id && item.replyTo?.id === changed.id
         ? { ...item, replyTo: parentPreview }
         : item
     );
-    if (replyingTo?.id === message.id) replyingTo = parentPreview;
+    if (replyingTo?.id === changed.id) replyingTo = parentPreview;
+  }
+
+  function applyReactionEvent(event: MessageReactionEvent) {
+    const index = chatMessages.findIndex((message: any) => message.id === event.messageId);
+    if (index < 0) return;
+    const current = chatMessages[index];
+    const selected = new Map(
+      reactionsOf(current).map((reaction) => [reaction.reaction, reaction.reactedByCurrentUser])
+    );
+    current.reactions = event.reactions.map((reaction) => ({
+      ...reaction,
+      reactedByCurrentUser: event.userId === data.user.id && reaction.reaction === event.reaction
+        ? event.active
+        : selected.get(reaction.reaction) ?? false
+    }));
+    chatMessages = [...chatMessages];
   }
 
   function isNearLatest(): boolean {
@@ -514,6 +567,8 @@
     replyingTo = null;
     editingMessageId = null;
     actionMenuMessageId = null;
+    reactionPickerMessageId = null;
+    reactionBusyKey = null;
     deleteCandidate = null;
 
     await loadLatestHistory(conversation.id);
@@ -536,6 +591,8 @@
     replyingTo = null;
     editingMessageId = null;
     actionMenuMessageId = null;
+    reactionPickerMessageId = null;
+    reactionBusyKey = null;
     deleteCandidate = null;
   }
 
@@ -576,6 +633,10 @@
     return Array.isArray(message?.attachments) ? message.attachments : [];
   }
 
+  function reactionsOf(message: any): MessageReaction[] {
+    return Array.isArray(message?.reactions) ? message.reactions : [];
+  }
+
   function replyPreviewFromMessage(message: any): ReplyPreview {
     const firstAttachment = attachmentsOf(message)[0];
     const attachmentKind = firstAttachment?.contentType?.startsWith('image/')
@@ -609,6 +670,7 @@
     replyingTo = replyPreviewFromMessage(message);
     editingMessageId = null;
     actionMenuMessageId = null;
+    reactionPickerMessageId = null;
     await tick();
     messageInput?.focus();
   }
@@ -618,6 +680,7 @@
     editingMessageId = message.id;
     replyingTo = null;
     actionMenuMessageId = null;
+    reactionPickerMessageId = null;
     messageBody = message.body;
     await tick();
     messageInput?.focus();
@@ -650,6 +713,7 @@
   async function requestDelete(message: any) {
     deleteCandidate = message;
     actionMenuMessageId = null;
+    reactionPickerMessageId = null;
     await tick();
     deleteDialog?.showModal();
     deleteDialog?.querySelector<HTMLButtonElement>('.cubic-message-delete-cancel')?.focus();
@@ -668,6 +732,36 @@
         : null;
       (visible ?? messageInput)?.focus();
     });
+  }
+
+  async function toggleReaction(message: any, reaction: string) {
+    const conversationId = activeConversation?.id;
+    const busyKey = `${message.id}:${reaction}`;
+    if (!conversationId || message.deletedAt || reactionBusyKey) return;
+
+    const selected = reactionsOf(message).some(
+      (item) => item.reaction === reaction && item.reactedByCurrentUser
+    );
+    reactionBusyKey = busyKey;
+    actionMenuMessageId = null;
+    reactionPickerMessageId = null;
+    error = '';
+
+    try {
+      const result = await api(
+        `/api/v1/conversations/${conversationId}/messages/${message.id}/reactions`,
+        { method: selected ? 'DELETE' : 'PUT', body: JSON.stringify({ reaction }) }
+      );
+      if (activeConversation?.id !== conversationId || !Array.isArray(result?.reactions)) return;
+      const index = chatMessages.findIndex((item: any) => item.id === message.id);
+      if (index < 0) return;
+      chatMessages[index] = { ...chatMessages[index], reactions: result.reactions };
+      chatMessages = [...chatMessages];
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Could not update reaction.';
+    } finally {
+      if (reactionBusyKey === busyKey) reactionBusyKey = null;
+    }
   }
 
   function currentStagedAttachments(): StagedAttachment[] {
@@ -2750,9 +2844,13 @@
           draftBeforeEdit = '';
         }
         if (actionMenuMessageId === message.id) actionMenuMessageId = null;
+        if (reactionPickerMessageId === message.id) reactionPickerMessageId = null;
         if (deleteCandidate?.id === message.id) closeDeleteDialog();
       }
       queueConversationRefresh();
+    });
+    socket.on('message:reactions', (event: MessageReactionEvent) => {
+      if (activeConversation?.id === event.conversationId) applyReactionEvent(event);
     });
     socket.on('conversation:updated', (event: any) => {
       queueConversationRefresh();
@@ -3149,16 +3247,45 @@
               {#if !message.deletedAt && attachmentsOf(message).length > 0}
                 <MessageAttachments attachments={attachmentsOf(message)} />
               {/if}
+
+              {#if !message.deletedAt && reactionsOf(message).length > 0}
+                <div class="cubic-message-reactions" aria-label="Message reactions">
+                  {#each reactionsOf(message) as reaction (reaction.reaction)}
+                    <button
+                      type="button"
+                      class:selected={reaction.reactedByCurrentUser}
+                      aria-pressed={reaction.reactedByCurrentUser}
+                      aria-label={`${REACTION_LABELS[reaction.reaction] ?? reaction.reaction}, ${reaction.count} ${reaction.count === 1 ? 'reaction' : 'reactions'}${reaction.reactedByCurrentUser ? ', selected' : ''}`}
+                      title={reaction.reactedByCurrentUser ? 'Remove your reaction' : 'Add this reaction'}
+                      disabled={Boolean(reactionBusyKey)}
+                      onclick={() => void toggleReaction(message, reaction.reaction)}
+                    >
+                      <span aria-hidden="true">{reaction.reaction}</span>
+                      <strong>{reaction.count}</strong>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
             </div>
 
             {#if !message.deletedAt}
               <MessageActions
                 own={message.senderId === data.user.id}
                 open={actionMenuMessageId === message.id}
+                reactionOpen={reactionPickerMessageId === message.id}
+                selectedReactions={reactionsOf(message).filter((reaction) => reaction.reactedByCurrentUser).map((reaction) => reaction.reaction)}
                 onreply={() => void startReply(message)}
                 onedit={() => void startEdit(message)}
                 ondelete={() => void requestDelete(message)}
-                ontoggle={() => actionMenuMessageId = actionMenuMessageId === message.id ? null : message.id}
+                onreaction={(reaction) => void toggleReaction(message, reaction)}
+                ontogglereactions={() => {
+                  actionMenuMessageId = null;
+                  reactionPickerMessageId = reactionPickerMessageId === message.id ? null : message.id;
+                }}
+                ontoggle={() => {
+                  reactionPickerMessageId = null;
+                  actionMenuMessageId = actionMenuMessageId === message.id ? null : message.id;
+                }}
               />
             {/if}
           </article>

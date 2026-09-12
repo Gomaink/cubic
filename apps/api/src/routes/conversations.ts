@@ -4,7 +4,9 @@ import { z } from 'zod';
 import type { Database } from '@cubic/database';
 import { attachments, blocks, conversationMembers, conversations, directConversationPairs, friendships, messages, users } from '@cubic/database/schema';
 import { createRequireAuth } from '../auth/guard.js';
-import type { RealtimeEvents, RealtimeMessage } from '../realtime/events.js';
+import type { RealtimeEvents, RealtimeMessage, RealtimeReaction } from '../realtime/events.js';
+
+export const SUPPORTED_REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '👎'] as const;
 
 const directBodySchema = z.object({ userId: z.string().uuid() });
 const conversationParamsSchema = z.object({ id: z.string().uuid() });
@@ -35,6 +37,7 @@ const messageBodySchema = z.object({
   }
 });
 const messageEditSchema = z.object({ body: z.string().trim().max(8000) });
+const reactionBodySchema = z.object({ reaction: z.enum(SUPPORTED_REACTIONS) });
 
 function orderedPair(a: string, b: string): [string, string] { return a < b ? [a, b] : [b, a]; }
 
@@ -173,6 +176,45 @@ async function replyPreviewsForMessages(
   return previews;
 }
 
+async function reactionsForMessages(
+  database: Database,
+  messageIds: string[],
+  currentUserId: string
+): Promise<Map<string, RealtimeReaction[]>> {
+  const byMessage = new Map<string, RealtimeReaction[]>();
+  if (messageIds.length === 0) return byMessage;
+
+  const result = await database.pool.query(
+    `select
+       message_id,
+       reaction,
+       count(*)::int as count,
+       bool_or(user_id = $2::uuid) as reacted_by_current_user
+     from message_reactions
+     where message_id = any($1::uuid[])
+     group by message_id, reaction`,
+    [messageIds, currentUserId]
+  );
+  const order = new Map(SUPPORTED_REACTIONS.map((reaction, index) => [reaction, index]));
+
+  for (const row of result.rows) {
+    const list = byMessage.get(row.message_id) ?? [];
+    list.push({
+      reaction: row.reaction,
+      count: Number(row.count),
+      reactedByCurrentUser: Boolean(row.reacted_by_current_user)
+    });
+    byMessage.set(row.message_id, list);
+  }
+
+  for (const reactions of byMessage.values()) {
+    reactions.sort((a, b) => (order.get(a.reaction as typeof SUPPORTED_REACTIONS[number]) ?? 99)
+      - (order.get(b.reaction as typeof SUPPORTED_REACTIONS[number]) ?? 99));
+  }
+
+  return byMessage;
+}
+
 type MessageRow = {
   id: string;
   conversationId: string;
@@ -191,7 +233,8 @@ type MessageRow = {
 function messageDto(
   row: MessageRow,
   attachmentsByMessage: Map<string, AttachmentDto[]>,
-  replyPreviews: Map<string, ReplyPreviewDto>
+  replyPreviews: Map<string, ReplyPreviewDto>,
+  reactionsByMessage: Map<string, RealtimeReaction[]>
 ): RealtimeMessage {
   return {
     ...row,
@@ -199,6 +242,7 @@ function messageDto(
     editedAt: row.editedAt?.toISOString() ?? null,
     deletedAt: row.deletedAt?.toISOString() ?? null,
     attachments: attachmentsByMessage.get(row.id) ?? [],
+    reactions: reactionsByMessage.get(row.id) ?? [],
     replyTo: row.replyToMessageId
       ? replyPreviews.get(row.replyToMessageId) ?? null
       : null
@@ -207,13 +251,15 @@ function messageDto(
 
 async function serializeMessages(
   database: Database,
-  rows: MessageRow[]
+  rows: MessageRow[],
+  currentUserId: string
 ): Promise<RealtimeMessage[]> {
-  const [attachmentsByMessage, replyPreviews] = await Promise.all([
+  const [attachmentsByMessage, replyPreviews, reactionsByMessage] = await Promise.all([
     attachmentsForMessages(database, rows.map((row) => row.id)),
-    replyPreviewsForMessages(database, rows.map((row) => row.replyToMessageId))
+    replyPreviewsForMessages(database, rows.map((row) => row.replyToMessageId)),
+    reactionsForMessages(database, rows.map((row) => row.id), currentUserId)
   ]);
-  return rows.map((row) => messageDto(row, attachmentsByMessage, replyPreviews));
+  return rows.map((row) => messageDto(row, attachmentsByMessage, replyPreviews, reactionsByMessage));
 }
 
 async function fetchMessage(
@@ -361,7 +407,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
 
     const hasMore = rows.length > query.data.limit;
     const page = rows.slice(0, query.data.limit).reverse();
-    const serialized = await serializeMessages(options.database, page);
+    const serialized = await serializeMessages(options.database, page, request.auth.user.id);
 
     return reply.send({
       messages: serialized,
@@ -394,7 +440,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
         existing[0].id
       );
       if (!existingMessage) throw new Error('Failed to load existing message.');
-      const [serialized] = await serializeMessages(options.database, [existingMessage]);
+      const [serialized] = await serializeMessages(options.database, [existingMessage], me);
 
       return reply.send({
         message: serialized,
@@ -526,7 +572,8 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     const message = messageDto(
       createdRow,
       new Map([[createdRow.id, boundAttachmentRows.map(attachmentDto)]]),
-      replyPreviews
+      replyPreviews,
+      new Map()
     );
 
     options.realtimeEvents?.emitMessageCreated({
@@ -578,7 +625,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
 
     const changed = await fetchMessage(options.database, params.data.id, current.id);
     if (!changed) throw new Error('Failed to load edited message.');
-    const [message] = await serializeMessages(options.database, [changed]);
+    const [message] = await serializeMessages(options.database, [changed], me);
     if (!message) throw new Error('Failed to serialize edited message.');
 
     options.realtimeEvents?.emitMessageUpdated({ conversationId: params.data.id, message });
@@ -615,10 +662,87 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
 
     const changed = await fetchMessage(options.database, params.data.id, current.id);
     if (!changed) throw new Error('Failed to load deleted message.');
-    const [message] = await serializeMessages(options.database, [changed]);
+    const [message] = await serializeMessages(options.database, [changed], me);
     if (!message) throw new Error('Failed to serialize deleted message.');
 
     options.realtimeEvents?.emitMessageDeleted({ conversationId: params.data.id, message });
     return reply.send({ message });
+  });
+
+  app.put('/:id/messages/:messageId/reactions', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = messageParamsSchema.safeParse(request.params);
+    const parsed = reactionBodySchema.safeParse(request.body);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid message.' });
+    if (!parsed.success) return reply.code(400).send({ error: 'Unsupported reaction.' });
+
+    const me = request.auth.user.id;
+    if (!(await isMember(options.database, params.data.id, me))) {
+      return reply.code(404).send({ error: 'Conversation not found.' });
+    }
+
+    const message = await fetchMessage(options.database, params.data.id, params.data.messageId);
+    if (!message) return reply.code(404).send({ error: 'Message not found.' });
+    if (message.deletedAt) return reply.code(409).send({ error: 'Deleted messages cannot be reacted to.' });
+
+    const changed = await options.database.pool.query(
+      `insert into message_reactions (message_id, user_id, reaction)
+       values ($1, $2, $3)
+       on conflict (message_id, user_id, reaction) do nothing
+       returning reaction`,
+      [message.id, me, parsed.data.reaction]
+    );
+    const reactions = (await reactionsForMessages(options.database, [message.id], me)).get(message.id) ?? [];
+
+    if (changed.rowCount) {
+      options.realtimeEvents?.emitMessageReactionsChanged({
+        conversationId: params.data.id,
+        messageId: message.id,
+        userId: me,
+        reaction: parsed.data.reaction,
+        active: true,
+        reactions: reactions.map(({ reaction, count }) => ({ reaction, count }))
+      });
+    }
+
+    return reply.send({ messageId: message.id, reactions, changed: Boolean(changed.rowCount) });
+  });
+
+  app.delete('/:id/messages/:messageId/reactions', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = messageParamsSchema.safeParse(request.params);
+    const parsed = reactionBodySchema.safeParse(request.body);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid message.' });
+    if (!parsed.success) return reply.code(400).send({ error: 'Unsupported reaction.' });
+
+    const me = request.auth.user.id;
+    if (!(await isMember(options.database, params.data.id, me))) {
+      return reply.code(404).send({ error: 'Conversation not found.' });
+    }
+
+    const message = await fetchMessage(options.database, params.data.id, params.data.messageId);
+    if (!message) return reply.code(404).send({ error: 'Message not found.' });
+    if (message.deletedAt) return reply.code(409).send({ error: 'Deleted messages cannot be reacted to.' });
+
+    const changed = await options.database.pool.query(
+      `delete from message_reactions
+       where message_id = $1 and user_id = $2 and reaction = $3
+       returning reaction`,
+      [message.id, me, parsed.data.reaction]
+    );
+    const reactions = (await reactionsForMessages(options.database, [message.id], me)).get(message.id) ?? [];
+
+    if (changed.rowCount) {
+      options.realtimeEvents?.emitMessageReactionsChanged({
+        conversationId: params.data.id,
+        messageId: message.id,
+        userId: me,
+        reaction: parsed.data.reaction,
+        active: false,
+        reactions: reactions.map(({ reaction, count }) => ({ reaction, count }))
+      });
+    }
+
+    return reply.send({ messageId: message.id, reactions, changed: Boolean(changed.rowCount) });
   });
 };

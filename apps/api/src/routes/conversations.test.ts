@@ -81,6 +81,7 @@ function rawAttachment(messageId: string | null = null, contentType = 'image/png
 class RouteDatabase {
   messages = new Map<string, RawMessage>();
   attachments = [rawAttachment()];
+  reactions: Array<{ message_id: string; user_id: string; reaction: string }> = [];
   selectResults: any[][] = [];
   nextMessage = 10;
 
@@ -148,9 +149,46 @@ class RouteDatabase {
       return this.result(this.attachments.filter((item) => item.message_id && ids.includes(item.message_id)));
     }
 
+    if (normalized.includes('from message_reactions') && normalized.includes('group by message_id, reaction')) {
+      const ids = params[0] as string[];
+      const currentUserId = params[1] as string;
+      const groups = new Map<string, { message_id: string; reaction: string; count: number; reacted_by_current_user: boolean }>();
+      for (const item of this.reactions.filter((reaction) => ids.includes(reaction.message_id))) {
+        const key = `${item.message_id}:${item.reaction}`;
+        const group = groups.get(key) ?? {
+          message_id: item.message_id,
+          reaction: item.reaction,
+          count: 0,
+          reacted_by_current_user: false
+        };
+        group.count += 1;
+        group.reacted_by_current_user ||= item.user_id === currentUserId;
+        groups.set(key, group);
+      }
+      return this.result([...groups.values()]);
+    }
+
     if (normalized.startsWith('select 1 from attachments where message_id')) {
       const rows = this.attachments.some((item) => item.message_id === params[0]) ? [{}] : [];
       return this.result(rows);
+    }
+
+    if (normalized.startsWith('insert into message_reactions')) {
+      const exists = this.reactions.some((item) =>
+        item.message_id === params[0] && item.user_id === params[1] && item.reaction === params[2]
+      );
+      if (exists) return this.result();
+      this.reactions.push({ message_id: params[0], user_id: params[1], reaction: params[2] });
+      return this.result([{ reaction: params[2] }]);
+    }
+
+    if (normalized.startsWith('delete from message_reactions')) {
+      const index = this.reactions.findIndex((item) =>
+        item.message_id === params[0] && item.user_id === params[1] && item.reaction === params[2]
+      );
+      if (index < 0) return this.result();
+      const [removed] = this.reactions.splice(index, 1);
+      return this.result([{ reaction: removed!.reaction }]);
     }
 
     if (normalized.startsWith('insert into messages')) {
@@ -209,6 +247,7 @@ async function routeHarness(database = new RouteDatabase()) {
     get(path: string, _options: unknown, handler: Handler) { handlers.set(`GET ${path}`, handler); },
     post(path: string, _options: unknown, handler: Handler) { handlers.set(`POST ${path}`, handler); },
     patch(path: string, _options: unknown, handler: Handler) { handlers.set(`PATCH ${path}`, handler); },
+    put(path: string, _options: unknown, handler: Handler) { handlers.set(`PUT ${path}`, handler); },
     delete(path: string, _options: unknown, handler: Handler) { handlers.set(`DELETE ${path}`, handler); }
   };
   const events = createRealtimeEvents();
@@ -429,4 +468,114 @@ test('normal text, attachment-only, text-plus-attachment, and client idempotency
   assert.equal(response.payload.duplicate, true);
   assert.equal(response.payload.message.id, existing.id);
   assert.equal(database.messages.size, 1);
+});
+
+test('reactions are unique, aggregate across users, allow multiple values, persist in history, and emit targeted realtime changes', async () => {
+  const database = new RouteDatabase();
+  database.messages.set(firstMessage, rawMessage({ sender_id: peer }));
+  database.attachments[0]!.message_id = firstMessage;
+  const harness = await routeHarness(database);
+  const events: any[] = [];
+  harness.events.onMessageReactionsChanged((event) => events.push(event));
+
+  database.selectResults.push([{ userId: me }]);
+  const added = await harness.invoke('PUT', '/:id/messages/:messageId/reactions', {
+    params: { id: conversation, messageId: firstMessage }, body: { reaction: '❤️' }
+  });
+  assert.equal(added.statusCode, 200);
+  assert.deepEqual(added.payload.reactions, [{ reaction: '❤️', count: 1, reactedByCurrentUser: true }]);
+  assert.equal(added.payload.changed, true);
+
+  database.selectResults.push([{ userId: me }]);
+  const duplicate = await harness.invoke('PUT', '/:id/messages/:messageId/reactions', {
+    params: { id: conversation, messageId: firstMessage }, body: { reaction: '❤️' }
+  });
+  assert.equal(duplicate.payload.changed, false);
+  assert.equal(duplicate.payload.reactions[0].count, 1);
+  assert.equal(database.reactions.length, 1);
+
+  database.selectResults.push([{ userId: peer }]);
+  const peerAdded = await harness.invoke('PUT', '/:id/messages/:messageId/reactions', {
+    params: { id: conversation, messageId: firstMessage }, body: { reaction: '❤️' }, userId: peer
+  });
+  assert.equal(peerAdded.payload.reactions[0].count, 2);
+  assert.equal(peerAdded.payload.reactions[0].reactedByCurrentUser, true);
+
+  database.selectResults.push([{ userId: me }]);
+  const secondReaction = await harness.invoke('PUT', '/:id/messages/:messageId/reactions', {
+    params: { id: conversation, messageId: firstMessage }, body: { reaction: '👍' }
+  });
+  assert.deepEqual(secondReaction.payload.reactions, [
+    { reaction: '❤️', count: 2, reactedByCurrentUser: true },
+    { reaction: '👍', count: 1, reactedByCurrentUser: true }
+  ]);
+
+  database.selectResults.push([{ userId: me }], [camelMessage(database.messages.get(firstMessage)!) ]);
+  const history = await harness.invoke('GET', '/:id/messages', {
+    params: { id: conversation }, query: { limit: 1 }
+  });
+  assert.deepEqual(history.payload.messages[0].reactions, secondReaction.payload.reactions);
+  assert.equal(history.payload.messages[0].attachments[0].id, attachmentId);
+  assert.equal(history.payload.messages[0].senderId, peer);
+
+  database.selectResults.push([{ userId: me }]);
+  const removed = await harness.invoke('DELETE', '/:id/messages/:messageId/reactions', {
+    params: { id: conversation, messageId: firstMessage }, body: { reaction: '❤️' }
+  });
+  assert.equal(removed.payload.changed, true);
+  assert.deepEqual(removed.payload.reactions, [
+    { reaction: '❤️', count: 1, reactedByCurrentUser: false },
+    { reaction: '👍', count: 1, reactedByCurrentUser: true }
+  ]);
+
+  assert.equal(events.length, 4);
+  assert.deepEqual(events.at(-1), {
+    conversationId: conversation,
+    messageId: firstMessage,
+    userId: me,
+    reaction: '❤️',
+    active: false,
+    reactions: [
+      { reaction: '❤️', count: 1 },
+      { reaction: '👍', count: 1 }
+    ]
+  });
+});
+
+test('reaction routes reject invalid authentication, membership, message, value, and deletion state', async () => {
+  const unsupported = await routeHarness();
+  const unsupportedResponse = await unsupported.invoke('PUT', '/:id/messages/:messageId/reactions', {
+    params: { id: conversation, messageId: firstMessage }, body: { reaction: '🔥' }
+  });
+  assert.equal(unsupportedResponse.statusCode, 400);
+
+  const unauthenticated = await routeHarness();
+  const unauthenticatedResponse = await unauthenticated.invoke('PUT', '/:id/messages/:messageId/reactions', {
+    params: { id: conversation, messageId: firstMessage }, body: { reaction: '👍' }, userId: null
+  });
+  assert.equal(unauthenticatedResponse.statusCode, 401);
+
+  const nonMember = await routeHarness();
+  nonMember.database.selectResults.push([]);
+  const nonMemberResponse = await nonMember.invoke('PUT', '/:id/messages/:messageId/reactions', {
+    params: { id: conversation, messageId: firstMessage }, body: { reaction: '👍' }, userId: outsider
+  });
+  assert.equal(nonMemberResponse.statusCode, 404);
+
+  const missing = await routeHarness();
+  missing.database.selectResults.push([{ userId: me }]);
+  const missingResponse = await missing.invoke('PUT', '/:id/messages/:messageId/reactions', {
+    params: { id: conversation, messageId: firstMessage }, body: { reaction: '👍' }
+  });
+  assert.equal(missingResponse.statusCode, 404);
+
+  const deletedDatabase = new RouteDatabase();
+  deletedDatabase.messages.set(firstMessage, rawMessage({ deleted_at: createdAt }));
+  deletedDatabase.selectResults.push([{ userId: me }]);
+  const deleted = await routeHarness(deletedDatabase);
+  const deletedResponse = await deleted.invoke('PUT', '/:id/messages/:messageId/reactions', {
+    params: { id: conversation, messageId: firstMessage }, body: { reaction: '👍' }
+  });
+  assert.equal(deletedResponse.statusCode, 409);
+  assert.equal(deletedDatabase.reactions.length, 0);
 });
