@@ -251,11 +251,14 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
                 a.message_id is null
                 and a.uploader_id = $2
               )
-              or exists (
-                select 1
-                  from conversation_members cm
-                 where cm.conversation_id = a.conversation_id
-                   and cm.user_id = $2
+              or (
+                a.message_id is not null
+                and exists (
+                  select 1
+                    from conversation_members cm
+                   where cm.conversation_id = a.conversation_id
+                     and cm.user_id = $2
+                )
               )
             )
           limit 1`,
@@ -267,18 +270,29 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
           return reply.code(404).send({ error: 'Attachment not found.' });
         }
 
-        const safeInline =
-          row.content_type.startsWith('image/') ||
-          row.content_type.startsWith('audio/') ||
-          row.content_type.startsWith('video/') ||
-          row.content_type === 'application/pdf' ||
-          row.content_type.startsWith('text/');
+        const safeInline = new Set([
+          'image/png',
+          'image/jpeg',
+          'image/webp',
+          'image/gif',
+          'audio/wav',
+          'audio/ogg',
+          'audio/mpeg',
+          'video/mp4',
+          'video/webm',
+          'video/ogg',
+          'application/pdf',
+          'text/plain',
+          'text/csv',
+          'text/markdown'
+        ]).has(row.content_type);
 
         const encodedName = encodeURIComponent(row.original_name);
 
         reply.header('Content-Type', row.content_type);
         reply.header('Content-Length', String(row.size_bytes));
         reply.header('X-Content-Type-Options', 'nosniff');
+        reply.header('Cache-Control', 'private, no-store');
         reply.header(
           'Content-Disposition',
           `${safeInline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodedName}`

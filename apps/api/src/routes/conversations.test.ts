@@ -14,6 +14,7 @@ const firstClient = '40000000-0000-4000-8000-000000000001';
 const secondClient = '40000000-0000-4000-8000-000000000002';
 const thirdClient = '40000000-0000-4000-8000-000000000003';
 const attachmentId = '50000000-0000-4000-8000-000000000001';
+const secondAttachmentId = '50000000-0000-4000-8000-000000000002';
 const createdAt = new Date('2026-09-12T12:00:00.000Z');
 
 type RawMessage = {
@@ -60,7 +61,11 @@ function camelMessage(row: RawMessage) {
   };
 }
 
-function rawAttachment(messageId: string | null = null, contentType = 'image/png') {
+function rawAttachment(
+  messageId: string | null = null,
+  contentType = 'image/png',
+  overrides: Record<string, unknown> = {}
+) {
   return {
     id: attachmentId,
     conversation_id: conversation,
@@ -74,7 +79,8 @@ function rawAttachment(messageId: string | null = null, contentType = 'image/png
     width: 20,
     height: 10,
     created_at: createdAt,
-    attached_at: messageId ? createdAt : null
+    attached_at: messageId ? createdAt : null,
+    ...overrides
   };
 }
 
@@ -84,6 +90,11 @@ class RouteDatabase {
   reactions: Array<{ message_id: string; user_id: string; reaction: string }> = [];
   selectResults: any[][] = [];
   nextMessage = 10;
+  transactionSnapshot: {
+    messages: Map<string, RawMessage>;
+    attachments: ReturnType<typeof rawAttachment>[];
+    nextMessage: number;
+  } | null = null;
 
   db = {
     select: () => {
@@ -112,7 +123,27 @@ class RouteDatabase {
 
   async query(sql: string, params: any[]) {
     const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase();
-    if (normalized === 'begin' || normalized === 'commit' || normalized === 'rollback') return this.result();
+    if (normalized === 'begin') {
+      this.transactionSnapshot = {
+        messages: new Map([...this.messages].map(([id, row]) => [id, { ...row }])),
+        attachments: this.attachments.map((item) => ({ ...item })),
+        nextMessage: this.nextMessage
+      };
+      return this.result();
+    }
+    if (normalized === 'commit') {
+      this.transactionSnapshot = null;
+      return this.result();
+    }
+    if (normalized === 'rollback') {
+      if (this.transactionSnapshot) {
+        this.messages = this.transactionSnapshot.messages;
+        this.attachments = this.transactionSnapshot.attachments;
+        this.nextMessage = this.transactionSnapshot.nextMessage;
+        this.transactionSnapshot = null;
+      }
+      return this.result();
+    }
     if (normalized.includes('from direct_conversation_pairs dp') && normalized.includes('join blocks')) return this.result();
 
     if (normalized.includes('from messages m') && normalized.includes('join users u')) {
@@ -468,6 +499,76 @@ test('normal text, attachment-only, text-plus-attachment, and client idempotency
   assert.equal(response.payload.duplicate, true);
   assert.equal(response.payload.message.id, existing.id);
   assert.equal(database.messages.size, 1);
+});
+
+test('attachment binding rejects foreign ownership and cross-conversation IDs without partial state', async () => {
+  for (const [targetConversation, userId] of [
+    [conversation, peer],
+    [otherConversation, me]
+  ] as const) {
+    const database = new RouteDatabase();
+    database.selectResults.push([{ userId }], []);
+    const harness = await routeHarness(database);
+    const response = await harness.invoke('POST', '/:id/messages', {
+      params: { id: targetConversation },
+      body: sendBody({ attachmentIds: [attachmentId] }),
+      userId
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.deepEqual(response.payload, {
+      error: 'One or more attachments are no longer available.'
+    });
+    assert.equal(database.messages.size, 0);
+    assert.equal(database.attachments[0]!.message_id, null);
+  }
+});
+
+test('mixed valid and invalid attachment IDs roll back the message and every binding', async () => {
+  const database = new RouteDatabase();
+  database.attachments.push(rawAttachment(null, 'image/png', {
+    id: secondAttachmentId,
+    uploader_id: peer,
+    storage_key: 'fixture-key-2'
+  }));
+  database.selectResults.push([{ userId: me }], []);
+  const harness = await routeHarness(database);
+
+  const response = await harness.invoke('POST', '/:id/messages', {
+    params: { id: conversation },
+    body: sendBody({ attachmentIds: [attachmentId, secondAttachmentId] })
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(database.messages.size, 0);
+  assert.deepEqual(database.attachments.map((item) => item.message_id), [null, null]);
+});
+
+test('multiple valid pending attachments bind atomically to one message', async () => {
+  const database = new RouteDatabase();
+  database.attachments.push(rawAttachment(null, 'application/octet-stream', {
+    id: secondAttachmentId,
+    storage_key: 'fixture-key-2',
+    original_name: 'notes.txt',
+    kind: 'file'
+  }));
+  database.selectResults.push([{ userId: me }], []);
+  const harness = await routeHarness(database);
+
+  const response = await harness.invoke('POST', '/:id/messages', {
+    params: { id: conversation },
+    body: sendBody({ body: '', attachmentIds: [attachmentId, secondAttachmentId] })
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.payload.message.body, '');
+  assert.deepEqual(
+    response.payload.message.attachments.map((item: any) => item.id),
+    [attachmentId, secondAttachmentId]
+  );
+  assert.equal(database.messages.size, 1);
+  assert.equal(new Set(database.attachments.map((item) => item.message_id)).size, 1);
+  assert.ok(database.attachments.every((item) => item.message_id));
 });
 
 test('reactions are unique, aggregate across users, allow multiple values, persist in history, and emit targeted realtime changes', async () => {
