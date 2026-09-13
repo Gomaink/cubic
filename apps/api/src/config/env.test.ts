@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadEnv } from './env.js';
+import { ATTACHMENT_DEFAULTS, loadEnv } from './env.js';
 
 const requiredEnvironment = {
   DATABASE_URL: 'postgresql://cubic:local-test-password@localhost:5432/cubic',
@@ -69,5 +69,52 @@ test('numeric proxy-hop configuration is rejected without a compatibility fallba
   assert.throws(
     () => loadEnv({ ...requiredEnvironment, TRUST_PROXY_HOPS: '1' }),
     /TRUST_PROXY_HOPS has been removed; use TRUST_PROXY_CIDRS/
+  );
+});
+
+test('attachment quota, storage, rate, and cleanup defaults are finite and documented in base units', () => {
+  const env = loadEnv(requiredEnvironment);
+
+  assert.equal(env.ATTACHMENT_PENDING_MAX_COUNT, ATTACHMENT_DEFAULTS.pendingMaxCount);
+  assert.equal(env.ATTACHMENT_PENDING_MAX_BYTES, ATTACHMENT_DEFAULTS.pendingMaxBytes);
+  assert.equal(env.ATTACHMENT_MIN_FREE_BYTES, ATTACHMENT_DEFAULTS.minFreeBytes);
+  assert.equal(env.ATTACHMENT_UPLOAD_RATE_LIMIT_MAX, ATTACHMENT_DEFAULTS.uploadRateLimitMax);
+  assert.equal(
+    env.ATTACHMENT_UPLOAD_RATE_LIMIT_WINDOW_MS,
+    ATTACHMENT_DEFAULTS.uploadRateLimitWindowMs
+  );
+  assert.equal(env.ATTACHMENT_CLEANUP_INTERVAL_MS, ATTACHMENT_DEFAULTS.cleanupIntervalMs);
+  assert.equal(env.ATTACHMENT_STALE_AGE_MS, ATTACHMENT_DEFAULTS.staleAgeMs);
+  assert.equal(env.ATTACHMENT_CLEANUP_BATCH_SIZE, ATTACHMENT_DEFAULTS.cleanupBatchSize);
+});
+
+test('attachment quota and cleanup configuration is strictly parsed', () => {
+  const settings = [
+    'ATTACHMENT_PENDING_MAX_COUNT',
+    'ATTACHMENT_PENDING_MAX_BYTES',
+    'ATTACHMENT_MIN_FREE_BYTES',
+    'ATTACHMENT_UPLOAD_RATE_LIMIT_MAX',
+    'ATTACHMENT_UPLOAD_RATE_LIMIT_WINDOW_MS',
+    'ATTACHMENT_CLEANUP_INTERVAL_MS',
+    'ATTACHMENT_STALE_AGE_MS',
+    'ATTACHMENT_CLEANUP_BATCH_SIZE'
+  ] as const;
+
+  for (const setting of settings) {
+    for (const invalid of ['0', '-1', '1.5', '1e6', ' 20', 'twenty']) {
+      assert.throws(
+        () => loadEnv({ ...requiredEnvironment, [setting]: invalid }),
+        new RegExp(`${setting}:`)
+      );
+    }
+  }
+
+  assert.throws(
+    () => loadEnv({
+      ...requiredEnvironment,
+      ATTACHMENT_MAX_BYTES: String(25 * 1024 * 1024),
+      ATTACHMENT_PENDING_MAX_BYTES: String(20 * 1024 * 1024)
+    }),
+    /ATTACHMENT_PENDING_MAX_BYTES: must be at least ATTACHMENT_MAX_BYTES/
   );
 });

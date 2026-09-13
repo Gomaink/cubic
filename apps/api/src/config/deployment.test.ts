@@ -24,6 +24,19 @@ test('default Compose requires private deployment credentials', async () => {
   assert.match(environmentExample, /^TRUST_PROXY_CIDRS=$/m);
   assert.doesNotMatch(`${compose}\n${environmentExample}`, /TRUST_PROXY_HOPS/);
   assert.match(compose, /web:[\s\S]*TRUST_PROXY_CIDRS: \$\{TRUST_PROXY_CIDRS:\?/);
+  for (const setting of [
+    'ATTACHMENT_PENDING_MAX_COUNT',
+    'ATTACHMENT_PENDING_MAX_BYTES',
+    'ATTACHMENT_MIN_FREE_BYTES',
+    'ATTACHMENT_UPLOAD_RATE_LIMIT_MAX',
+    'ATTACHMENT_UPLOAD_RATE_LIMIT_WINDOW_MS',
+    'ATTACHMENT_CLEANUP_INTERVAL_MS',
+    'ATTACHMENT_STALE_AGE_MS',
+    'ATTACHMENT_CLEANUP_BATCH_SIZE'
+  ]) {
+    assert.match(compose, new RegExp(`${setting}: \\$\\{${setting}:-[0-9]+\\}`));
+    assert.match(environmentExample, new RegExp(`^${setting}=[0-9]+$`, 'm'));
+  }
   assert.doesNotMatch(
     `${compose}\n${environmentExample}`,
     /cubic-dev-password|CUBICDEVKEY|cubic-development-secret-change-me/

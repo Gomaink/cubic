@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import test from 'node:test';
 import { attachmentRoutes } from './attachments.js';
+import { PendingAttachmentQuotaError } from '../media/attachment-quotas.js';
+import { AttachmentStorageReserveError } from '../media/attachments.js';
 
 const uploader = '10000000-0000-4000-8000-000000000001';
 const member = '10000000-0000-4000-8000-000000000002';
@@ -58,6 +60,15 @@ class AttachmentRouteDatabase {
         return { rows, rowCount: rows.length };
       }
 
+      if (normalized.includes('from conversation_members')) {
+        const rows = params[0] === conversation && this.members.has(params[1]) ? [{}] : [];
+        return { rows, rowCount: rows.length };
+      }
+
+      if (normalized.includes('from direct_conversation_pairs dp')) {
+        return { rows: [], rowCount: 0 };
+      }
+
       if (normalized.startsWith('select id, storage_key from attachments')) {
         const rows = this.attachments.filter((item) =>
           item.id === params[0] && item.uploader_id === params[1] && item.message_id === null
@@ -80,26 +91,60 @@ class AttachmentRouteDatabase {
 
 type Handler = (request: any, reply: any) => Promise<any>;
 
-async function routeHarness(database = new AttachmentRouteDatabase()) {
+async function routeHarness(
+  database = new AttachmentRouteDatabase(),
+  overrides: {
+    assertFreeSpace?: () => Promise<void>;
+    save?: () => Promise<any>;
+    insertPendingAttachment?: () => Promise<any>;
+  } = {}
+) {
   const handlers = new Map<string, Handler>();
+  const routeOptions = new Map<string, any>();
   const deletedKeys: string[] = [];
   const app = {
-    get(path: string, _options: unknown, handler: Handler) { handlers.set(`GET ${path}`, handler); },
-    post(path: string, _options: unknown, handler: Handler) { handlers.set(`POST ${path}`, handler); },
-    delete(path: string, _options: unknown, handler: Handler) { handlers.set(`DELETE ${path}`, handler); }
+    get(path: string, options: unknown, handler: Handler) { routeOptions.set(`GET ${path}`, options); handlers.set(`GET ${path}`, handler); },
+    post(path: string, options: unknown, handler: Handler) { routeOptions.set(`POST ${path}`, options); handlers.set(`POST ${path}`, handler); },
+    delete(path: string, options: unknown, handler: Handler) { routeOptions.set(`DELETE ${path}`, options); handlers.set(`DELETE ${path}`, handler); }
+  };
+  const stored = {
+    key: '50000000-0000-4000-8000-000000000099',
+    originalName: 'upload.txt',
+    contentType: 'text/plain',
+    kind: 'document',
+    sizeBytes: 7,
+    width: null,
+    height: null
   };
   const store = {
     open: (key: string) => Readable.from([key]),
-    delete: async (key: string) => { deletedKeys.push(key); }
+    delete: async (key: string) => { deletedKeys.push(key); },
+    assertFreeSpace: overrides.assertFreeSpace ?? (async () => {}),
+    save: overrides.save ?? (async () => stored)
   };
   await attachmentRoutes(app as never, {
     database: database as never,
     cookieName: 'session',
     attachmentStore: store as never,
-    attachmentMaxBytes: 1024
+    attachmentMaxBytes: 1024,
+    attachmentPendingMaxCount: 20,
+    attachmentPendingMaxBytes: 10_000,
+    attachmentMinFreeBytes: 1024,
+    insertPendingAttachment: overrides.insertPendingAttachment ?? (async () => ({
+      ...attachment({ storage_key: stored.key, original_name: stored.originalName }),
+      kind: stored.kind,
+      width: stored.width,
+      height: stored.height,
+      created_at: new Date('2026-09-13T12:00:00.000Z')
+    }))
   });
 
-  async function invoke(method: string, path: string, userId: string | null = uploader) {
+  async function invoke(
+    method: string,
+    path: string,
+    userId: string | null = uploader,
+    input: { file?: any } = {}
+  ) {
     const state = {
       statusCode: 200,
       payload: undefined as any,
@@ -112,13 +157,19 @@ async function routeHarness(database = new AttachmentRouteDatabase()) {
     };
     const request = {
       auth: userId ? { user: { id: userId } } : null,
-      params: { id: attachmentId }
+      params: { id: path.includes('conversations') ? conversation : attachmentId },
+      file: async () => input.file ?? {
+        file: Object.assign(Readable.from([Buffer.from('content')]), { truncated: false }),
+        filename: 'upload.txt',
+        mimetype: 'text/plain'
+      },
+      log: { warn() {}, error() {} }
     };
     await handlers.get(`${method} ${path}`)!(request, reply);
     return state;
   }
 
-  return { database, deletedKeys, invoke };
+  return { database, deletedKeys, routeOptions, invoke };
 }
 
 test('pending attachment content is visible only to its uploader', async () => {
@@ -194,4 +245,86 @@ test('recognized image and video types retain inline content serving', async () 
     const response = await (await routeHarness(database)).invoke('GET', '/attachments/:id/content');
     assert.match(response.headers['content-disposition'] ?? '', /^inline;/);
   }
+});
+
+test('normal upload persists a pending row and returns its attachment DTO', async () => {
+  const harness = await routeHarness();
+  const response = await harness.invoke('POST', '/conversations/:id/attachments');
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.payload.attachment.originalName, 'upload.txt');
+  assert.deepEqual(harness.deletedKeys, []);
+  assert.equal(
+    harness.routeOptions.get('POST /conversations/:id/attachments').config.rateLimit,
+    false
+  );
+});
+
+test('quota rejection removes the just-written file and leaves no pending DB row', async () => {
+  const database = new AttachmentRouteDatabase();
+  const initialRows = database.attachments.length;
+  const harness = await routeHarness(database, {
+    insertPendingAttachment: async () => { throw new PendingAttachmentQuotaError('count'); }
+  });
+
+  const response = await harness.invoke('POST', '/conversations/:id/attachments');
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.payload.code, 'ATTACHMENT_PENDING_COUNT_QUOTA');
+  assert.deepEqual(harness.deletedKeys, ['50000000-0000-4000-8000-000000000099']);
+  assert.equal(database.attachments.length, initialRows);
+});
+
+test('pending byte quota has distinct diagnostics and DB insertion failures remove the file', async () => {
+  for (const [error, expectedStatus, expectedCode] of [
+    [new PendingAttachmentQuotaError('bytes'), 409, 'ATTACHMENT_PENDING_BYTE_QUOTA'],
+    [new Error('database unavailable'), 500, undefined]
+  ] as const) {
+    const harness = await routeHarness(new AttachmentRouteDatabase(), {
+      insertPendingAttachment: async () => { throw error; }
+    });
+
+    if (expectedStatus === 500) {
+      await assert.rejects(
+        () => harness.invoke('POST', '/conversations/:id/attachments'),
+        /database unavailable/
+      );
+    } else {
+      const response = await harness.invoke('POST', '/conversations/:id/attachments');
+      assert.equal(response.statusCode, expectedStatus);
+      assert.equal(response.payload.code, expectedCode);
+    }
+    assert.deepEqual(harness.deletedKeys, ['50000000-0000-4000-8000-000000000099']);
+  }
+});
+
+test('storage reserve rejection occurs before a file is written', async () => {
+  let saveCalled = false;
+  const harness = await routeHarness(new AttachmentRouteDatabase(), {
+    assertFreeSpace: async () => {
+      throw new AttachmentStorageReserveError(10n, 20n, 30n);
+    },
+    save: async () => {
+      saveCalled = true;
+      throw new Error('must not save');
+    }
+  });
+
+  const response = await harness.invoke('POST', '/conversations/:id/attachments');
+  assert.equal(response.statusCode, 507);
+  assert.equal(response.payload.code, 'ATTACHMENT_STORAGE_RESERVE');
+  assert.equal(saveCalled, false);
+  assert.deepEqual(harness.deletedKeys, []);
+});
+
+test('individual oversize rejection keeps 413 semantics and no stored file', async () => {
+  const harness = await routeHarness(new AttachmentRouteDatabase(), {
+    save: async () => {
+      throw Object.assign(new Error('too large'), { code: 'CUBIC_ATTACHMENT_TOO_LARGE' });
+    }
+  });
+
+  const response = await harness.invoke('POST', '/conversations/:id/attachments');
+  assert.equal(response.statusCode, 413);
+  assert.match(response.payload.error, /limit/);
+  assert.deepEqual(harness.deletedKeys, []);
 });

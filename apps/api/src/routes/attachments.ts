@@ -1,8 +1,15 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, preHandlerAsyncHookHandler } from 'fastify';
 import { z } from 'zod';
 import type { Database } from '@cubic/database';
 import { createRequireAuth } from '../auth/guard.js';
-import type { AttachmentStore } from '../media/attachments.js';
+import {
+  AttachmentStorageReserveError,
+  type AttachmentStore
+} from '../media/attachments.js';
+import {
+  PendingAttachmentQuotaError,
+  type insertPendingAttachmentWithinQuota
+} from '../media/attachment-quotas.js';
 
 const conversationParamsSchema = z.object({
   id: z.string().uuid()
@@ -17,6 +24,11 @@ export interface AttachmentRoutesOptions {
   cookieName: string;
   attachmentStore: AttachmentStore;
   attachmentMaxBytes: number;
+  attachmentPendingMaxCount: number;
+  attachmentPendingMaxBytes: number;
+  attachmentMinFreeBytes: number;
+  uploadRateLimit?: preHandlerAsyncHookHandler;
+  insertPendingAttachment: typeof insertPendingAttachmentWithinQuota;
 }
 
 async function isMember(
@@ -75,34 +87,6 @@ function dto(row: any) {
   };
 }
 
-async function cleanupStalePending(
-  database: Database,
-  attachmentStore: AttachmentStore
-): Promise<void> {
-  const result = await database.pool.query(
-    `select id, storage_key
-       from attachments
-      where message_id is null
-        and created_at < now() - interval '24 hours'
-      order by created_at asc
-      limit 250`
-  );
-
-  for (const row of result.rows) {
-    try {
-      await attachmentStore.delete(row.storage_key);
-      await database.pool.query(
-        `delete from attachments
-          where id = $1
-            and message_id is null`,
-        [row.id]
-      );
-    } catch {
-      // Retry lazily on a later upload.
-    }
-  }
-}
-
 export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
   async (app, options) => {
     const requireAuth = createRequireAuth(
@@ -110,11 +94,16 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
       options.cookieName
     );
 
-    let cleanupScheduled = false;
+    const uploadPreHandlers = options.uploadRateLimit
+      ? [requireAuth, options.uploadRateLimit]
+      : [requireAuth];
 
     app.post(
       '/conversations/:id/attachments',
-      { preHandler: requireAuth },
+      {
+        config: { rateLimit: false },
+        preHandler: uploadPreHandlers
+      },
       async (request, reply) => {
         if (!request.auth) {
           return reply.code(401).send({ error: 'Authentication required.' });
@@ -136,12 +125,34 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
           return reply.code(403).send({ error: 'Messaging is not allowed.' });
         }
 
-        if (!cleanupScheduled) {
-          cleanupScheduled = true;
-          void cleanupStalePending(
-            options.database,
-            options.attachmentStore
-          ).catch(() => {});
+        try {
+          await options.attachmentStore.assertFreeSpace(
+            options.attachmentMaxBytes,
+            options.attachmentMinFreeBytes
+          );
+        } catch (error) {
+          if (error instanceof AttachmentStorageReserveError) {
+            request.log.warn(
+              {
+                availableBytes: error.availableBytes.toString(),
+                requiredBytes: error.requiredBytes.toString(),
+                reserveBytes: error.reserveBytes.toString()
+              },
+              'Attachment upload rejected to preserve the media storage reserve'
+            );
+            return reply.code(507).send({
+              code: 'ATTACHMENT_STORAGE_RESERVE',
+              error: 'Attachment storage is temporarily full.'
+            });
+          }
+
+          request.log.error(
+            { errorCode: (error as NodeJS.ErrnoException).code ?? 'UNKNOWN' },
+            'Could not inspect available attachment storage'
+          );
+          return reply.code(503).send({
+            error: 'Attachment storage is temporarily unavailable.'
+          });
         }
 
         const part = await request.file().catch(() => null);
@@ -184,37 +195,37 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
         }
 
         try {
-          const result = await options.database.pool.query(
-            `insert into attachments (
-               conversation_id,
-               uploader_id,
-               storage_key,
-               original_name,
-               content_type,
-               kind,
-               size_bytes,
-               width,
-               height
-             ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-             returning *`,
-            [
+          const row = await options.insertPendingAttachment(
+            options.database,
+            {
               conversationId,
-              me,
-              stored.key,
-              stored.originalName,
-              stored.contentType,
-              stored.kind,
-              stored.sizeBytes,
-              stored.width,
-              stored.height
-            ]
+              uploaderId: me,
+              ...stored
+            },
+            {
+              maxCount: options.attachmentPendingMaxCount,
+              maxBytes: options.attachmentPendingMaxBytes
+            }
           );
 
           return reply.code(201).send({
-            attachment: dto(result.rows[0])
+            attachment: dto(row)
           });
         } catch (error) {
           await options.attachmentStore.delete(stored.key).catch(() => {});
+
+          if (error instanceof PendingAttachmentQuotaError) {
+            const countQuota = error.reason === 'count';
+            return reply.code(409).send({
+              code: countQuota
+                ? 'ATTACHMENT_PENDING_COUNT_QUOTA'
+                : 'ATTACHMENT_PENDING_BYTE_QUOTA',
+              error: countQuota
+                ? 'Pending attachment count limit reached. Send or remove pending attachments before uploading more.'
+                : 'Pending attachment storage limit reached. Send or remove pending attachments before uploading more.'
+            });
+          }
+
           throw error;
         }
       }

@@ -17,6 +17,12 @@ import { attachmentRoutes } from './routes/attachments.js';
 import { createRealtimeEvents, type RealtimeEvents } from './realtime/events.js';
 import { LocalMediaStore } from './media/local.js';
 import { AttachmentStore } from './media/attachments.js';
+import { insertPendingAttachmentWithinQuota } from './media/attachment-quotas.js';
+import {
+  AttachmentCleanupScheduler,
+  cleanupStalePendingBatch
+} from './media/attachment-cleanup.js';
+import { ATTACHMENT_DEFAULTS } from './config/env.js';
 
 export interface CreateAppOptions {
   database: Database;
@@ -29,6 +35,14 @@ export interface CreateAppOptions {
   mediaRoot?: string;
   groupAvatarMaxBytes?: number;
   attachmentMaxBytes?: number;
+  attachmentPendingMaxCount?: number;
+  attachmentPendingMaxBytes?: number;
+  attachmentMinFreeBytes?: number;
+  attachmentUploadRateLimitMax?: number;
+  attachmentUploadRateLimitWindowMs?: number;
+  attachmentCleanupIntervalMs?: number;
+  attachmentStaleAgeMs?: number;
+  attachmentCleanupBatchSize?: number;
   livekitPublicUrl: string;
   livekitApiKey: string;
   livekitApiSecret: string;
@@ -44,7 +58,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     bodyLimit: Math.max(
       2 * 1024 * 1024,
       (options.groupAvatarMaxBytes ?? 2 * 1024 * 1024) + 512 * 1024,
-      (options.attachmentMaxBytes ?? 25 * 1024 * 1024) + 1024 * 1024
+      (options.attachmentMaxBytes ?? ATTACHMENT_DEFAULTS.maxBytes) + 1024 * 1024
     )
   });
 
@@ -54,7 +68,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
       files: 1,
       fileSize: Math.max(
         options.groupAvatarMaxBytes ?? 2 * 1024 * 1024,
-        options.attachmentMaxBytes ?? 25 * 1024 * 1024
+        options.attachmentMaxBytes ?? ATTACHMENT_DEFAULTS.maxBytes
       )
     }
   });
@@ -120,14 +134,48 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   });
 
   const attachmentStore = new AttachmentStore(options.mediaRoot ?? '/data/media');
+  await attachmentStore.prepare();
+
+  const attachmentUploadRateLimit = app.rateLimit({
+    max: options.attachmentUploadRateLimitMax ?? ATTACHMENT_DEFAULTS.uploadRateLimitMax,
+    timeWindow:
+      options.attachmentUploadRateLimitWindowMs ??
+      ATTACHMENT_DEFAULTS.uploadRateLimitWindowMs,
+    groupId: 'attachment-upload',
+    keyGenerator: (request) => request.auth?.user.id ?? `unauthenticated:${request.ip}`
+  });
 
   await app.register(attachmentRoutes, {
     prefix: '/api/v1',
     database: options.database,
     cookieName: options.cookieName,
     attachmentStore,
-    attachmentMaxBytes: options.attachmentMaxBytes ?? 25 * 1024 * 1024
+    attachmentMaxBytes: options.attachmentMaxBytes ?? ATTACHMENT_DEFAULTS.maxBytes,
+    attachmentPendingMaxCount:
+      options.attachmentPendingMaxCount ?? ATTACHMENT_DEFAULTS.pendingMaxCount,
+    attachmentPendingMaxBytes:
+      options.attachmentPendingMaxBytes ?? ATTACHMENT_DEFAULTS.pendingMaxBytes,
+    attachmentMinFreeBytes:
+      options.attachmentMinFreeBytes ?? ATTACHMENT_DEFAULTS.minFreeBytes,
+    uploadRateLimit: attachmentUploadRateLimit,
+    insertPendingAttachment: insertPendingAttachmentWithinQuota
   });
+
+  const attachmentCleanupScheduler = new AttachmentCleanupScheduler({
+    intervalMs:
+      options.attachmentCleanupIntervalMs ?? ATTACHMENT_DEFAULTS.cleanupIntervalMs,
+    logger: app.log,
+    cleanup: () => cleanupStalePendingBatch({
+      database: options.database,
+      attachmentStore,
+      staleAgeMs: options.attachmentStaleAgeMs ?? ATTACHMENT_DEFAULTS.staleAgeMs,
+      batchSize:
+        options.attachmentCleanupBatchSize ?? ATTACHMENT_DEFAULTS.cleanupBatchSize,
+      logger: app.log
+    })
+  });
+  app.addHook('onReady', async () => attachmentCleanupScheduler.start());
+  app.addHook('onClose', async () => attachmentCleanupScheduler.stop());
 
   const mediaStore = new LocalMediaStore(options.mediaRoot ?? '/data/media');
 

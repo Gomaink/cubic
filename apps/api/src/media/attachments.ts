@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, open, stat, unlink } from 'node:fs/promises';
+import { mkdir, open, stat, statfs, unlink } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -22,6 +22,18 @@ export type StoredAttachment = {
   width: number | null;
   height: number | null;
 };
+
+export class AttachmentStorageReserveError extends Error {
+  readonly code = 'CUBIC_ATTACHMENT_STORAGE_RESERVE';
+
+  constructor(
+    readonly availableBytes: bigint,
+    readonly requiredBytes: bigint,
+    readonly reserveBytes: bigint
+  ) {
+    super('Attachment storage reserve would be breached.');
+  }
+}
 
 function safeAttachmentKey(key: string): string {
   const normalized = basename(key);
@@ -283,6 +295,23 @@ export class AttachmentStore {
 
   constructor(mediaRoot: string) {
     this.root = join(mediaRoot, 'attachments');
+  }
+
+  async prepare(): Promise<void> {
+    await mkdir(this.root, { recursive: true });
+    await statfs(this.root, { bigint: true });
+  }
+
+  async assertFreeSpace(requiredBytes: number, reserveBytes: number): Promise<void> {
+    await mkdir(this.root, { recursive: true });
+    const filesystem = await statfs(this.root, { bigint: true });
+    const availableBytes = filesystem.bavail * filesystem.bsize;
+    const required = BigInt(requiredBytes);
+    const reserve = BigInt(reserveBytes);
+
+    if (availableBytes < required + reserve) {
+      throw new AttachmentStorageReserveError(availableBytes, required, reserve);
+    }
   }
 
   async save(

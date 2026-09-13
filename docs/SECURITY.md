@@ -35,7 +35,12 @@ Cubic v1 used bcryptjs. During migration, an imported bcrypt hash remains valid 
 
 ## Rate limiting
 
-The API has a general per-client rate limit and stricter limits for authentication attempts. The current local-memory limiter is appropriate for the single API process used by the alpha stack. When Cubic supports multiple API replicas, the limiter store must move to shared Redis state.
+The API has a general per-client rate limit, stricter limits for authentication
+attempts, and a dedicated attachment-upload limit keyed by the authenticated
+user. The current local-memory limiter is appropriate for the single API
+process used by the alpha stack. When Cubic supports multiple API replicas, the
+limiter store must move to shared Redis state. Attachment count and byte quotas
+do not share that limitation: PostgreSQL serializes them across API processes.
 
 ## Reverse proxies
 
@@ -129,4 +134,36 @@ configuration.
 
 ## Uploads
 
-The v1 avatar upload trusted browser MIME metadata. Alpha.2 intentionally does not restore that endpoint. The new upload pipeline will validate content and store files behind an explicit storage boundary instead of dropping arbitrary uploads into the public web root.
+Attachments stream into UUID-named files beneath the private media root. The
+streaming path enforces the individual byte limit, removes partial files after
+errors, and detects supported formats from file signatures rather than trusting
+the browser's filename, extension, or MIME claim. Content delivery remains
+authenticated and authorization depends on pending ownership or current
+conversation membership.
+
+Attachment storage controls use the following finite self-hosted defaults. Byte
+settings are raw bytes; time settings are milliseconds.
+
+| Setting | Default | Purpose |
+| --- | ---: | --- |
+| `ATTACHMENT_MAX_BYTES` | `26214400` | Maximum bytes for one attachment |
+| `ATTACHMENT_PENDING_MAX_COUNT` | `20` | Maximum unbound attachments per user |
+| `ATTACHMENT_PENDING_MAX_BYTES` | `262144000` | Maximum total unbound bytes per user |
+| `ATTACHMENT_MIN_FREE_BYTES` | `1073741824` | Free-space reserve on the media filesystem |
+| `ATTACHMENT_UPLOAD_RATE_LIMIT_MAX` | `20` | Upload attempts per rate window per user |
+| `ATTACHMENT_UPLOAD_RATE_LIMIT_WINDOW_MS` | `60000` | Upload rate window |
+| `ATTACHMENT_CLEANUP_INTERVAL_MS` | `900000` | Recurring stale-cleanup interval |
+| `ATTACHMENT_STALE_AGE_MS` | `86400000` | Age before an unbound upload is stale |
+| `ATTACHMENT_CLEANUP_BATCH_SIZE` | `250` | Maximum rows processed per interval |
+
+Pending quota checks and inserts are serialized by an uploader-scoped
+PostgreSQL advisory lock. Binding an attachment to a message immediately removes
+it from pending quota usage. The stale cleaner runs independently of uploads,
+locks rows while deleting their files, never selects bound rows, and retries
+remaining work on later intervals.
+
+The minimum-free-space check uses filesystem statistics from the attachment
+directory itself and reserves enough capacity for one maximum-size upload. It
+is deliberately a last-resort guard, not a perfect concurrent disk reservation.
+Crash-safe generalized orphan reconciliation and a durable deletion queue are
+deferred to the next storage-hardening slice.

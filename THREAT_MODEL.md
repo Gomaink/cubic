@@ -103,6 +103,37 @@ Threats include:
 Uploads must be stored outside directly executable web roots and delivered
 through authorized routes where required.
 
+### Attachment storage exhaustion
+
+Threat: an authenticated user repeatedly creates unbound attachment uploads,
+or abandoned pending uploads accumulate indefinitely, until the instance media
+filesystem is exhausted. Concurrent requests must not bypass a quota by reading
+the same stale usage value.
+
+Controls:
+
+- only pending rows (`message_id IS NULL`) count toward finite per-user count
+  and byte quotas
+- a short PostgreSQL transaction and uploader-scoped advisory lock serialize
+  quota calculation with pending-row insertion across API processes
+- upload streams finish before that transaction begins; rejected quota files
+  are removed best-effort
+- the local media backend uses Node's filesystem statistics for the filesystem
+  containing the attachment directory and reserves configurable free space
+- attachment uploads have a stricter authenticated-user rate limit than normal
+  API traffic
+- a lifecycle-managed recurring cleaner selects only stale pending rows in
+  bounded batches, locks selected rows, and uses a PostgreSQL advisory lock to
+  prevent cleanup overlap across API processes
+- cleanup file deletion is idempotent when a file is already absent; failed
+  batches or individual file deletions are retried on later intervals
+
+Residual risk: the free-space check is a final guard rather than a reservation,
+so simultaneous writes or unrelated processes can consume space after the
+check. The alpha stack's rate-limit counters are local to its single API
+process. Crashes can still create filesystem/database orphans; generalized
+reconciliation and a durable deletion queue are deferred to Slice 0A.4b.
+
 ## Sessions
 
 Required controls should include:

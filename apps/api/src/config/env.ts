@@ -4,6 +4,26 @@ import { parseTrustedProxyCidrs } from './proxy.js';
 const booleanString = z.enum(['true', 'false']).default('false').transform((value) => value === 'true');
 const enabledString = z.enum(['true', 'false']).default('true').transform((value) => value === 'true');
 
+export const ATTACHMENT_DEFAULTS = {
+  maxBytes: 25 * 1024 * 1024,
+  pendingMaxCount: 20,
+  pendingMaxBytes: 250 * 1024 * 1024,
+  minFreeBytes: 1024 * 1024 * 1024,
+  uploadRateLimitMax: 20,
+  uploadRateLimitWindowMs: 60 * 1000,
+  cleanupIntervalMs: 15 * 60 * 1000,
+  staleAgeMs: 24 * 60 * 60 * 1000,
+  cleanupBatchSize: 250
+} as const;
+
+function strictPositiveInteger(defaultValue: number, minimum: number, maximum: number) {
+  return z.string()
+    .regex(/^[1-9][0-9]*$/, 'must be a base-10 positive integer')
+    .transform(Number)
+    .pipe(z.number().int().min(minimum).max(maximum))
+    .default(defaultValue);
+}
+
 const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -28,7 +48,47 @@ const envSchema = z
     REGISTRATION_ENABLED: enabledString,
     MEDIA_ROOT: z.string().min(1).default('/data/media'),
     GROUP_AVATAR_MAX_BYTES: z.coerce.number().int().min(65536).max(8 * 1024 * 1024).default(2 * 1024 * 1024),
-    ATTACHMENT_MAX_BYTES: z.coerce.number().int().min(1024 * 1024).max(250 * 1024 * 1024).default(25 * 1024 * 1024),
+    ATTACHMENT_MAX_BYTES: z.coerce.number().int().min(1024 * 1024).max(250 * 1024 * 1024).default(ATTACHMENT_DEFAULTS.maxBytes),
+    ATTACHMENT_PENDING_MAX_COUNT: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.pendingMaxCount,
+      1,
+      1_000
+    ),
+    ATTACHMENT_PENDING_MAX_BYTES: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.pendingMaxBytes,
+      1024 * 1024,
+      1024 ** 4
+    ),
+    ATTACHMENT_MIN_FREE_BYTES: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.minFreeBytes,
+      1024 * 1024,
+      100 * 1024 ** 4
+    ),
+    ATTACHMENT_UPLOAD_RATE_LIMIT_MAX: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.uploadRateLimitMax,
+      1,
+      10_000
+    ),
+    ATTACHMENT_UPLOAD_RATE_LIMIT_WINDOW_MS: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.uploadRateLimitWindowMs,
+      1_000,
+      24 * 60 * 60 * 1000
+    ),
+    ATTACHMENT_CLEANUP_INTERVAL_MS: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.cleanupIntervalMs,
+      1_000,
+      24 * 60 * 60 * 1000
+    ),
+    ATTACHMENT_STALE_AGE_MS: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.staleAgeMs,
+      60_000,
+      365 * 24 * 60 * 60 * 1000
+    ),
+    ATTACHMENT_CLEANUP_BATCH_SIZE: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.cleanupBatchSize,
+      1,
+      10_000
+    ),
     LIVEKIT_PUBLIC_URL: z.string().min(1),
     LIVEKIT_API_KEY: z.string().min(3),
     LIVEKIT_API_SECRET: z.string().min(32)
@@ -39,6 +99,14 @@ const envSchema = z
         code: 'custom',
         path: ['SESSION_COOKIE_SECURE'],
         message: 'must be true when NODE_ENV is production'
+      });
+    }
+
+    if (env.ATTACHMENT_PENDING_MAX_BYTES < env.ATTACHMENT_MAX_BYTES) {
+      context.addIssue({
+        code: 'custom',
+        path: ['ATTACHMENT_PENDING_MAX_BYTES'],
+        message: 'must be at least ATTACHMENT_MAX_BYTES'
       });
     }
   });
