@@ -59,6 +59,19 @@ async function rateLimitApp() {
   await app.register(attachmentRoutes, {
     database: database as never,
     cookieName: 'session',
+    sessionService: {
+      resolveToken: async () => ({
+        sessionId: '60000000-0000-4000-8000-000000000001',
+        expiresAt: new Date(Date.now() + 60_000),
+        user: {
+          id: userId,
+          username: 'uploader',
+          displayName: 'Uploader',
+          avatarUrl: null,
+          createdAt: new Date().toISOString()
+        }
+      })
+    } as never,
     attachmentStore: {
       assertFreeSpace: async () => {},
       delete: async () => {}

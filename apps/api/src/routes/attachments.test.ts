@@ -129,6 +129,7 @@ async function routeHarness(
   await attachmentRoutes(app as never, {
     database: database as never,
     cookieName: 'session',
+    sessionService: {} as never,
     attachmentStore: store as never,
     attachmentMaxBytes: 1024,
     attachmentPendingMaxCount: 20,

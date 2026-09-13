@@ -6,12 +6,8 @@ import { userSettings, users } from '@cubic/database/schema';
 import { normalizeEmail, normalizeUsername, toPublicUser } from '../auth/identity.js';
 import { createRequireAuth } from '../auth/guard.js';
 import { hashPassword, verifyPassword } from '../security/password.js';
-import {
-  createSession,
-  deleteExpiredSessions,
-  destroySession,
-  resolveSession
-} from '../security/session.js';
+import type { SessionService } from '../security/session.js';
+import type { RealtimeEvents } from '../realtime/events.js';
 
 const registerBodySchema = z.object({
   email: z.string().trim().email().max(254),
@@ -36,6 +32,8 @@ export interface AuthRoutesOptions {
   cookieSecure: boolean;
   sessionTtlDays: number;
   registrationEnabled: boolean;
+  sessionService: SessionService;
+  realtimeEvents: RealtimeEvents;
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -48,7 +46,7 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, options) => {
-  const requireAuth = createRequireAuth(options.database, options.cookieName);
+  const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
   const cookieBase = {
     httpOnly: true,
     sameSite: 'lax' as const,
@@ -118,9 +116,12 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
         });
 
         const previousToken = request.cookies[options.cookieName];
-        if (previousToken) await destroySession(options.database, previousToken);
+        if (previousToken) {
+          const previousSessionId = await options.sessionService.destroyToken(previousToken);
+          if (previousSessionId) options.realtimeEvents.emitSessionRevoked({ sessionId: previousSessionId });
+        }
 
-        const session = await createSession(options.database, user.id, options.sessionTtlDays);
+        const session = await options.sessionService.create(user.id, options.sessionTtlDays);
         reply.setCookie(options.cookieName, session.token, {
           ...cookieBase,
           expires: session.expiresAt,
@@ -174,12 +175,15 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
       }
 
       await options.database.db.update(users).set(updates).where(eq(users.id, user.id));
-      await deleteExpiredSessions(options.database);
+      await options.sessionService.deleteInvalid();
 
       const previousToken = request.cookies[options.cookieName];
-      if (previousToken) await destroySession(options.database, previousToken);
+      if (previousToken) {
+        const previousSessionId = await options.sessionService.destroyToken(previousToken);
+        if (previousSessionId) options.realtimeEvents.emitSessionRevoked({ sessionId: previousSessionId });
+      }
 
-      const session = await createSession(options.database, user.id, options.sessionTtlDays);
+      const session = await options.sessionService.create(user.id, options.sessionTtlDays);
       reply.setCookie(options.cookieName, session.token, {
         ...cookieBase,
         expires: session.expiresAt,
@@ -192,7 +196,10 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
 
   app.post('/logout', async (request, reply) => {
     const token = request.cookies[options.cookieName];
-    if (token) await destroySession(options.database, token);
+    if (token) {
+      const sessionId = await options.sessionService.destroyToken(token);
+      if (sessionId) options.realtimeEvents.emitSessionRevoked({ sessionId });
+    }
 
     reply.clearCookie(options.cookieName, cookieBase);
     return reply.code(204).send();
@@ -209,8 +216,11 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
     const token = request.cookies[options.cookieName];
     if (!token) return reply.send({ authenticated: false });
 
-    const identity = await resolveSession(options.database, token);
-    if (!identity) return reply.send({ authenticated: false });
+    const identity = await options.sessionService.resolveToken(token, { activity: true });
+    if (!identity) {
+      reply.clearCookie(options.cookieName, cookieBase);
+      return reply.send({ authenticated: false });
+    }
 
     return reply.send({ authenticated: true, user: identity.user });
   });

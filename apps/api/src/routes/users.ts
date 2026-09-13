@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Database } from '@cubic/database';
 import { userSettings, users } from '@cubic/database/schema';
 import { createRequireAuth } from '../auth/guard.js';
+import type { SessionService } from '../security/session.js';
 
 const profileBodySchema = z.object({
   displayName: z.string().trim().min(1).max(64)
@@ -22,10 +23,11 @@ const settingsBodySchema = z
 export interface UserRoutesOptions {
   database: Database;
   cookieName: string;
+  sessionService: SessionService;
 }
 
 export const userRoutes: FastifyPluginAsync<UserRoutesOptions> = async (app, options) => {
-  const requireAuth = createRequireAuth(options.database, options.cookieName);
+  const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
 
   app.get('/me/settings', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });

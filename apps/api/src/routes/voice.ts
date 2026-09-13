@@ -9,11 +9,13 @@ import {
   directConversationPairs
 } from '@cubic/database/schema';
 import { createRequireAuth } from '../auth/guard.js';
+import type { SessionService } from '../security/session.js';
 import { createVoiceJoinToken } from '../voice/token.js';
 
 export interface VoiceRoutesOptions {
   database: Database;
   cookieName: string;
+  sessionService: SessionService;
   livekitPublicUrl: string;
   livekitApiKey: string;
   livekitApiSecret: string;
@@ -27,7 +29,7 @@ export async function voiceRoutes(
   app: FastifyInstance,
   options: VoiceRoutesOptions
 ): Promise<void> {
-  const requireAuth = createRequireAuth(options.database, options.cookieName);
+  const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
 
   app.post(
     '/conversations/:conversationId/token',

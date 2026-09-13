@@ -89,6 +89,10 @@ export interface GroupInvitesChangedEvent {
   userIds: string[];
 }
 
+export interface SessionRevokedEvent {
+  sessionId: string;
+}
+
 type MessageCreatedListener = (event: MessageCreatedEvent) => void;
 type MessageUpdatedListener = (event: MessageChangedEvent) => void;
 type MessageDeletedListener = (event: MessageChangedEvent) => void;
@@ -97,6 +101,7 @@ type ConversationOpenedListener = (event: ConversationOpenedEvent) => void;
 type ConversationChangedListener = (event: ConversationChangedEvent) => void;
 type ConversationRemovedListener = (event: ConversationRemovedEvent) => void;
 type GroupInvitesChangedListener = (event: GroupInvitesChangedEvent) => void;
+type SessionRevokedListener = (event: SessionRevokedEvent) => void;
 
 export interface RealtimeEvents {
   emitMessageCreated(event: MessageCreatedEvent): void;
@@ -107,6 +112,7 @@ export interface RealtimeEvents {
   emitConversationChanged(event: ConversationChangedEvent): void;
   emitConversationRemoved(event: ConversationRemovedEvent): void;
   emitGroupInvitesChanged(event: GroupInvitesChangedEvent): void;
+  emitSessionRevoked(event: SessionRevokedEvent): void;
   onMessageCreated(listener: MessageCreatedListener): () => void;
   onMessageUpdated(listener: MessageUpdatedListener): () => void;
   onMessageDeleted(listener: MessageDeletedListener): () => void;
@@ -115,6 +121,7 @@ export interface RealtimeEvents {
   onConversationChanged(listener: ConversationChangedListener): () => void;
   onConversationRemoved(listener: ConversationRemovedListener): () => void;
   onGroupInvitesChanged(listener: GroupInvitesChangedListener): () => void;
+  onSessionRevoked(listener: SessionRevokedListener): () => void;
 }
 
 export function createRealtimeEvents(): RealtimeEvents {
@@ -126,6 +133,7 @@ export function createRealtimeEvents(): RealtimeEvents {
   const conversationChangedListeners = new Set<ConversationChangedListener>();
   const conversationRemovedListeners = new Set<ConversationRemovedListener>();
   const groupInvitesChangedListeners = new Set<GroupInvitesChangedListener>();
+  const sessionRevokedListeners = new Set<SessionRevokedListener>();
 
   return {
     emitMessageCreated(event) {
@@ -151,6 +159,9 @@ export function createRealtimeEvents(): RealtimeEvents {
     },
     emitGroupInvitesChanged(event) {
       for (const listener of groupInvitesChangedListeners) listener(event);
+    },
+    emitSessionRevoked(event) {
+      for (const listener of sessionRevokedListeners) listener(event);
     },
     onMessageCreated(listener) {
       messageCreatedListeners.add(listener);
@@ -183,6 +194,10 @@ export function createRealtimeEvents(): RealtimeEvents {
     onGroupInvitesChanged(listener) {
       groupInvitesChangedListeners.add(listener);
       return () => groupInvitesChangedListeners.delete(listener);
+    },
+    onSessionRevoked(listener) {
+      sessionRevokedListeners.add(listener);
+      return () => sessionRevokedListeners.delete(listener);
     }
   };
 }

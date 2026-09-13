@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Database } from '@cubic/database';
 import { attachments, blocks, conversationMembers, conversations, directConversationPairs, friendships, messages, users } from '@cubic/database/schema';
 import { createRequireAuth } from '../auth/guard.js';
+import type { SessionService } from '../security/session.js';
 import type { RealtimeEvents, RealtimeMessage, RealtimeReaction } from '../realtime/events.js';
 
 export const SUPPORTED_REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '👎'] as const;
@@ -41,7 +42,7 @@ const reactionBodySchema = z.object({ reaction: z.enum(SUPPORTED_REACTIONS) });
 
 function orderedPair(a: string, b: string): [string, string] { return a < b ? [a, b] : [b, a]; }
 
-export interface ConversationRoutesOptions { database: Database; cookieName: string; realtimeEvents?: RealtimeEvents; }
+export interface ConversationRoutesOptions { database: Database; cookieName: string; sessionService: SessionService; realtimeEvents?: RealtimeEvents; }
 
 async function isMember(database: Database, conversationId: string, userId: string): Promise<boolean> {
   const rows = await database.db.select({ userId: conversationMembers.userId }).from(conversationMembers)
@@ -306,7 +307,7 @@ async function fetchMessage(
 }
 
 export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> = async (app, options) => {
-  const requireAuth = createRequireAuth(options.database, options.cookieName);
+  const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
 
   app.get('/', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });

@@ -48,8 +48,11 @@ Particularly important areas include:
 - authorization is enforced server-side
 - object identifiers are not authorization
 - primary browser credentials must not be exposed to frontend JavaScript
+- browser sessions require both absolute and finite idle validity, and are
+  revalidated for established realtime connections
+- current-session logout revokes server-side state before disconnecting every
+  Socket.IO connection associated with that exact session
 - secrets must never be committed to the repository
 - destructive security fixes must be reviewed rather than blindly automated
 
 See `THREAT_MODEL.md` for the project's current threat model.
-

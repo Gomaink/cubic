@@ -3,10 +3,12 @@ import { createApp } from './app.js';
 import { loadEnv } from './config/env.js';
 import { createRealtimeEvents } from './realtime/events.js';
 import { attachRealtime } from './realtime/socket.js';
+import { createSessionService } from './security/session.js';
 
 const env = loadEnv();
 const database = createDatabase(env.DATABASE_URL);
 const realtimeEvents = createRealtimeEvents();
+const sessionService = createSessionService(database, env.SESSION_IDLE_TIMEOUT_MS);
 const app = await createApp({
   database,
   corsOrigin: env.CORS_ORIGIN,
@@ -14,6 +16,7 @@ const app = await createApp({
   cookieName: env.SESSION_COOKIE_NAME,
   cookieSecure: env.SESSION_COOKIE_SECURE,
   sessionTtlDays: env.SESSION_TTL_DAYS,
+  sessionService,
   registrationEnabled: env.REGISTRATION_ENABLED,
   mediaRoot: env.MEDIA_ROOT,
   groupAvatarMaxBytes: env.GROUP_AVATAR_MAX_BYTES,
@@ -48,6 +51,8 @@ const realtime = attachRealtime({
   server: app.server,
   database,
   cookieName: env.SESSION_COOKIE_NAME,
+  sessionService,
+  revalidateIntervalMs: env.SESSION_SOCKET_REVALIDATE_MS,
   trustedProxyCidrs: env.TRUST_PROXY_CIDRS,
   events: realtimeEvents
 });

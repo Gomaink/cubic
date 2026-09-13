@@ -31,6 +31,7 @@ import {
   AttachmentReconciliationScheduler
 } from './media/attachment-reconciliation.js';
 import { ATTACHMENT_DEFAULTS } from './config/env.js';
+import type { SessionService } from './security/session.js';
 
 export interface CreateAppOptions {
   database: Database;
@@ -39,6 +40,7 @@ export interface CreateAppOptions {
   cookieName: string;
   cookieSecure: boolean;
   sessionTtlDays: number;
+  sessionService: SessionService;
   registrationEnabled: boolean;
   mediaRoot?: string;
   groupAvatarMaxBytes?: number;
@@ -128,25 +130,30 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     cookieName: options.cookieName,
     cookieSecure: options.cookieSecure,
     sessionTtlDays: options.sessionTtlDays,
+    sessionService: options.sessionService,
+    realtimeEvents,
     registrationEnabled: options.registrationEnabled
   });
 
   await app.register(userRoutes, {
     prefix: '/api/v1/users',
     database: options.database,
-    cookieName: options.cookieName
+    cookieName: options.cookieName,
+    sessionService: options.sessionService
   });
 
   await app.register(socialRoutes, {
     prefix: '/api/v1/social',
     database: options.database,
-    cookieName: options.cookieName
+    cookieName: options.cookieName,
+    sessionService: options.sessionService
   });
 
   await app.register(conversationRoutes, {
     prefix: '/api/v1/conversations',
     database: options.database,
     cookieName: options.cookieName,
+    sessionService: options.sessionService,
     realtimeEvents
   });
 
@@ -166,6 +173,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     prefix: '/api/v1',
     database: options.database,
     cookieName: options.cookieName,
+    sessionService: options.sessionService,
     attachmentStore,
     attachmentMaxBytes: options.attachmentMaxBytes ?? ATTACHMENT_DEFAULTS.maxBytes,
     attachmentPendingMaxCount:
@@ -242,6 +250,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     prefix: '/api/v1/groups',
     database: options.database,
     cookieName: options.cookieName,
+    sessionService: options.sessionService,
     realtimeEvents,
     mediaStore,
     groupAvatarMaxBytes: options.groupAvatarMaxBytes ?? 2 * 1024 * 1024
@@ -251,6 +260,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     prefix: '/api/v1/voice',
     database: options.database,
     cookieName: options.cookieName,
+    sessionService: options.sessionService,
     livekitPublicUrl: options.livekitPublicUrl,
     livekitApiKey: options.livekitApiKey,
     livekitApiSecret: options.livekitApiSecret
@@ -259,7 +269,8 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   await app.register(callHistoryRoutes, {
     prefix: '/api/v1/calls',
     database: options.database,
-    cookieName: options.cookieName
+    cookieName: options.cookieName,
+    sessionService: options.sessionService
   });
 
   return app;

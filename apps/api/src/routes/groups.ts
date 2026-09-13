@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Database } from '@cubic/database';
 import { conversationMembers, conversations, friendships } from '@cubic/database/schema';
 import { createRequireAuth } from '../auth/guard.js';
+import type { SessionService } from '../security/session.js';
 import type { LocalMediaStore } from '../media/local.js';
 import type { RealtimeEvents } from '../realtime/events.js';
 
@@ -44,6 +45,7 @@ export function canRemoveGroupMember(actorRole: string, targetRole: string): boo
 export interface GroupRoutesOptions {
   database: Database;
   cookieName: string;
+  sessionService: SessionService;
   realtimeEvents?: RealtimeEvents;
   mediaStore: LocalMediaStore;
   groupAvatarMaxBytes: number;
@@ -183,7 +185,7 @@ async function serializeGroup(database: Database, conversationId: string, userId
 }
 
 export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, options) => {
-  const requireAuth = createRequireAuth(options.database, options.cookieName);
+  const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
 
   app.get('/invites', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });

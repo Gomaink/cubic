@@ -2,10 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Database } from '@cubic/database';
 import { createRequireAuth } from '../auth/guard.js';
+import type { SessionService } from '../security/session.js';
 
 export interface CallHistoryRoutesOptions {
   database: Database;
   cookieName: string;
+  sessionService: SessionService;
 }
 
 const historyQuery = z.object({
@@ -22,7 +24,7 @@ export async function callHistoryRoutes(
   app: FastifyInstance,
   options: CallHistoryRoutesOptions
 ): Promise<void> {
-  const requireAuth = createRequireAuth(options.database, options.cookieName);
+  const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
 
   app.get('/', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return;

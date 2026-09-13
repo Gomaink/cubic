@@ -25,6 +25,11 @@ export const ATTACHMENT_DEFAULTS = {
   reconciliationMissingBatchSize: 250
 } as const;
 
+export const SESSION_DEFAULTS = {
+  idleTimeoutMs: 7 * 24 * 60 * 60 * 1000,
+  socketRevalidateMs: 5 * 60 * 1000
+} as const;
+
 function strictPositiveInteger(defaultValue: number, minimum: number, maximum: number) {
   return z.string()
     .regex(/^[1-9][0-9]*$/, 'must be a base-10 positive integer')
@@ -54,6 +59,16 @@ const envSchema = z
     SESSION_COOKIE_NAME: z.string().min(1).max(64).default('cubic_session'),
     SESSION_COOKIE_SECURE: booleanString,
     SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+    SESSION_IDLE_TIMEOUT_MS: strictPositiveInteger(
+      SESSION_DEFAULTS.idleTimeoutMs,
+      5 * 60 * 1000,
+      30 * 24 * 60 * 60 * 1000
+    ),
+    SESSION_SOCKET_REVALIDATE_MS: strictPositiveInteger(
+      SESSION_DEFAULTS.socketRevalidateMs,
+      30 * 1000,
+      60 * 60 * 1000
+    ),
     REGISTRATION_ENABLED: enabledString,
     MEDIA_ROOT: z.string().min(1).default('/data/media'),
     GROUP_AVATAR_MAX_BYTES: z.coerce.number().int().min(65536).max(8 * 1024 * 1024).default(2 * 1024 * 1024),
@@ -169,6 +184,14 @@ const envSchema = z
         code: 'custom',
         path: ['ATTACHMENT_DELETION_RETRY_MAX_MS'],
         message: 'must be at least ATTACHMENT_DELETION_RETRY_BASE_MS'
+      });
+    }
+
+    if (env.SESSION_SOCKET_REVALIDATE_MS > env.SESSION_IDLE_TIMEOUT_MS) {
+      context.addIssue({
+        code: 'custom',
+        path: ['SESSION_SOCKET_REVALIDATE_MS'],
+        message: 'must not exceed SESSION_IDLE_TIMEOUT_MS'
       });
     }
   });

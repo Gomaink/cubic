@@ -47,6 +47,9 @@ Requirements:
 - primary browser sessions use HttpOnly cookies
 - sessions are stored and revocable server-side
 - logout invalidates server-side session state
+- sessions have independent absolute and finite idle expiration boundaries
+- established Socket.IO connections are associated with the database session
+  and are disconnected after logout or confirmed revalidation failure
 - session identifiers are cryptographically random
 - session secrets are never placed in URLs or logs
 - WebSocket identity derives from authenticated session state
@@ -54,6 +57,13 @@ Requirements:
 
 A compromised browser context may still perform actions as the logged-in user
 while that context remains compromised.
+
+HttpOnly prevents straightforward JavaScript extraction of the session token;
+it does not prevent XSS from issuing authenticated actions through the browser.
+An attacker who has already copied a raw cookie can continue acting while the
+session remains valid and active. Absolute expiry, idle expiry, server-side
+revocation and realtime disconnect bound or terminate that reuse; per-device
+management and broader credential rotation remain future controls.
 
 The architecture should minimize the ability to steal one credential and reuse
 it indefinitely from another device.
@@ -136,6 +146,23 @@ reconciliation and a durable deletion queue are deferred to Slice 0A.4b.
 
 ## Sessions
 
+Current controls:
+
+- PostgreSQL stores only SHA-256 session-token digests
+- browser tokens are host-only, HttpOnly, SameSite=Lax cookies and are Secure
+  in production
+- absolute expiration defaults to 30 days
+- idle expiration defaults to 7 days and is evaluated in addition to absolute
+  expiration
+- ordinary authenticated HTTP requests and authenticated client-originated
+  Socket.IO application events refresh `last_seen_at` through a bounded
+  server-side touch (at most once per five minutes, or half the configured idle
+  window when shorter)
+- Socket.IO handshakes, Engine.IO heartbeat traffic, server-originated realtime
+  events and database revalidation sweeps do not refresh activity
+- logout deletes the authoritative database session before disconnecting all
+  registered sockets for that exact session
+
 Required controls should include:
 
 - HttpOnly
@@ -153,6 +180,16 @@ CSRF risks must be reviewed for cookie-authenticated state-changing routes.
 ## Realtime
 
 Socket identity and room membership are server-controlled.
+
+Established sockets retain only the database session ID and the minimum user
+identity required by current events. A process-local registry groups all tabs
+by session. Client-originated application packets validate the authoritative
+session before their handlers run, while a single shared five-minute sweep
+checks each unique active session for revocation, absolute/idle expiry and
+account disablement. Confirmed invalid sessions are disconnected. A transient
+database error does not by itself revoke otherwise established connections;
+the sweep retries later, and application events fail closed while validation
+is unavailable.
 
 Clients must not be able to claim:
 - another user ID

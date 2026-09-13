@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Database } from '@cubic/database';
 import { blocks, friendRequests, friendships, users } from '@cubic/database/schema';
 import { createRequireAuth } from '../auth/guard.js';
+import type { SessionService } from '../security/session.js';
 
 const userIdSchema = z.object({ userId: z.string().uuid() });
 const requestIdParamsSchema = z.object({ id: z.string().uuid() });
@@ -27,10 +28,11 @@ function publicUser(row: typeof users.$inferSelect) {
 export interface SocialRoutesOptions {
   database: Database;
   cookieName: string;
+  sessionService: SessionService;
 }
 
 export const socialRoutes: FastifyPluginAsync<SocialRoutesOptions> = async (app, options) => {
-  const requireAuth = createRequireAuth(options.database, options.cookieName);
+  const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
 
   app.get('/search', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });

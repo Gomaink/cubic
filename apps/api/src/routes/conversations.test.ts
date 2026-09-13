@@ -293,7 +293,12 @@ async function routeHarness(database = new RouteDatabase()) {
     delete(path: string, _options: unknown, handler: Handler) { handlers.set(`DELETE ${path}`, handler); }
   };
   const events = createRealtimeEvents();
-  await conversationRoutes(app as never, { database: database as never, cookieName: 'session', realtimeEvents: events });
+  await conversationRoutes(app as never, {
+    database: database as never,
+    cookieName: 'session',
+    sessionService: {} as never,
+    realtimeEvents: events
+  });
 
   async function invoke(method: string, path: string, input: { params?: any; query?: any; body?: any; userId?: string | null }) {
     const state = { statusCode: 200, payload: undefined as any };

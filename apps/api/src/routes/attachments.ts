@@ -2,6 +2,7 @@ import type { FastifyPluginAsync, preHandlerAsyncHookHandler } from 'fastify';
 import { z } from 'zod';
 import type { Database } from '@cubic/database';
 import { createRequireAuth } from '../auth/guard.js';
+import type { SessionService } from '../security/session.js';
 import {
   AttachmentStorageReserveError,
   type AttachmentStore
@@ -22,6 +23,7 @@ const attachmentParamsSchema = z.object({
 export interface AttachmentRoutesOptions {
   database: Database;
   cookieName: string;
+  sessionService: SessionService;
   attachmentStore: AttachmentStore;
   attachmentMaxBytes: number;
   attachmentPendingMaxCount: number;
@@ -89,10 +91,7 @@ function dto(row: any) {
 
 export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
   async (app, options) => {
-    const requireAuth = createRequireAuth(
-      options.database,
-      options.cookieName
-    );
+    const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
 
     const uploadPreHandlers = options.uploadRateLimit
       ? [requireAuth, options.uploadRateLimit]

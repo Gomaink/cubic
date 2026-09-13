@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ATTACHMENT_DEFAULTS, loadEnv } from './env.js';
+import { ATTACHMENT_DEFAULTS, SESSION_DEFAULTS, loadEnv } from './env.js';
 
 const requiredEnvironment = {
   DATABASE_URL: 'postgresql://cubic:local-test-password@localhost:5432/cubic',
@@ -39,6 +39,57 @@ test('development retains an explicit plain HTTP workflow', () => {
   });
 
   assert.equal(env.SESSION_COOKIE_SECURE, false);
+});
+
+test('session idle and socket revalidation defaults are finite and production-safe', () => {
+  const env = loadEnv(requiredEnvironment);
+
+  assert.equal(env.SESSION_IDLE_TIMEOUT_MS, SESSION_DEFAULTS.idleTimeoutMs);
+  assert.equal(env.SESSION_SOCKET_REVALIDATE_MS, SESSION_DEFAULTS.socketRevalidateMs);
+});
+
+test('session timeout settings use strict bounded millisecond integers', () => {
+  for (const setting of ['SESSION_IDLE_TIMEOUT_MS', 'SESSION_SOCKET_REVALIDATE_MS'] as const) {
+    for (const invalid of ['0', '-1', '1.5', '1e6', ' 300000', 'unlimited']) {
+      assert.throws(
+        () => loadEnv({ ...requiredEnvironment, [setting]: invalid }),
+        new RegExp(`${setting}:`)
+      );
+    }
+  }
+
+  assert.throws(
+    () => loadEnv({ ...requiredEnvironment, SESSION_IDLE_TIMEOUT_MS: '299999' }),
+    /SESSION_IDLE_TIMEOUT_MS:/
+  );
+  assert.throws(
+    () => loadEnv({ ...requiredEnvironment, SESSION_SOCKET_REVALIDATE_MS: '29999' }),
+    /SESSION_SOCKET_REVALIDATE_MS:/
+  );
+  assert.throws(
+    () => loadEnv({ ...requiredEnvironment, SESSION_IDLE_TIMEOUT_MS: '2592000001' }),
+    /SESSION_IDLE_TIMEOUT_MS:/
+  );
+  assert.throws(
+    () => loadEnv({ ...requiredEnvironment, SESSION_SOCKET_REVALIDATE_MS: '3600001' }),
+    /SESSION_SOCKET_REVALIDATE_MS:/
+  );
+  assert.throws(
+    () => loadEnv({
+      ...requiredEnvironment,
+      SESSION_IDLE_TIMEOUT_MS: '300000',
+      SESSION_SOCKET_REVALIDATE_MS: '300001'
+    }),
+    /SESSION_SOCKET_REVALIDATE_MS: must not exceed SESSION_IDLE_TIMEOUT_MS/
+  );
+
+  const env = loadEnv({
+    ...requiredEnvironment,
+    SESSION_IDLE_TIMEOUT_MS: '3600000',
+    SESSION_SOCKET_REVALIDATE_MS: '60000'
+  });
+  assert.equal(env.SESSION_IDLE_TIMEOUT_MS, 3_600_000);
+  assert.equal(env.SESSION_SOCKET_REVALIDATE_MS, 60_000);
 });
 
 test('trusted proxy CIDRs are required and strictly parsed', () => {
