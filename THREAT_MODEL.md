@@ -162,6 +162,20 @@ Current controls:
   events and database revalidation sweeps do not refresh activity
 - logout deletes the authoritative database session before disconnecting all
   registered sockets for that exact session
+- active-session management is scoped to the authenticated user and exposes only
+  the session UUID, a server-defined coarse client label, and lifecycle timestamps
+- the session UUID is an opaque management handle, not an authentication
+  credential; foreign, missing and already-revoked UUIDs have uniform mutation
+  responses
+- raw User-Agent values and IP addresses or prefixes are not persisted as session
+  metadata
+
+New login and registration continue to issue a fresh server-generated token.
+Idle and absolute expiry retain their existing boundaries, and logout-all issues
+no replacement. Transparent periodic rotation is intentionally deferred: future
+password, recovery and MFA-sensitive flows should confirm credentials and perform
+atomic session replacement/revocation. Ordinary profile and server/channel
+changes do not rotate sessions.
 
 Required controls should include:
 
@@ -196,6 +210,14 @@ Clients must not be able to claim:
 - unauthorized conversation membership
 - unauthorized server/channel membership
 - elevated permissions
+
+The current deployment has one API process. Session revocation notifications and
+the session-to-sockets registry are process-local. In a hypothetical multi-process
+deployment, HTTP requests, new handshakes and client application packets still
+validate against PostgreSQL, and the periodic sweep remains a recovery path, but
+another process would not receive the immediate local revocation event. Cubic does
+not claim immediate distributed socket revocation until a distributed Socket.IO
+adapter and invalidation mechanism are designed together.
 
 ## Voice/video
 

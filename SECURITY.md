@@ -52,6 +52,10 @@ Particularly important areas include:
   revalidated for established realtime connections
 - current-session logout revokes server-side state before disconnecting every
   Socket.IO connection associated with that exact session
+- authenticated users can review and revoke their own active sessions; the
+  browser receives only a random session UUID management handle, coarse client
+  label and session timestamps, never the session token or stored digest
+- session presentation metadata excludes raw User-Agent values and IP addresses
 - secrets must never be committed to the repository
 - destructive security fixes must be reviewed rather than blindly automated
 

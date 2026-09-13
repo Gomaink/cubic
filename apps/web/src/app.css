@@ -3567,6 +3567,180 @@ body { background: var(--cubic-onyx-0); }
   border-radius: 8px !important;
 }
 
+/* Active sessions / devices */
+.messenger-nav > .cubic-session-settings-trigger {
+  width: 100%;
+  min-height: 54px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cubic-muted);
+  font-size: .68rem;
+  font-weight: 650;
+}
+
+.messenger-nav > .cubic-session-settings-trigger:hover,
+.messenger-nav > .cubic-session-settings-trigger:focus-visible {
+  background: var(--cubic-bg-hover);
+  color: var(--cubic-text);
+}
+
+.cubic-session-dialog {
+  width: min(720px, calc(100vw - 32px));
+  max-width: none;
+  max-height: min(780px, calc(100dvh - 32px));
+  padding: 0;
+  border: 1px solid #303136;
+  border-radius: 12px;
+  background: #111214;
+  color: #f2f3f5;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .58);
+  overflow: hidden;
+}
+
+.cubic-session-dialog::backdrop {
+  background: rgba(4, 5, 7, .78);
+  backdrop-filter: blur(3px);
+}
+
+.cubic-session-panel {
+  display: grid;
+  grid-template-rows: auto minmax(120px, 1fr) auto;
+  max-height: min(780px, calc(100dvh - 32px));
+}
+
+.cubic-session-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid #27282d;
+}
+
+.cubic-session-header > div { min-width: 0; flex: 1; }
+.cubic-session-header small { color: #949ba4; font-size: .67rem; font-weight: 800; letter-spacing: .12em; }
+.cubic-session-header h2 { margin: 5px 0 4px; font-size: 1.25rem; }
+.cubic-session-header p { margin: 0; color: #a6aab2; font-size: .82rem; line-height: 1.45; }
+.cubic-session-header > button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #b5bac1;
+}
+.cubic-session-header > button:hover,
+.cubic-session-header > button:focus-visible { background: #2b2d31; color: #fff; }
+
+.cubic-session-content { min-height: 0; padding: 14px; overflow-y: auto; }
+.cubic-session-state {
+  min-height: 150px;
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  padding: 24px;
+  color: #aeb1b8;
+  text-align: center;
+}
+.cubic-session-state button,
+.cubic-session-footer button,
+.cubic-session-row > button {
+  border: 1px solid #3b3d44;
+  border-radius: 7px;
+  background: #2b2d31;
+  color: #f2f3f5;
+  font: inherit;
+  font-size: .76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cubic-session-state button { padding: 8px 14px; }
+.cubic-session-list { display: grid; gap: 8px; }
+.cubic-session-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid #292a2f;
+  border-radius: 9px;
+  background: #191a1e;
+}
+.cubic-session-row.current { border-color: #50547a; background: #1b1c24; }
+.cubic-session-row-main { min-width: 0; flex: 1; }
+.cubic-session-client { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.cubic-session-client strong { overflow-wrap: anywhere; font-size: .9rem; }
+.cubic-session-client span {
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: #414676;
+  color: #e7e9ff;
+  font-size: .62rem;
+  font-weight: 800;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+.cubic-session-row dl { display: flex; flex-wrap: wrap; gap: 7px 18px; margin: 10px 0 0; }
+.cubic-session-row dl > div { min-width: 130px; }
+.cubic-session-row dt { color: #858990; font-size: .62rem; font-weight: 750; text-transform: uppercase; }
+.cubic-session-row dd { margin: 2px 0 0; color: #c5c7cc; font-size: .7rem; }
+.cubic-session-row > button { flex: 0 0 auto; padding: 8px 11px; }
+.cubic-session-row > button:hover,
+.cubic-session-row > button:focus-visible,
+.cubic-session-footer button:hover,
+.cubic-session-footer button:focus-visible { border-color: #666974; background: #35373c; }
+.cubic-session-row > button.danger,
+.cubic-session-footer button.danger { border-color: #713f43; background: #4a292c; color: #ffd7da; }
+.cubic-session-row > button:disabled,
+.cubic-session-footer button:disabled { opacity: .48; cursor: default; }
+.cubic-session-inline-error { margin: 12px 2px 0; color: #ff9ca3; font-size: .76rem; }
+.cubic-session-error { color: #ffb2b7; }
+.cubic-session-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 18px;
+  border-top: 1px solid #27282d;
+  background: #151619;
+}
+.cubic-session-footer button { min-height: 38px; padding: 8px 13px; }
+
+@media (max-width: 680px) {
+  .messenger-nav > .cubic-session-settings-trigger {
+    width: 58px;
+    min-height: 48px;
+    display: flex;
+    padding: 6px;
+    font-size: .6rem;
+  }
+
+  .cubic-session-dialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    margin: auto;
+    border-radius: 10px;
+  }
+
+  .cubic-session-panel { max-height: calc(100dvh - 16px); }
+  .cubic-session-header { padding: 17px 16px 14px; }
+  .cubic-session-header p { font-size: .76rem; }
+  .cubic-session-content { padding: 9px; }
+  .cubic-session-row { align-items: stretch; flex-direction: column; gap: 12px; padding: 12px; }
+  .cubic-session-row dl { display: grid; grid-template-columns: 1fr; gap: 7px; }
+  .cubic-session-row > button { min-height: 42px; width: 100%; }
+  .cubic-session-footer { flex-direction: column; padding: 10px; }
+  .cubic-session-footer button { min-height: 44px; width: 100%; }
+}
+
 .voice-dock-actions > button:has(svg) > span {
   display: none !important;
 }

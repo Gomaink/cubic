@@ -67,14 +67,22 @@ const conversationId = '20000000-0000-4000-8000-000000000001';
 function sessionRecord(
   token: string,
   userId: string,
-  options: { lastSeenAt?: Date; expiresAt?: Date; disabledAt?: Date | null } = {}
+  options: {
+    id?: string;
+    clientLabel?: string | null;
+    createdAt?: Date;
+    lastSeenAt?: Date;
+    expiresAt?: Date;
+    disabledAt?: Date | null;
+  } = {}
 ): SessionRecord {
   return {
     session: {
-      id: randomUUID(),
+      id: options.id ?? randomUUID(),
       userId,
       tokenHash: digestSessionToken(token),
-      createdAt: new Date(),
+      clientLabel: options.clientLabel ?? null,
+      createdAt: options.createdAt ?? new Date(),
       lastSeenAt: options.lastSeenAt ?? new Date(),
       expiresAt: options.expiresAt ?? new Date(Date.now() + 60_000)
     },
@@ -100,6 +108,7 @@ class RealtimeSessionRepository implements SessionRepository {
   readonly records = new Map<string, SessionRecord>();
   touchCount = 0;
   failValidation = false;
+  failMutation = false;
   findByIdDelayMs = 0;
   activeFindById = 0;
   maximumConcurrentFindById = 0;
@@ -118,9 +127,10 @@ class RealtimeSessionRepository implements SessionRepository {
     return value.session.id;
   }
 
-  async insert(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
+  async insert(userId: string, tokenHash: string, expiresAt: Date, clientLabel: string): Promise<void> {
     const value = sessionRecord('temporary', userId, { expiresAt });
     value.session.tokenHash = tokenHash;
+    value.session.clientLabel = clientLabel;
     this.records.set(value.session.id, value);
   }
 
@@ -145,6 +155,24 @@ class RealtimeSessionRepository implements SessionRepository {
     }
   }
 
+  async listActiveForUser(userId: string, now: Date, idleCutoff: Date) {
+    if (this.failValidation) throw new Error('temporary database failure');
+    return [...this.records.values()]
+      .filter((value) =>
+        value.session.userId === userId &&
+        value.session.expiresAt.getTime() > now.getTime() &&
+        value.session.lastSeenAt.getTime() > idleCutoff.getTime()
+      )
+      .sort((left, right) => right.session.lastSeenAt.getTime() - left.session.lastSeenAt.getTime())
+      .map((value) => ({
+        id: value.session.id,
+        clientLabel: value.session.clientLabel,
+        createdAt: value.session.createdAt,
+        lastSeenAt: value.session.lastSeenAt,
+        expiresAt: value.session.expiresAt
+      }));
+  }
+
   async touch(sessionId: string, lastSeenAt: Date, staleBefore: Date): Promise<void> {
     const value = this.records.get(sessionId);
     if (value && value.session.lastSeenAt.getTime() <= staleBefore.getTime()) {
@@ -160,6 +188,38 @@ class RealtimeSessionRepository implements SessionRepository {
     if (!value) return null;
     this.records.delete(value.session.id);
     return value.session.id;
+  }
+
+  async deleteForUser(sessionId: string, userId: string): Promise<string | null> {
+    if (this.failValidation || this.failMutation) throw new Error('temporary database failure');
+    const value = this.records.get(sessionId);
+    if (!value || value.session.userId !== userId) return null;
+    this.records.delete(sessionId);
+    return sessionId;
+  }
+
+  async deleteOthersForUser(userId: string, currentSessionId: string): Promise<string[]> {
+    if (this.failValidation || this.failMutation) throw new Error('temporary database failure');
+    const deletedIds: string[] = [];
+    for (const [sessionId, value] of this.records) {
+      if (value.session.userId === userId && sessionId !== currentSessionId) {
+        this.records.delete(sessionId);
+        deletedIds.push(sessionId);
+      }
+    }
+    return deletedIds;
+  }
+
+  async deleteAllForUser(userId: string): Promise<string[]> {
+    if (this.failValidation || this.failMutation) throw new Error('temporary database failure');
+    const deletedIds: string[] = [];
+    for (const [sessionId, value] of this.records) {
+      if (value.session.userId === userId) {
+        this.records.delete(sessionId);
+        deletedIds.push(sessionId);
+      }
+    }
+    return deletedIds;
   }
 
   async deleteInvalid(absoluteCutoff: Date, idleCutoff: Date): Promise<void> {
@@ -393,6 +453,194 @@ test('logout does not disconnect before session deletion succeeds', async (conte
   assert.equal(harness.realtime.registry.socketCount, 1);
   harness.repository.failValidation = false;
   socket.close();
+});
+
+test('active-session API lists only safe owned metadata with the current session first', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const ownerId = '10000000-0000-4000-8000-000000000001';
+  const current = harness.repository.add('list-current', ownerId, {
+    clientLabel: 'Firefox on Linux',
+    lastSeenAt: new Date(Date.now() - 30_000)
+  });
+  const other = harness.repository.add('list-other', ownerId, {
+    clientLabel: null,
+    lastSeenAt: new Date()
+  });
+  harness.repository.add('list-foreign', '10000000-0000-4000-8000-000000000002', {
+    clientLabel: 'Edge on Windows'
+  });
+  harness.repository.add('list-expired', ownerId, {
+    expiresAt: new Date(Date.now() - 1)
+  });
+
+  const response = await fetch(`${harness.url}/api/v1/auth/sessions`, {
+    headers: { cookie: 'session=list-current' }
+  });
+
+  assert.equal(response.status, 200);
+  const payload = await response.json() as { sessions: Array<Record<string, unknown>> };
+  assert.deepEqual(payload.sessions.map((session) => session.id), [current.session.id, other.session.id]);
+  assert.equal(payload.sessions[0]?.current, true);
+  assert.equal(payload.sessions[1]?.current, false);
+  assert.equal(payload.sessions[1]?.client, 'Unknown client');
+  for (const session of payload.sessions) {
+    assert.deepEqual(Object.keys(session).sort(), [
+      'client', 'createdAt', 'current', 'expiresAt', 'id', 'lastSeenAt'
+    ]);
+    assert.equal('tokenHash' in session, false);
+    assert.equal('token_hash' in session, false);
+    assert.equal('userId' in session, false);
+    assert.equal('user_id' in session, false);
+  }
+});
+
+test('revoke-one API is owner-scoped, idempotent, and disconnects every target tab', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const ownerId = '10000000-0000-4000-8000-000000000001';
+  harness.repository.add('revoke-current', ownerId);
+  const target = harness.repository.add('revoke-target', ownerId);
+  const foreign = harness.repository.add(
+    'revoke-foreign',
+    '10000000-0000-4000-8000-000000000002'
+  );
+  const currentSocket = await connectClient(harness, 'revoke-current');
+  const targetTabOne = await connectClient(harness, 'revoke-target');
+  const targetTabTwo = await connectClient(harness, 'revoke-target');
+  const foreignSocket = await connectClient(harness, 'revoke-foreign');
+  const firstDisconnect = waitForEvent(targetTabOne, 'disconnect');
+  const secondDisconnect = waitForEvent(targetTabTwo, 'disconnect');
+
+  const revoked = await fetch(`${harness.url}/api/v1/auth/sessions/${target.session.id}`, {
+    method: 'DELETE',
+    headers: { cookie: 'session=revoke-current' }
+  });
+
+  assert.equal(revoked.status, 204);
+  assert.equal(revoked.headers.get('set-cookie'), null);
+  await Promise.all([firstDisconnect, secondDisconnect]);
+  assert.equal(currentSocket.connected, true);
+  assert.equal(foreignSocket.connected, true);
+
+  const missingId = '60000000-0000-4000-8000-000000000099';
+  const repeated = await fetch(`${harness.url}/api/v1/auth/sessions/${target.session.id}`, {
+    method: 'DELETE', headers: { cookie: 'session=revoke-current' }
+  });
+  const missing = await fetch(`${harness.url}/api/v1/auth/sessions/${missingId}`, {
+    method: 'DELETE', headers: { cookie: 'session=revoke-current' }
+  });
+  const foreignAttempt = await fetch(`${harness.url}/api/v1/auth/sessions/${foreign.session.id}`, {
+    method: 'DELETE', headers: { cookie: 'session=revoke-current' }
+  });
+  const malformed = await fetch(`${harness.url}/api/v1/auth/sessions/not-a-uuid`, {
+    method: 'DELETE', headers: { cookie: 'session=revoke-current' }
+  });
+  assert.deepEqual(
+    [repeated.status, missing.status, foreignAttempt.status, repeated.headers.get('content-length'), missing.headers.get('content-length'), foreignAttempt.headers.get('content-length')],
+    [204, 204, 204, null, null, null]
+  );
+  assert.equal(malformed.status, 400);
+  assert.equal(harness.repository.records.has(foreign.session.id), true);
+
+  const reconnect = createClient(harness.url, {
+    transports: ['websocket'],
+    reconnection: false,
+    extraHeaders: { cookie: 'session=revoke-target' }
+  });
+  assert.match((await waitForEvent<Error>(reconnect, 'connect_error')).message, /Authentication required/);
+  reconnect.close();
+  currentSocket.close();
+  foreignSocket.close();
+});
+
+test('revoke-others preserves current tabs and logout-all disconnects all owned sessions only', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const ownerId = '10000000-0000-4000-8000-000000000001';
+  const current = harness.repository.add('bulk-current', ownerId);
+  const other = harness.repository.add('bulk-other', ownerId);
+  const foreign = harness.repository.add('bulk-foreign', '10000000-0000-4000-8000-000000000002');
+  const currentTabOne = await connectClient(harness, 'bulk-current');
+  const currentTabTwo = await connectClient(harness, 'bulk-current');
+  const otherSocket = await connectClient(harness, 'bulk-other');
+  const foreignSocket = await connectClient(harness, 'bulk-foreign');
+  const otherDisconnect = waitForEvent(otherSocket, 'disconnect');
+
+  const revokeOthers = await fetch(`${harness.url}/api/v1/auth/sessions/others`, {
+    method: 'DELETE', headers: { cookie: 'session=bulk-current' }
+  });
+  assert.equal(revokeOthers.status, 204);
+  assert.equal(revokeOthers.headers.get('set-cookie'), null);
+  await otherDisconnect;
+  assert.equal(harness.repository.records.has(current.session.id), true);
+  assert.equal(harness.repository.records.has(other.session.id), false);
+  assert.equal(harness.repository.records.has(foreign.session.id), true);
+  assert.equal(currentTabOne.connected, true);
+  assert.equal(currentTabTwo.connected, true);
+  assert.equal(foreignSocket.connected, true);
+
+  const later = harness.repository.add('bulk-later', ownerId);
+  const laterSocket = await connectClient(harness, 'bulk-later');
+  const currentDisconnectOne = waitForEvent(currentTabOne, 'disconnect');
+  const currentDisconnectTwo = waitForEvent(currentTabTwo, 'disconnect');
+  const laterDisconnect = waitForEvent(laterSocket, 'disconnect');
+  const logoutAll = await fetch(`${harness.url}/api/v1/auth/sessions`, {
+    method: 'DELETE', headers: { cookie: 'session=bulk-current' }
+  });
+  assert.equal(logoutAll.status, 204);
+  assert.match(logoutAll.headers.get('set-cookie') ?? '', /session=;/);
+  await Promise.all([currentDisconnectOne, currentDisconnectTwo, laterDisconnect]);
+  assert.equal(harness.repository.records.has(current.session.id), false);
+  assert.equal(harness.repository.records.has(later.session.id), false);
+  assert.equal(harness.repository.records.has(foreign.session.id), true);
+  assert.equal(foreignSocket.connected, true);
+  foreignSocket.close();
+});
+
+test('session management persistence failure returns generic 503 without cookie or socket side effects', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const current = harness.repository.add(
+    'failure-current',
+    '10000000-0000-4000-8000-000000000001'
+  );
+  const socket = await connectClient(harness, 'failure-current');
+  harness.repository.failMutation = true;
+
+  const response = await fetch(`${harness.url}/api/v1/auth/sessions/${current.session.id}`, {
+    method: 'DELETE', headers: { cookie: 'session=failure-current' }
+  });
+  const body = await response.json() as { error?: string };
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(body, { error: 'Session management is temporarily unavailable.' });
+  assert.equal(response.headers.get('set-cookie'), null);
+  assert.equal(harness.repository.records.has(current.session.id), true);
+  assert.equal(socket.connected, true);
+  socket.close();
+});
+
+test('revoking the current session clears its cookie only after deletion and disconnects all tabs', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const current = harness.repository.add(
+    'current-management-session',
+    '10000000-0000-4000-8000-000000000001'
+  );
+  const tabOne = await connectClient(harness, 'current-management-session');
+  const tabTwo = await connectClient(harness, 'current-management-session');
+  const firstDisconnect = waitForEvent(tabOne, 'disconnect');
+  const secondDisconnect = waitForEvent(tabTwo, 'disconnect');
+
+  const response = await fetch(`${harness.url}/api/v1/auth/sessions/${current.session.id}`, {
+    method: 'DELETE', headers: { cookie: 'session=current-management-session' }
+  });
+
+  assert.equal(response.status, 204);
+  assert.match(response.headers.get('set-cookie') ?? '', /session=;/);
+  await Promise.all([firstDisconnect, secondDisconnect]);
+  assert.equal(harness.repository.records.has(current.session.id), false);
 });
 
 test('direct database revocation and later account disabling are found by shared revalidation', async (context) => {

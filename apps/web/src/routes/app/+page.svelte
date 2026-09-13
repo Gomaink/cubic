@@ -7,9 +7,11 @@
   import ScreenShareTile from '$lib/ui/ScreenShareTile.svelte';
   import MessageAttachments from '$lib/ui/MessageAttachments.svelte';
   import MessageActions from '$lib/ui/MessageActions.svelte';
+  import SessionSettings from '$lib/ui/SessionSettings.svelte';
 
   let { data } = $props();
   let loggingOut = $state(false);
+  let sessionSettingsOpen = $state(false);
   let tab = $state<'chats' | 'people'>('chats');
   let query = $state('');
   let searchResults = $state<any[]>([]);
@@ -2812,7 +2814,17 @@
       Promise.all([refreshSocial(), refreshGroupInvites(), refreshConversations(), syncActiveConversation(), refreshGroupDetails()]).catch(() => {});
       syncDirectCall(socket).catch(() => {});
     });
-    socket.on('disconnect', () => { realtimeConnected = false; });
+    socket.on('disconnect', (reason) => {
+      realtimeConnected = false;
+      if (reason === 'io server disconnect') {
+        fetch('/api/v1/auth/session', { credentials: 'include' })
+          .then((response) => response.ok ? response.json() : null)
+          .then((session) => {
+            if (session && session.authenticated === false) window.location.assign('/login');
+          })
+          .catch(() => {});
+      }
+    });
     socket.on('connect_error', () => { realtimeConnected = false; });
     socket.on('message:created', (message: any) => {
       if (activeConversation?.id === message.conversationId) {
@@ -2940,10 +2952,17 @@
     </button>
     <div class="messenger-nav-spacer"></div>
     <div class="mini-profile"><span>{data.user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{data.user.displayName}</strong><small>@{data.user.username}</small></div></div>
+    <button class="cubic-session-settings-trigger" title="Active sessions" aria-label="Active sessions" onclick={() => sessionSettingsOpen = true}>
+      <Icon name="settings" size={20} /><span>Sessions</span>
+    </button>
     <button class="logout-action" title="Log out" aria-label="Log out" onclick={logout} disabled={loggingOut}>
       <Icon name="logout" size={20} /><span>{loggingOut ? 'Wait…' : 'Log out'}</span>
     </button>
   </aside>
+
+  {#if sessionSettingsOpen}
+    <SessionSettings onclose={() => sessionSettingsOpen = false} />
+  {/if}
 
   <section class="conversation-list">
     {#if tab === 'chats'}

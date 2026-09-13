@@ -12,6 +12,8 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 let messages;
 let staged;
 let videoBytes;
+let sessionMode;
+let activeSessions;
 
 function attachment(name, contentType = 'image/png', dimensions = { width: 800, height: 600 }) {
   const id = randomUUID();
@@ -22,6 +24,13 @@ function attachment(name, contentType = 'image/png', dimensions = { width: 800, 
 function reset() {
   staged = new Map();
   videoBytes = null;
+  sessionMode = 'ok';
+  activeSessions = [
+    { id: '60000000-0000-4000-8000-000000000001', current: true, client: 'Firefox on Linux',
+      createdAt: '2026-09-12T10:00:00.000Z', lastSeenAt: '2026-09-13T12:00:00.000Z', expiresAt: '2026-10-12T10:00:00.000Z' },
+    { id: '60000000-0000-4000-8000-000000000002', current: false, client: 'Unknown client',
+      createdAt: '2026-09-10T09:00:00.000Z', lastSeenAt: '2026-09-12T08:00:00.000Z', expiresAt: '2026-10-10T09:00:00.000Z' }
+  ];
   messages = Array.from({ length: 80 }, (_, index) => ({
     id: `message-${index}`, conversationId: dm, senderId: peer.id, senderDisplayName: peer.displayName,
     createdAt: new Date(Date.UTC(2026, 8, 1, 12, index)).toISOString(),
@@ -54,6 +63,10 @@ const server = createServer(async (request, response) => {
   };
 
   if (url.pathname === '/__test/reset') { reset(); return json({ ok: true }); }
+  if (url.pathname === '/__test/session-mode') {
+    sessionMode = url.searchParams.get('value') ?? 'ok';
+    return json({ ok: true });
+  }
   if (url.pathname === '/__test/video') { videoBytes = await body(); return json({ ok: true }); }
   if (url.pathname === '/__test/realtime') {
     const message = { ...messages.at(-1), id: randomUUID(), createdAt: new Date().toISOString(), body: 'Realtime attachment', attachments: [attachment('realtime.png')], reactions: [] };
@@ -74,6 +87,27 @@ const server = createServer(async (request, response) => {
   }
   if (!request.headers.cookie?.includes('cubic_session=browser-fixture')) return json({ error: 'Authentication required.' }, 401);
   if (url.pathname === '/api/v1/auth/me') return json({ user });
+  if (url.pathname === '/api/v1/auth/session') return json({ authenticated: true, user });
+  if (url.pathname === '/api/v1/auth/sessions' && request.method === 'GET') {
+    if (sessionMode === 'error') return json({ error: 'Session management is temporarily unavailable.' }, 503);
+    return json({ sessions: sessionMode === 'empty' ? [] : activeSessions });
+  }
+  if (url.pathname === '/api/v1/auth/sessions/others' && request.method === 'DELETE') {
+    activeSessions = activeSessions.filter((session) => session.current);
+    response.writeHead(204);
+    return response.end();
+  }
+  if (url.pathname === '/api/v1/auth/sessions' && request.method === 'DELETE') {
+    activeSessions = [];
+    response.writeHead(204, { 'set-cookie': 'cubic_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax' });
+    return response.end();
+  }
+  const sessionAction = /^\/api\/v1\/auth\/sessions\/([0-9a-f-]+)$/.exec(url.pathname);
+  if (sessionAction && request.method === 'DELETE') {
+    activeSessions = activeSessions.filter((session) => session.id !== sessionAction[1]);
+    response.writeHead(204);
+    return response.end();
+  }
   if (url.pathname === '/api/v1/social/friends') return json({ friends: [] });
   if (url.pathname === '/api/v1/social/requests') return json({ requests: [] });
   if (url.pathname === '/api/v1/groups/invites') return json({ invites: [] });

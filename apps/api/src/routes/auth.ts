@@ -1,4 +1,4 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { eq, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Database } from '@cubic/database';
@@ -6,7 +6,7 @@ import { userSettings, users } from '@cubic/database/schema';
 import { normalizeEmail, normalizeUsername, toPublicUser } from '../auth/identity.js';
 import { createRequireAuth } from '../auth/guard.js';
 import { hashPassword, verifyPassword } from '../security/password.js';
-import type { SessionService } from '../security/session.js';
+import { SessionPersistenceError, type SessionService } from '../security/session.js';
 import type { RealtimeEvents } from '../realtime/events.js';
 
 const registerBodySchema = z.object({
@@ -24,6 +24,10 @@ const registerBodySchema = z.object({
 const loginBodySchema = z.object({
   identifier: z.string().trim().min(1).max(254),
   password: z.string().min(1).max(128)
+});
+
+const sessionParamsSchema = z.object({
+  sessionId: z.string().uuid()
 });
 
 export interface AuthRoutesOptions {
@@ -53,6 +57,8 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
     secure: options.cookieSecure,
     path: '/'
   };
+  const sessionUnavailable = (reply: FastifyReply) =>
+    reply.code(503).send({ error: 'Session management is temporarily unavailable.' });
 
   app.post(
     '/register',
@@ -121,7 +127,11 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
           if (previousSessionId) options.realtimeEvents.emitSessionRevoked({ sessionId: previousSessionId });
         }
 
-        const session = await options.sessionService.create(user.id, options.sessionTtlDays);
+        const session = await options.sessionService.create(
+          user.id,
+          options.sessionTtlDays,
+          request.headers['user-agent']
+        );
         reply.setCookie(options.cookieName, session.token, {
           ...cookieBase,
           expires: session.expiresAt,
@@ -183,7 +193,11 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
         if (previousSessionId) options.realtimeEvents.emitSessionRevoked({ sessionId: previousSessionId });
       }
 
-      const session = await options.sessionService.create(user.id, options.sessionTtlDays);
+      const session = await options.sessionService.create(
+        user.id,
+        options.sessionTtlDays,
+        request.headers['user-agent']
+      );
       reply.setCookie(options.cookieName, session.token, {
         ...cookieBase,
         expires: session.expiresAt,
@@ -208,6 +222,90 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
   app.get('/me', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
     return reply.send({ user: request.auth.user });
+  });
+
+  app.get('/sessions', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+
+    try {
+      const activeSessions = await options.sessionService.listActiveForUser(request.auth.user.id);
+      const currentSessionId = request.auth.sessionId;
+      activeSessions.sort((left, right) => {
+        const currentOrder = Number(right.id === currentSessionId) - Number(left.id === currentSessionId);
+        return currentOrder || right.lastSeenAt.getTime() - left.lastSeenAt.getTime();
+      });
+
+      return reply.send({
+        sessions: activeSessions.map((session) => ({
+          id: session.id,
+          current: session.id === currentSessionId,
+          client: session.client,
+          createdAt: session.createdAt.toISOString(),
+          lastSeenAt: session.lastSeenAt.toISOString(),
+          expiresAt: session.expiresAt.toISOString()
+        }))
+      });
+    } catch (error) {
+      if (error instanceof SessionPersistenceError) return sessionUnavailable(reply);
+      throw error;
+    }
+  });
+
+  app.delete('/sessions/others', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+
+    try {
+      const deletedIds = await options.sessionService.deleteOthersForUser(
+        request.auth.user.id,
+        request.auth.sessionId
+      );
+      for (const sessionId of deletedIds) {
+        options.realtimeEvents.emitSessionRevoked({ sessionId });
+      }
+      return reply.code(204).send();
+    } catch (error) {
+      if (error instanceof SessionPersistenceError) return sessionUnavailable(reply);
+      throw error;
+    }
+  });
+
+  app.delete('/sessions', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+
+    try {
+      const deletedIds = await options.sessionService.deleteAllForUser(request.auth.user.id);
+      for (const sessionId of deletedIds) {
+        options.realtimeEvents.emitSessionRevoked({ sessionId });
+      }
+      reply.clearCookie(options.cookieName, cookieBase);
+      return reply.code(204).send();
+    } catch (error) {
+      if (error instanceof SessionPersistenceError) return sessionUnavailable(reply);
+      throw error;
+    }
+  });
+
+  app.delete('/sessions/:sessionId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = sessionParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid session id.' });
+
+    try {
+      const deletedId = await options.sessionService.deleteForUser(
+        params.data.sessionId,
+        request.auth.user.id
+      );
+      if (deletedId) {
+        options.realtimeEvents.emitSessionRevoked({ sessionId: deletedId });
+        if (deletedId === request.auth.sessionId) {
+          reply.clearCookie(options.cookieName, cookieBase);
+        }
+      }
+      return reply.code(204).send();
+    } catch (error) {
+      if (error instanceof SessionPersistenceError) return sessionUnavailable(reply);
+      throw error;
+    }
   });
 
   // Small endpoint used by the web app to validate the browser cookie after a
