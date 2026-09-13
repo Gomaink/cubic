@@ -21,7 +21,7 @@
     "argon2": "^0.45.1",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.2",
-    "fastify": "^5.11.0",
+    "fastify": "5.12.4",
     "zod": "^4.4.3",
     "socket.io": "^4.8.1",
     "@fastify/multipart": "^9.2.1",

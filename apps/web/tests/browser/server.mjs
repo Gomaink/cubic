@@ -172,7 +172,13 @@ io.on('connection', (socket) => {
 });
 server.listen(3198, '127.0.0.1');
 const web = spawn(process.execPath, ['server.mjs'], {
-  env: { ...process.env, HOST: '127.0.0.1', PORT: '3197', API_INTERNAL_URL: 'http://127.0.0.1:3198' },
+  env: {
+    ...process.env,
+    HOST: '127.0.0.1',
+    PORT: '3197',
+    API_INTERNAL_URL: 'http://127.0.0.1:3198',
+    TRUST_PROXY_CIDRS: '127.0.0.1/32,::1/128'
+  },
   stdio: 'inherit'
 });
 function shutdown() {

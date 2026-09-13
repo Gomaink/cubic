@@ -10,7 +10,7 @@ const realtimeEvents = createRealtimeEvents();
 const app = await createApp({
   database,
   corsOrigin: env.CORS_ORIGIN,
-  trustProxyHops: env.TRUST_PROXY_HOPS,
+  trustedProxyCidrs: env.TRUST_PROXY_CIDRS,
   cookieName: env.SESSION_COOKIE_NAME,
   cookieSecure: env.SESSION_COOKIE_SECURE,
   sessionTtlDays: env.SESSION_TTL_DAYS,
@@ -29,6 +29,7 @@ const realtime = attachRealtime({
   server: app.server,
   database,
   cookieName: env.SESSION_COOKIE_NAME,
+  trustedProxyCidrs: env.TRUST_PROXY_CIDRS,
   events: realtimeEvents
 });
 

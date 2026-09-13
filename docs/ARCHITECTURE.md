@@ -36,6 +36,12 @@ PostgreSQL 18
 
 The SvelteKit proxy deliberately keeps API calls same-origin in the browser. The API remains independently reachable for health checks and future native/API clients.
 
+Forwarded identity crosses two explicit checks. The web proxy accepts edge
+forwarding only from operator-configured CIDRs and replaces incoming forwarding
+headers with canonical client IP, protocol and host values. Fastify accepts
+those values only when the web peer is in the same configured trust boundary.
+Neither layer supports numeric hop trust.
+
 ## Session lifecycle
 
 ```text

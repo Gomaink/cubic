@@ -185,6 +185,29 @@ expose a development deployment, mishandle the `.env`, or misconfigure TLS and
 proxy routing. Documentation, unique random credential generation and careful
 rotation reduce these operator-controlled risks but cannot eliminate them.
 
+## Forwarded-header trust
+
+Threat: an untrusted client supplies `X-Forwarded-For`, `X-Forwarded-Proto` or
+`X-Forwarded-Host` and is mistaken for another client, changes rate-limit
+identity, or influences protocol/host security decisions. Numeric hop counts
+are especially unsafe when the path length can differ.
+
+Controls:
+
+- Fastify is pinned to the audited 5.12.4 security release
+- numeric and unrestricted proxy trust are rejected
+- operators must provide explicit trusted proxy CIDRs
+- the public web proxy discards forwarded identity from peers outside that
+  boundary and canonicalizes trusted forwarding chains
+- the API accepts canonical forwarding only from a peer inside that boundary
+- regression tests cover untrusted spoofing, trusted forwarding, multi-value
+  chains, rate-limit identity and secure cookies behind HTTPS
+
+Residual risk: a compromised process or host inside the explicitly trusted
+network can forge forwarding metadata. Operators must therefore use the
+smallest dedicated network practical, avoid attaching unrelated containers,
+and update the CIDRs when network topology changes.
+
 ## Out of scope / unavoidable limits
 
 If an endpoint device is fully compromised, malware may control the browser,

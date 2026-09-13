@@ -14,12 +14,16 @@ test('default Compose requires private deployment credentials', async () => {
   assert.match(compose, /\$\{LIVEKIT_API_KEY:\?/);
   assert.match(compose, /\$\{LIVEKIT_API_SECRET:\?/);
   assert.match(compose, /\$\{SESSION_COOKIE_SECURE:\?/);
+  assert.match(compose, /\$\{TRUST_PROXY_CIDRS:\?/);
   assert.doesNotMatch(compose, /POSTGRES_PASSWORD:-/);
   assert.doesNotMatch(compose, /LIVEKIT_API_KEY:-/);
   assert.doesNotMatch(compose, /LIVEKIT_API_SECRET:-/);
   assert.match(environmentExample, /^POSTGRES_PASSWORD=$/m);
   assert.match(environmentExample, /^LIVEKIT_API_KEY=$/m);
   assert.match(environmentExample, /^LIVEKIT_API_SECRET=$/m);
+  assert.match(environmentExample, /^TRUST_PROXY_CIDRS=$/m);
+  assert.doesNotMatch(`${compose}\n${environmentExample}`, /TRUST_PROXY_HOPS/);
+  assert.match(compose, /web:[\s\S]*TRUST_PROXY_CIDRS: \$\{TRUST_PROXY_CIDRS:\?/);
   assert.doesNotMatch(
     `${compose}\n${environmentExample}`,
     /cubic-dev-password|CUBICDEVKEY|cubic-development-secret-change-me/

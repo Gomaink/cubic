@@ -10,6 +10,7 @@ import {
   directConversationPairs
 } from '@cubic/database/schema';
 import { resolveSession, type SessionIdentity } from '../security/session.js';
+import { createTrustedProxyCheck } from '../config/proxy.js';
 import {
   CallLifecycleError,
   DirectCallCoordinator,
@@ -52,14 +53,20 @@ export function readCookie(header: string | undefined, name: string): string | n
   return null;
 }
 
-export function isSameOriginRequest(request: IncomingMessage): boolean {
+export function isSameOriginRequest(
+  request: IncomingMessage,
+  isTrustedProxy: (address: string) => boolean
+): boolean {
   const origin = request.headers.origin;
   if (!origin) return true;
 
   const forwardedHost = request.headers['x-forwarded-host'];
-  const host = Array.isArray(forwardedHost)
-    ? forwardedHost[0]
-    : forwardedHost ?? request.headers.host;
+  const remoteAddress = request.socket.remoteAddress ?? '';
+  const host = isTrustedProxy(remoteAddress)
+    ? Array.isArray(forwardedHost)
+      ? forwardedHost[0]
+      : forwardedHost ?? request.headers.host
+    : request.headers.host;
 
   if (!host) return false;
 
@@ -74,6 +81,7 @@ export interface AttachRealtimeOptions {
   server: HttpServer;
   database: Database;
   cookieName: string;
+  trustedProxyCidrs: string[];
   events: RealtimeEvents;
 }
 
@@ -255,6 +263,7 @@ async function recoverStaleCallRows(database: Database): Promise<void> {
 }
 
 export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
+  const isTrustedProxy = createTrustedProxyCheck(options.trustedProxyCidrs);
   const io = new Server(options.server, {
     path: '/socket.io',
     transports: ['websocket', 'polling'],
@@ -264,7 +273,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
       credentials: true
     },
     allowRequest: (request, callback) => {
-      const allowed = isSameOriginRequest(request);
+      const allowed = isSameOriginRequest(request, isTrustedProxy);
       callback(allowed ? null : 'Origin not allowed.', allowed);
     }
   });

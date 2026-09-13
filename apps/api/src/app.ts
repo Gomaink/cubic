@@ -21,7 +21,7 @@ import { AttachmentStore } from './media/attachments.js';
 export interface CreateAppOptions {
   database: Database;
   corsOrigin: string;
-  trustProxyHops: number;
+  trustedProxyCidrs: string[];
   cookieName: string;
   cookieSecure: boolean;
   sessionTtlDays: number;
@@ -40,7 +40,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   const realtimeEvents = options.realtimeEvents ?? createRealtimeEvents();
   const app = Fastify({
     logger: options.logger ?? true,
-    trustProxy: options.trustProxyHops,
+    trustProxy: options.trustedProxyCidrs,
     bodyLimit: Math.max(
       2 * 1024 * 1024,
       (options.groupAvatarMaxBytes ?? 2 * 1024 * 1024) + 512 * 1024,

@@ -21,6 +21,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/web/package.json apps/web/package.json
 COPY --from=build /app/apps/web/build apps/web/build
 COPY apps/web/server.mjs apps/web/server.mjs
+COPY apps/web/proxy-trust.mjs apps/web/proxy-trust.mjs
 
 USER node
 EXPOSE 3000

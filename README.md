@@ -85,8 +85,15 @@ use:
 
 ```env
 SESSION_COOKIE_SECURE=true
-TRUST_PROXY_HOPS=1
+TRUST_PROXY_CIDRS=<dedicated Cubic Docker network CIDR>
 ```
+
+Determine the exact subnet attached to both `web` and `api` with
+`docker network inspect <project>_cubic`; do not substitute a broad private
+network range. Both services reject missing or malformed CIDRs at startup.
+The web service accepts incoming forwarded headers only from this boundary,
+canonicalizes them, and the API accepts the canonical headers only from the
+same boundary. Numeric proxy-hop trust is not supported.
 
 Do not expose a production login over plain HTTP. The API is not published to
 the host by the default Compose stack; browser traffic goes through the
@@ -107,6 +114,7 @@ export LIVEKIT_PUBLIC_URL='ws://localhost:7880'
 export LIVEKIT_API_KEY='CUBIC_LOCAL_DEVELOPMENT_KEY'
 export LIVEKIT_API_SECRET='cubic-local-development-only-secret-000000000000'
 export SESSION_COOKIE_SECURE='false'
+export TRUST_PROXY_CIDRS='127.0.0.1/32,::1/128'
 npm run db:migrate
 npm run dev
 ```

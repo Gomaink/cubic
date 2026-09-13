@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseTrustedProxyCidrs } from './proxy.js';
 
 const booleanString = z.enum(['true', 'false']).default('false').transform((value) => value === 'true');
 const enabledString = z.enum(['true', 'false']).default('true').transform((value) => value === 'true');
@@ -10,7 +11,17 @@ const envSchema = z
     API_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
     DATABASE_URL: z.string().min(1),
     CORS_ORIGIN: z.string().min(1).default('http://localhost:3000'),
-    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(8).default(1),
+    TRUST_PROXY_CIDRS: z.string().min(1).transform((value, context) => {
+      try {
+        return parseTrustedProxyCidrs(value);
+      } catch (error) {
+        context.addIssue({
+          code: 'custom',
+          message: error instanceof Error ? error.message : 'must contain valid IP CIDRs'
+        });
+        return z.NEVER;
+      }
+    }),
     SESSION_COOKIE_NAME: z.string().min(1).max(64).default('cubic_session'),
     SESSION_COOKIE_SECURE: booleanString,
     SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
@@ -35,6 +46,12 @@ const envSchema = z
 export type AppEnv = z.infer<typeof envSchema>;
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
+  if (source.TRUST_PROXY_HOPS !== undefined) {
+    throw new Error(
+      'Invalid Cubic API environment: TRUST_PROXY_HOPS has been removed; use TRUST_PROXY_CIDRS with explicit IP CIDRs'
+    );
+  }
+
   const result = envSchema.safeParse(source);
 
   if (!result.success) {

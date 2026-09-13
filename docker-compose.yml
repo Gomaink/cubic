@@ -70,7 +70,7 @@ services:
       API_PORT: 3001
       DATABASE_URL: postgresql://${POSTGRES_USER:-cubic}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required; set a strong unique value}@db:5432/${POSTGRES_DB:-cubic}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
-      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      TRUST_PROXY_CIDRS: ${TRUST_PROXY_CIDRS:?TRUST_PROXY_CIDRS is required; set it to the dedicated Cubic network CIDR}
       SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-cubic_session}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:?SESSION_COOKIE_SECURE is required and must be true for production}
       SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-30}
@@ -110,6 +110,7 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       API_INTERNAL_URL: http://api:3001
+      TRUST_PROXY_CIDRS: ${TRUST_PROXY_CIDRS:?TRUST_PROXY_CIDRS is required; set it to the dedicated Cubic network CIDR}
       BODY_SIZE_LIMIT: 4M
     depends_on:
       api:

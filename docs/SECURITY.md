@@ -39,7 +39,37 @@ The API has a general per-client rate limit and stricter limits for authenticati
 
 ## Reverse proxies
 
-`TRUST_PROXY_HOPS` defaults to one hop to match the SvelteKit/Traefik -> Cubic topology. The default Docker Compose stack does not publish the API port to the host, so untrusted clients cannot connect to it directly. If you intentionally publish the API port, review proxy trust and rate-limit identity before exposing it.
+Numeric proxy-hop trust is forbidden. `TRUST_PROXY_CIDRS` is a required,
+comma-separated list of explicit IPv4 or IPv6 CIDRs. Malformed entries and the
+removed `TRUST_PROXY_HOPS` setting fail startup. In production, configure the
+smallest dedicated Docker network that contains Cubic's web-to-API hop and the
+host bridge gateway used by the external reverse proxy. Do not configure all
+RFC1918 space merely because the deployment uses private addresses.
+
+For the validated deployment, the request path is:
+
+```text
+browser -> HTTPS Traefik -> host-published Cubic web -> private Cubic API
+```
+
+Traefik terminates TLS and reaches the published web port through the Cubic
+bridge gateway. The web proxy validates its immediate peer against
+`TRUST_PROXY_CIDRS`, walks `X-Forwarded-For` from the nearest hop to the first
+untrusted address, and emits a single canonical client address, protocol and
+host to the API. Headers supplied through an untrusted direct connection are
+discarded. Fastify then trusts canonical forwarding only when its immediate
+peer is within the configured boundary. The API remains unpublished by the
+default Compose stack.
+
+Inspect the actual network before setting the value:
+
+```bash
+docker network inspect <compose-project>_cubic
+```
+
+The checked-in development env uses only loopback CIDRs for host-run Vite and
+Fastify. A full development Compose stack needs CIDRs matching its actual
+private network instead; never carry a development value into production.
 
 ## Deployment secrets and fail-closed startup
 
@@ -51,6 +81,7 @@ configuration:
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
 - `SESSION_COOKIE_SECURE` (must be `true` in production)
+- `TRUST_PROXY_CIDRS` (must match the deployment's dedicated Cubic network)
 
 Missing or empty values cause `docker compose config` and startup to fail with
 the name of the missing setting. Secret values are not included in those error
