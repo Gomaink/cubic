@@ -48,16 +48,26 @@ docs/           architecture, security, roadmap and migration notes
 
 ```bash
 cp .env.example .env
-# Change POSTGRES_PASSWORD before exposing this stack.
+# Fill every blank required credential with a unique value.
+# Generate URL-safe values with: openssl rand -hex 32
+docker compose config -q
 docker compose up -d --build
 ```
 
-The one-shot `migrate` service currently applies alpha schemas with `drizzle-kit push` before the API starts. Committed SQL migrations replace this convenience path before v2 stable.
+The default Compose configuration is production-oriented and fails during
+configuration when `POSTGRES_PASSWORD`, `LIVEKIT_API_KEY`,
+`LIVEKIT_API_SECRET` or `SESSION_COOKIE_SECURE` is missing or empty. The API
+also refuses to start in production unless `SESSION_COOKIE_SECURE=true`.
+Repository examples are public information and must never be reused as
+production credentials.
+
+The one-shot `migrate` service applies the committed, versioned Drizzle
+migrations before the API starts.
 
 Open:
 
-- Web: `http://localhost:3000`
-- API health from the host: `http://localhost:3001/api/v1/health`
+- Web: `http://localhost:3010`
+- API health through the web proxy: `http://localhost:3010/api/v1/health`
 
 Create an account at `/register`, then verify protected routing at `/app`.
 
@@ -65,39 +75,49 @@ Check the stack:
 
 ```bash
 docker compose ps
-curl http://localhost:3001/api/v1/health
+curl http://localhost:3010/api/v1/health
 ```
 
 ## Cookies and HTTPS
 
-For local/LAN HTTP testing:
-
-```env
-SESSION_COOKIE_SECURE=false
-```
-
-When Cubic is behind Traefik or another HTTPS reverse proxy:
+When Cubic is behind Traefik or another HTTPS reverse proxy, production must
+use:
 
 ```env
 SESSION_COOKIE_SECURE=true
 TRUST_PROXY_HOPS=1
 ```
 
-Do not expose a production login over plain HTTP. The Compose stack binds the host API port to `127.0.0.1` by default; browser traffic goes through the SvelteKit `/api/*` proxy.
+Do not expose a production login over plain HTTP. The API is not published to
+the host by the default Compose stack; browser traffic goes through the
+SvelteKit `/api/*` proxy. Plain-HTTP development is isolated in the explicitly
+opt-in development configuration described below.
 
 ## Local development
 
 Requirements: Node.js 24, npm 11+, PostgreSQL 18 (or Docker for PostgreSQL).
 
 ```bash
-cp .env.example .env
-npm install
+npm ci
 
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
-export DATABASE_URL='postgresql://cubic:change-me-in-production@localhost:5432/cubic'
-npm run db:push
+docker compose --env-file docker-compose.dev.env \
+  -f docker-compose.yml -f docker-compose.dev.yml up -d db
+export DATABASE_URL='postgresql://cubic:cubic-local-development-only-password@localhost:5432/cubic'
+export LIVEKIT_PUBLIC_URL='ws://localhost:7880'
+export LIVEKIT_API_KEY='CUBIC_LOCAL_DEVELOPMENT_KEY'
+export LIVEKIT_API_SECRET='cubic-local-development-only-secret-000000000000'
+export SESSION_COOKIE_SECURE='false'
+npm run db:migrate
 npm run dev
 ```
+
+`docker-compose.dev.env` contains public, development-only credentials. It is
+loaded only when named with `--env-file`; never use it for an exposed or
+production deployment. To run the complete local HTTP stack, use the same
+command without the trailing `db` service name and add `--build` as needed.
+
+See [`docs/SECURITY.md`](docs/SECURITY.md) for credential generation and
+rotation guidance.
 
 ## Useful commands
 

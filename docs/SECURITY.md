@@ -39,7 +39,62 @@ The API has a general per-client rate limit and stricter limits for authenticati
 
 ## Reverse proxies
 
-`TRUST_PROXY_HOPS` defaults to one hop to match the SvelteKit/Traefik -> Cubic topology. The Docker Compose host binding for the API defaults to `127.0.0.1`, so untrusted clients cannot directly inject forwarded-address headers. If you intentionally bind the API to `0.0.0.0`, review proxy trust and rate-limit identity before exposing it.
+`TRUST_PROXY_HOPS` defaults to one hop to match the SvelteKit/Traefik -> Cubic topology. The default Docker Compose stack does not publish the API port to the host, so untrusted clients cannot connect to it directly. If you intentionally publish the API port, review proxy trust and rate-limit identity before exposing it.
+
+## Deployment secrets and fail-closed startup
+
+The default `docker-compose.yml` is production-oriented. These values must be
+set explicitly in the operator's private `.env` before Compose can resolve the
+configuration:
+
+- `POSTGRES_PASSWORD`
+- `LIVEKIT_API_KEY`
+- `LIVEKIT_API_SECRET`
+- `SESSION_COOKIE_SECURE` (must be `true` in production)
+
+Missing or empty values cause `docker compose config` and startup to fail with
+the name of the missing setting. Secret values are not included in those error
+messages. The API independently rejects production startup when secure cookies
+are disabled.
+
+Generate unique, URL-safe credentials locally. For example, run
+`openssl rand -hex 32` separately for the PostgreSQL password and LiveKit
+secret, and `openssl rand -hex 16` for the LiveKit key. Paste each output into
+the private `.env`; do not paste outputs into logs, issues or shell history on
+shared systems. Files and examples in this repository are public and no value
+copied from them is a production secret.
+
+The checked-in `docker-compose.dev.env` and `docker-compose.dev.yml` are an
+explicit local-development path. Their public credentials and insecure cookie
+setting are safe only for an isolated local HTTP environment. They are not
+loaded by the default `docker compose` command.
+
+### Rotation overview
+
+Plan credential rotation during a maintenance window, take and verify a backup,
+and keep a tested recovery path. Never recreate or remove the PostgreSQL volume
+as part of rotation.
+
+- PostgreSQL: change the existing role password in PostgreSQL, update the
+  private `.env` to the same value, then recreate only the migrate/API services
+  and verify migrations, health and application data. Coordinate these steps
+  closely so new database connections do not remain locked out.
+- LiveKit: replace the key and secret in the private `.env`, then recreate the
+  LiveKit and API services together. Existing short-lived LiveKit tokens and
+  calls may need to reconnect; verify token issuance and media joins afterward.
+
+Do not rotate credentials merely because repository defaults changed. Existing
+persistent deployments using unique private credentials can continue using
+those credentials.
+
+## HTTPS cookies
+
+HTTPS deployments require `SESSION_COOKIE_SECURE=true`, so browsers transmit
+the session cookie only over secure connections. TLS normally terminates at a
+trusted reverse proxy, which forwards traffic to Cubic's internal web service.
+The plain-HTTP development exception is intentionally limited to API processes
+running with `NODE_ENV=development` through the documented development
+configuration.
 
 ## Uploads
 

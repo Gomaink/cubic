@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-cubic}
       POSTGRES_USER: ${POSTGRES_USER:-cubic}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cubic-dev-password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required; set a strong unique value}
     volumes:
       - cubic_postgres:/var/lib/postgresql
     healthcheck:
@@ -24,7 +24,7 @@ services:
       context: .
       dockerfile: infra/docker/migrate.Dockerfile
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-cubic}:${POSTGRES_PASSWORD:-cubic-dev-password}@db:5432/${POSTGRES_DB:-cubic}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cubic}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required; set a strong unique value}@db:5432/${POSTGRES_DB:-cubic}
     depends_on:
       db:
         condition: service_healthy
@@ -33,7 +33,7 @@ services:
       - cubic
 
   livekit:
-    image: livekit/livekit-server:v1.13.5
+    image: livekit/livekit-server:v1.13.6
     restart: unless-stopped
     environment:
       LIVEKIT_CONFIG: |
@@ -47,7 +47,7 @@ services:
           allow_tcp_fallback: true
           node_ip: ${LIVEKIT_NODE_IP:-192.168.15.172}
         keys:
-          ${LIVEKIT_API_KEY:-CUBICDEVKEY}: ${LIVEKIT_API_SECRET:-cubic-development-secret-change-me-0123456789}
+          ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required; set a strong unique value}: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required; set a strong unique value}
         turn:
           enabled: ${LIVEKIT_TURN_ENABLED:-false}
           udp_port: 3478
@@ -68,19 +68,19 @@ services:
       NODE_ENV: production
       API_HOST: 0.0.0.0
       API_PORT: 3001
-      DATABASE_URL: postgresql://${POSTGRES_USER:-cubic}:${POSTGRES_PASSWORD:-cubic-dev-password}@db:5432/${POSTGRES_DB:-cubic}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cubic}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required; set a strong unique value}@db:5432/${POSTGRES_DB:-cubic}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
       SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-cubic_session}
-      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:?SESSION_COOKIE_SECURE is required and must be true for production}
       SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-30}
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-true}
       MEDIA_ROOT: ${MEDIA_ROOT:-/data/media}
       GROUP_AVATAR_MAX_BYTES: ${GROUP_AVATAR_MAX_BYTES:-2097152}
       ATTACHMENT_MAX_BYTES: ${ATTACHMENT_MAX_BYTES:-26214400}
       LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-ws://localhost:7880}
-      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-CUBICDEVKEY}
-      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-cubic-development-secret-change-me-0123456789}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required; set a strong unique value}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required; set a strong unique value}
     depends_on:
       migrate:
         condition: service_completed_successfully

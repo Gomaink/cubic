@@ -162,6 +162,29 @@ Automate dependency and static-code scanning where useful.
 
 Never assume a library is safe solely because it is popular.
 
+## Deployment credential configuration
+
+Threat: an operator starts the public Compose configuration without supplying
+private credentials, causing Cubic to use repository-known database or LiveKit
+credentials. A second failure mode is an HTTPS deployment that silently emits
+session cookies without the `Secure` attribute.
+
+Controls:
+
+- production Compose requires non-empty PostgreSQL and LiveKit credentials
+  during interpolation and contains no secret fallback values
+- the production API refuses to start unless secure session cookies are enabled
+- example production secret fields are blank
+- public development credentials and plain-HTTP cookies require an explicitly
+  selected development env file and override
+- startup validation identifies invalid setting names without logging their
+  values
+
+Residual risk: an operator can still choose a weak or reused private secret,
+expose a development deployment, mishandle the `.env`, or misconfigure TLS and
+proxy routing. Documentation, unique random credential generation and careful
+rotation reduce these operator-controlled risks but cannot eliminate them.
+
 ## Out of scope / unavoidable limits
 
 If an endpoint device is fully compromised, malware may control the browser,
@@ -169,4 +192,3 @@ capture input/screen contents or act through an authenticated session.
 
 Cubic should nevertheless prevent such compromise from trivially yielding a
 long-lived portable account credential.
-
