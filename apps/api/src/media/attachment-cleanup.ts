@@ -1,11 +1,9 @@
 import type { Database } from '@cubic/database';
-import type { AttachmentStore } from './attachments.js';
 
 const CLEANUP_LOCK_NAME = 'cubic:stale-pending-attachment-cleanup';
 
 type CleanupLogger = {
   error(bindings: Record<string, unknown>, message: string): void;
-  warn(bindings: Record<string, unknown>, message: string): void;
 };
 
 export type AttachmentCleanupResult = {
@@ -17,7 +15,6 @@ export type AttachmentCleanupResult = {
 
 export async function cleanupStalePendingBatch(options: {
   database: Database;
-  attachmentStore: AttachmentStore;
   staleAgeMs: number;
   batchSize: number;
   logger: CleanupLogger;
@@ -38,8 +35,8 @@ export async function cleanupStalePendingBatch(options: {
       return { lockAcquired: false, selected: 0, deleted: 0, failed: 0 };
     }
 
-    const staleResult = await client.query<{ id: string; storage_key: string }>(
-      `select id, storage_key
+    const staleResult = await client.query<{ id: string }>(
+      `select id
          from attachments
         where message_id is null
           and created_at < $1
@@ -49,32 +46,13 @@ export async function cleanupStalePendingBatch(options: {
       [cutoff, options.batchSize]
     );
 
-    const deletableIds: string[] = [];
-    let failed = 0;
-
-    for (const row of staleResult.rows) {
-      try {
-        await options.attachmentStore.delete(row.storage_key);
-        deletableIds.push(row.id);
-      } catch (error) {
-        failed += 1;
-        options.logger.warn(
-          {
-            attachmentId: row.id,
-            errorCode: (error as NodeJS.ErrnoException).code ?? 'UNKNOWN'
-          },
-          'Could not delete a stale pending attachment file; it will be retried'
-        );
-      }
-    }
-
     let deleted = 0;
-    if (deletableIds.length > 0) {
+    if (staleResult.rows.length > 0) {
       const deleteResult = await client.query(
         `delete from attachments
           where id = any($1::uuid[])
             and message_id is null`,
-        [deletableIds]
+        [staleResult.rows.map((row) => row.id)]
       );
       deleted = deleteResult.rowCount ?? 0;
     }
@@ -84,7 +62,7 @@ export async function cleanupStalePendingBatch(options: {
       lockAcquired: true,
       selected: staleResult.rowCount ?? staleResult.rows.length,
       deleted,
-      failed
+      failed: 0
     };
   } catch (error) {
     await client.query('rollback').catch(() => {});

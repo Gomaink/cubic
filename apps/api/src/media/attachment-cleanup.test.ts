@@ -30,7 +30,7 @@ class CleanupDatabase {
         if (normalized.includes('pg_try_advisory_xact_lock')) {
           return { rows: [{ acquired: this.locked }], rowCount: 1 };
         }
-        if (normalized.startsWith('select id, storage_key from attachments')) {
+        if (normalized.startsWith('select id from attachments')) {
           const cutoff = params[0] as Date;
           const batchSize = params[1] as number;
           const rows = this.rows
@@ -73,11 +73,8 @@ test('cleanup deletes only stale pending attachments and preserves recent or bou
     row('00000000-0000-4000-8000-000000000002', recent),
     row('00000000-0000-4000-8000-000000000003', old, 'bound-message')
   ]);
-  const deletedKeys: string[] = [];
-
   const result = await cleanupStalePendingBatch({
     database: database as never,
-    attachmentStore: { delete: async (key: string) => { deletedKeys.push(key); } } as never,
     staleAgeMs: 24 * 60 * 60 * 1000,
     batchSize: 10,
     logger: logger(),
@@ -85,7 +82,6 @@ test('cleanup deletes only stale pending attachments and preserves recent or bou
   });
 
   assert.deepEqual(result, { lockAcquired: true, selected: 1, deleted: 1, failed: 0 });
-  assert.deepEqual(deletedKeys, ['00000000-0000-4000-8000-000000000001']);
   assert.deepEqual(database.rows.map((item) => item.id), [
     '00000000-0000-4000-8000-000000000002',
     '00000000-0000-4000-8000-000000000003'
@@ -98,11 +94,8 @@ test('cleanup drains a backlog over bounded batch iterations', async () => {
     row('00000000-0000-4000-8000-000000000002', old),
     row('00000000-0000-4000-8000-000000000003', old)
   ]);
-  const store = { delete: async () => {} };
-
   const first = await cleanupStalePendingBatch({
     database: database as never,
-    attachmentStore: store as never,
     staleAgeMs: 1,
     batchSize: 2,
     logger: logger(),
@@ -110,7 +103,6 @@ test('cleanup drains a backlog over bounded batch iterations', async () => {
   });
   const second = await cleanupStalePendingBatch({
     database: database as never,
-    attachmentStore: store as never,
     staleAgeMs: 1,
     batchSize: 2,
     logger: logger(),
@@ -122,32 +114,20 @@ test('cleanup drains a backlog over bounded batch iterations', async () => {
   assert.equal(database.rows.length, 0);
 });
 
-test('cleanup treats a missing file as safely deletable and retries other file failures later', async () => {
+test('cleanup is DB-only and leaves filesystem retry responsibility to the deletion outbox', async () => {
   const missingId = '00000000-0000-4000-8000-000000000001';
   const failedId = '00000000-0000-4000-8000-000000000002';
   const database = new CleanupDatabase([row(missingId, old), row(failedId, old)]);
-  const testLogger = logger();
-
   const result = await cleanupStalePendingBatch({
     database: database as never,
-    attachmentStore: {
-      delete: async (key: string) => {
-        if (key === failedId) {
-          const error = new Error('failure') as NodeJS.ErrnoException;
-          error.code = 'EACCES';
-          throw error;
-        }
-      }
-    } as never,
     staleAgeMs: 1,
     batchSize: 10,
-    logger: testLogger,
+    logger: logger(),
     now
   });
 
-  assert.deepEqual(result, { lockAcquired: true, selected: 2, deleted: 1, failed: 1 });
-  assert.deepEqual(database.rows.map((item) => item.id), [failedId]);
-  assert.deepEqual(testLogger.warnings, [{ attachmentId: failedId, errorCode: 'EACCES' }]);
+  assert.deepEqual(result, { lockAcquired: true, selected: 2, deleted: 2, failed: 0 });
+  assert.deepEqual(database.rows, []);
 });
 
 test('cleanup skips work when another API instance owns the PostgreSQL cleanup lock', async () => {
@@ -156,7 +136,6 @@ test('cleanup skips work when another API instance owns the PostgreSQL cleanup l
 
   const result = await cleanupStalePendingBatch({
     database: database as never,
-    attachmentStore: { delete: async () => { throw new Error('must not run'); } } as never,
     staleAgeMs: 1,
     batchSize: 10,
     logger: logger(),

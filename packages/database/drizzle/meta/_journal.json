@@ -50,6 +50,13 @@
       "when": 1789238856897,
       "tag": "0006_bent_dakota_north",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789320872191,
+      "tag": "0007_purple_exodus",
+      "breakpoints": true
     }
   ]
 }

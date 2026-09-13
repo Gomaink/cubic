@@ -87,6 +87,7 @@ function rawAttachment(
 class RouteDatabase {
   messages = new Map<string, RawMessage>();
   attachments = [rawAttachment()];
+  deletionKeys: string[] = [];
   reactions: Array<{ message_id: string; user_id: string; reaction: string }> = [];
   selectResults: any[][] = [];
   nextMessage = 10;
@@ -94,6 +95,7 @@ class RouteDatabase {
     messages: Map<string, RawMessage>;
     attachments: ReturnType<typeof rawAttachment>[];
     nextMessage: number;
+    deletionKeys: string[];
   } | null = null;
 
   db = {
@@ -127,7 +129,8 @@ class RouteDatabase {
       this.transactionSnapshot = {
         messages: new Map([...this.messages].map(([id, row]) => [id, { ...row }])),
         attachments: this.attachments.map((item) => ({ ...item })),
-        nextMessage: this.nextMessage
+        nextMessage: this.nextMessage,
+        deletionKeys: [...this.deletionKeys]
       };
       return this.result();
     }
@@ -140,6 +143,7 @@ class RouteDatabase {
         this.messages = this.transactionSnapshot.messages;
         this.attachments = this.transactionSnapshot.attachments;
         this.nextMessage = this.transactionSnapshot.nextMessage;
+        this.deletionKeys = this.transactionSnapshot.deletionKeys;
         this.transactionSnapshot = null;
       }
       return this.result();
@@ -220,6 +224,13 @@ class RouteDatabase {
       if (index < 0) return this.result();
       const [removed] = this.reactions.splice(index, 1);
       return this.result([{ reaction: removed!.reaction }]);
+    }
+
+    if (normalized.startsWith('delete from attachments where message_id')) {
+      const removed = this.attachments.filter((item) => item.message_id === params[0]);
+      this.attachments = this.attachments.filter((item) => item.message_id !== params[0]);
+      this.deletionKeys.push(...removed.map((item) => item.storage_key));
+      return this.result(removed.map((item) => ({ id: item.id })));
     }
 
     if (normalized.startsWith('insert into messages')) {
@@ -430,9 +441,15 @@ test('editing enforces ownership, deletion state, body rules, and keeps immutabl
   }
 });
 
-test('soft deletion enforces ownership, rejects repeats, persists in history, and emits realtime state', async () => {
+test('soft deletion removes attachment metadata, preserves replies and tombstone, and emits realtime state', async () => {
   const database = new RouteDatabase();
   database.messages.set(firstMessage, rawMessage());
+  database.messages.set(secondMessage, rawMessage({
+    id: secondMessage,
+    client_message_id: secondClient,
+    reply_to_message_id: firstMessage,
+    sender_id: peer
+  }));
   database.attachments[0]!.message_id = firstMessage;
   database.selectResults.push([{ userId: me }]);
   const harness = await routeHarness(database);
@@ -445,7 +462,10 @@ test('soft deletion enforces ownership, rejects repeats, persists in history, an
   assert.equal(response.statusCode, 200);
   assert.equal(response.payload.message.body, '');
   assert.ok(response.payload.message.deletedAt);
-  assert.equal(response.payload.message.attachments[0].id, attachmentId);
+  assert.deepEqual(response.payload.message.attachments, []);
+  assert.deepEqual(database.attachments, []);
+  assert.deepEqual(database.deletionKeys, ['fixture-key']);
+  assert.equal(database.messages.get(secondMessage)?.reply_to_message_id, firstMessage);
   assert.deepEqual(events, [response.payload.message]);
 
   database.selectResults.push([{ userId: me }]);
@@ -468,6 +488,26 @@ test('soft deletion enforces ownership, rejects repeats, persists in history, an
     params: { id: conversation, messageId: firstMessage }
   });
   assert.equal(denied.statusCode, 403);
+});
+
+test('soft deletion removes every attachment from a multi-attachment message', async () => {
+  const database = new RouteDatabase();
+  database.messages.set(firstMessage, rawMessage());
+  database.attachments[0]!.message_id = firstMessage;
+  database.attachments.push(rawAttachment(firstMessage, 'application/octet-stream', {
+    id: secondAttachmentId,
+    storage_key: 'fixture-key-2'
+  }));
+  database.selectResults.push([{ userId: me }]);
+  const harness = await routeHarness(database);
+
+  const response = await harness.invoke('DELETE', '/:id/messages/:messageId', {
+    params: { id: conversation, messageId: firstMessage }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.payload.message.attachments, []);
+  assert.deepEqual(database.deletionKeys, ['fixture-key', 'fixture-key-2']);
 });
 
 test('normal text, attachment-only, text-plus-attachment, and client idempotency retain their payloads', async () => {

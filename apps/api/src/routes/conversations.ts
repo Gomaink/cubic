@@ -648,17 +648,35 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     if (current.deletedAt) return reply.code(409).send({ error: 'Message is already deleted.' });
 
     const deletedAt = new Date();
-    const deleted = await options.database.pool.query(
-      `update messages
-          set body = '', deleted_at = $1
-        where id = $2
-          and conversation_id = $3
-          and sender_id = $4
-          and deleted_at is null
-      returning id`,
-      [deletedAt, current.id, params.data.id, me]
-    );
-    if (!deleted.rowCount) return reply.code(409).send({ error: 'Message is already deleted.' });
+    const client = await options.database.pool.connect();
+    let deleted = false;
+    try {
+      await client.query('begin');
+      const result = await client.query(
+        `update messages
+            set body = '', deleted_at = $1
+          where id = $2
+            and conversation_id = $3
+            and sender_id = $4
+            and deleted_at is null
+        returning id`,
+        [deletedAt, current.id, params.data.id, me]
+      );
+      if (result.rowCount) {
+        await client.query(
+          'delete from attachments where message_id = $1',
+          [current.id]
+        );
+        deleted = true;
+      }
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+    if (!deleted) return reply.code(409).send({ error: 'Message is already deleted.' });
 
     const changed = await fetchMessage(options.database, params.data.id, current.id);
     if (!changed) throw new Error('Failed to load deleted message.');

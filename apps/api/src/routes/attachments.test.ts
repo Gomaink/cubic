@@ -79,7 +79,7 @@ class AttachmentRouteDatabase {
       if (normalized.startsWith('delete from attachments')) {
         const before = this.attachments.length;
         this.attachments = this.attachments.filter((item) =>
-          item.id !== params[0] || item.message_id !== null
+          item.id !== params[0] || item.uploader_id !== params[1] || item.message_id !== null
         );
         return { rows: [], rowCount: before - this.attachments.length };
       }
@@ -96,12 +96,14 @@ async function routeHarness(
   overrides: {
     assertFreeSpace?: () => Promise<void>;
     save?: () => Promise<any>;
-    insertPendingAttachment?: () => Promise<any>;
+    insertPendingAttachment?: (...args: any[]) => Promise<any>;
+    open?: (key: string) => unknown;
   } = {}
 ) {
   const handlers = new Map<string, Handler>();
   const routeOptions = new Map<string, any>();
   const deletedKeys: string[] = [];
+  const publishedKeys: string[] = [];
   const app = {
     get(path: string, options: unknown, handler: Handler) { routeOptions.set(`GET ${path}`, options); handlers.set(`GET ${path}`, handler); },
     post(path: string, options: unknown, handler: Handler) { routeOptions.set(`POST ${path}`, options); handlers.set(`POST ${path}`, handler); },
@@ -117,8 +119,10 @@ async function routeHarness(
     height: null
   };
   const store = {
-    open: (key: string) => Readable.from([key]),
+    open: overrides.open ?? ((key: string) => Readable.from([key])),
     delete: async (key: string) => { deletedKeys.push(key); },
+    discardStaged: async (key: string) => { deletedKeys.push(key); },
+    publish: async (key: string) => { publishedKeys.push(key); },
     assertFreeSpace: overrides.assertFreeSpace ?? (async () => {}),
     save: overrides.save ?? (async () => stored)
   };
@@ -130,13 +134,21 @@ async function routeHarness(
     attachmentPendingMaxCount: 20,
     attachmentPendingMaxBytes: 10_000,
     attachmentMinFreeBytes: 1024,
-    insertPendingAttachment: overrides.insertPendingAttachment ?? (async () => ({
-      ...attachment({ storage_key: stored.key, original_name: stored.originalName }),
-      kind: stored.kind,
-      width: stored.width,
-      height: stored.height,
-      created_at: new Date('2026-09-13T12:00:00.000Z')
-    }))
+    insertPendingAttachment: overrides.insertPendingAttachment ?? (async (
+      _database: unknown,
+      _attachment: unknown,
+      _quota: unknown,
+      beforeCommit?: () => Promise<void>
+    ) => {
+      await beforeCommit?.();
+      return {
+        ...attachment({ storage_key: stored.key, original_name: stored.originalName }),
+        kind: stored.kind,
+        width: stored.width,
+        height: stored.height,
+        created_at: new Date('2026-09-13T12:00:00.000Z')
+      };
+    })
   });
 
   async function invoke(
@@ -169,7 +181,7 @@ async function routeHarness(
     return state;
   }
 
-  return { database, deletedKeys, routeOptions, invoke };
+  return { database, deletedKeys, publishedKeys, routeOptions, invoke };
 }
 
 test('pending attachment content is visible only to its uploader', async () => {
@@ -209,7 +221,7 @@ test('pending attachment deletion is available only to its uploader', async () =
   const response = await harness.invoke('DELETE', '/attachments/:id');
   assert.equal(response.statusCode, 204);
   assert.equal(harness.database.attachments.length, 0);
-  assert.deepEqual(harness.deletedKeys, ['50000000-0000-4000-8000-000000000099']);
+  assert.deepEqual(harness.deletedKeys, []);
 });
 
 test('bound attachment requires current conversation membership even for its uploader', async () => {
@@ -247,6 +259,20 @@ test('recognized image and video types retain inline content serving', async () 
   }
 });
 
+test('missing attachment bytes return generic not-found semantics while preserving metadata', async () => {
+  const database = new AttachmentRouteDatabase();
+  const harness = await routeHarness(database, {
+    open: async () => {
+      throw Object.assign(new Error('internal path omitted'), { code: 'ENOENT' });
+    }
+  });
+
+  const response = await harness.invoke('GET', '/attachments/:id/content');
+  assert.equal(response.statusCode, 404);
+  assert.deepEqual(response.payload, { error: 'Attachment not found.' });
+  assert.equal(database.attachments.length, 1);
+});
+
 test('normal upload persists a pending row and returns its attachment DTO', async () => {
   const harness = await routeHarness();
   const response = await harness.invoke('POST', '/conversations/:id/attachments');
@@ -254,6 +280,7 @@ test('normal upload persists a pending row and returns its attachment DTO', asyn
   assert.equal(response.statusCode, 201);
   assert.equal(response.payload.attachment.originalName, 'upload.txt');
   assert.deepEqual(harness.deletedKeys, []);
+  assert.deepEqual(harness.publishedKeys, ['50000000-0000-4000-8000-000000000099']);
   assert.equal(
     harness.routeOptions.get('POST /conversations/:id/attachments').config.rateLimit,
     false
@@ -295,6 +322,27 @@ test('pending byte quota has distinct diagnostics and DB insertion failures remo
     }
     assert.deepEqual(harness.deletedKeys, ['50000000-0000-4000-8000-000000000099']);
   }
+});
+
+test('database failure after atomic publication preserves a recoverable filesystem orphan', async () => {
+  const harness = await routeHarness(new AttachmentRouteDatabase(), {
+    insertPendingAttachment: async (
+      _database: unknown,
+      _attachment: unknown,
+      _quota: unknown,
+      beforeCommit?: () => Promise<void>
+    ) => {
+      await beforeCommit?.();
+      throw Object.assign(new Error('commit failed'), { code: '08006' });
+    }
+  });
+
+  await assert.rejects(
+    () => harness.invoke('POST', '/conversations/:id/attachments'),
+    /commit failed/
+  );
+  assert.deepEqual(harness.publishedKeys, ['50000000-0000-4000-8000-000000000099']);
+  assert.deepEqual(harness.deletedKeys, []);
 });
 
 test('storage reserve rejection occurs before a file is written', async () => {

@@ -22,6 +22,14 @@ import {
   AttachmentCleanupScheduler,
   cleanupStalePendingBatch
 } from './media/attachment-cleanup.js';
+import {
+  AttachmentDeletionScheduler,
+  runAttachmentDeletionBatch
+} from './media/attachment-deletions.js';
+import {
+  AttachmentReconciler,
+  AttachmentReconciliationScheduler
+} from './media/attachment-reconciliation.js';
 import { ATTACHMENT_DEFAULTS } from './config/env.js';
 
 export interface CreateAppOptions {
@@ -43,6 +51,15 @@ export interface CreateAppOptions {
   attachmentCleanupIntervalMs?: number;
   attachmentStaleAgeMs?: number;
   attachmentCleanupBatchSize?: number;
+  attachmentDeletionIntervalMs?: number;
+  attachmentDeletionBatchSize?: number;
+  attachmentDeletionLeaseMs?: number;
+  attachmentDeletionRetryBaseMs?: number;
+  attachmentDeletionRetryMaxMs?: number;
+  attachmentReconciliationIntervalMs?: number;
+  attachmentOrphanGraceMs?: number;
+  attachmentReconciliationScanBatchSize?: number;
+  attachmentReconciliationMissingBatchSize?: number;
   livekitPublicUrl: string;
   livekitApiKey: string;
   livekitApiSecret: string;
@@ -167,7 +184,6 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     logger: app.log,
     cleanup: () => cleanupStalePendingBatch({
       database: options.database,
-      attachmentStore,
       staleAgeMs: options.attachmentStaleAgeMs ?? ATTACHMENT_DEFAULTS.staleAgeMs,
       batchSize:
         options.attachmentCleanupBatchSize ?? ATTACHMENT_DEFAULTS.cleanupBatchSize,
@@ -176,6 +192,49 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   });
   app.addHook('onReady', async () => attachmentCleanupScheduler.start());
   app.addHook('onClose', async () => attachmentCleanupScheduler.stop());
+
+  const attachmentDeletionScheduler = new AttachmentDeletionScheduler({
+    intervalMs:
+      options.attachmentDeletionIntervalMs ?? ATTACHMENT_DEFAULTS.deletionIntervalMs,
+    logger: app.log,
+    run: () => runAttachmentDeletionBatch({
+      database: options.database,
+      attachmentStore,
+      batchSize:
+        options.attachmentDeletionBatchSize ?? ATTACHMENT_DEFAULTS.deletionBatchSize,
+      leaseMs: options.attachmentDeletionLeaseMs ?? ATTACHMENT_DEFAULTS.deletionLeaseMs,
+      baseBackoffMs:
+        options.attachmentDeletionRetryBaseMs ?? ATTACHMENT_DEFAULTS.deletionRetryBaseMs,
+      maximumBackoffMs:
+        options.attachmentDeletionRetryMaxMs ?? ATTACHMENT_DEFAULTS.deletionRetryMaxMs,
+      logger: app.log
+    })
+  });
+  app.addHook('onReady', async () => attachmentDeletionScheduler.start());
+  app.addHook('onClose', async () => attachmentDeletionScheduler.stop());
+
+  const attachmentReconciler = new AttachmentReconciler({
+    database: options.database,
+    attachmentStore,
+    gracePeriodMs:
+      options.attachmentOrphanGraceMs ?? ATTACHMENT_DEFAULTS.orphanGraceMs,
+    scanBatchSize:
+      options.attachmentReconciliationScanBatchSize ??
+      ATTACHMENT_DEFAULTS.reconciliationScanBatchSize,
+    missingBatchSize:
+      options.attachmentReconciliationMissingBatchSize ??
+      ATTACHMENT_DEFAULTS.reconciliationMissingBatchSize,
+    logger: app.log
+  });
+  const attachmentReconciliationScheduler = new AttachmentReconciliationScheduler({
+    intervalMs:
+      options.attachmentReconciliationIntervalMs ??
+      ATTACHMENT_DEFAULTS.reconciliationIntervalMs,
+    reconciler: attachmentReconciler,
+    logger: app.log
+  });
+  app.addHook('onReady', async () => attachmentReconciliationScheduler.start());
+  app.addHook('onClose', async () => attachmentReconciliationScheduler.stop());
 
   const mediaStore = new LocalMediaStore(options.mediaRoot ?? '/data/media');
 

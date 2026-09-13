@@ -86,6 +86,15 @@ test('attachment quota, storage, rate, and cleanup defaults are finite and docum
   assert.equal(env.ATTACHMENT_CLEANUP_INTERVAL_MS, ATTACHMENT_DEFAULTS.cleanupIntervalMs);
   assert.equal(env.ATTACHMENT_STALE_AGE_MS, ATTACHMENT_DEFAULTS.staleAgeMs);
   assert.equal(env.ATTACHMENT_CLEANUP_BATCH_SIZE, ATTACHMENT_DEFAULTS.cleanupBatchSize);
+  assert.equal(env.ATTACHMENT_DELETION_INTERVAL_MS, ATTACHMENT_DEFAULTS.deletionIntervalMs);
+  assert.equal(env.ATTACHMENT_DELETION_BATCH_SIZE, ATTACHMENT_DEFAULTS.deletionBatchSize);
+  assert.equal(env.ATTACHMENT_DELETION_LEASE_MS, ATTACHMENT_DEFAULTS.deletionLeaseMs);
+  assert.equal(env.ATTACHMENT_DELETION_RETRY_BASE_MS, ATTACHMENT_DEFAULTS.deletionRetryBaseMs);
+  assert.equal(env.ATTACHMENT_DELETION_RETRY_MAX_MS, ATTACHMENT_DEFAULTS.deletionRetryMaxMs);
+  assert.equal(env.ATTACHMENT_RECONCILIATION_INTERVAL_MS, ATTACHMENT_DEFAULTS.reconciliationIntervalMs);
+  assert.equal(env.ATTACHMENT_ORPHAN_GRACE_MS, ATTACHMENT_DEFAULTS.orphanGraceMs);
+  assert.equal(env.ATTACHMENT_RECONCILIATION_SCAN_BATCH_SIZE, ATTACHMENT_DEFAULTS.reconciliationScanBatchSize);
+  assert.equal(env.ATTACHMENT_RECONCILIATION_MISSING_BATCH_SIZE, ATTACHMENT_DEFAULTS.reconciliationMissingBatchSize);
 });
 
 test('attachment quota and cleanup configuration is strictly parsed', () => {
@@ -97,7 +106,16 @@ test('attachment quota and cleanup configuration is strictly parsed', () => {
     'ATTACHMENT_UPLOAD_RATE_LIMIT_WINDOW_MS',
     'ATTACHMENT_CLEANUP_INTERVAL_MS',
     'ATTACHMENT_STALE_AGE_MS',
-    'ATTACHMENT_CLEANUP_BATCH_SIZE'
+    'ATTACHMENT_CLEANUP_BATCH_SIZE',
+    'ATTACHMENT_DELETION_INTERVAL_MS',
+    'ATTACHMENT_DELETION_BATCH_SIZE',
+    'ATTACHMENT_DELETION_LEASE_MS',
+    'ATTACHMENT_DELETION_RETRY_BASE_MS',
+    'ATTACHMENT_DELETION_RETRY_MAX_MS',
+    'ATTACHMENT_RECONCILIATION_INTERVAL_MS',
+    'ATTACHMENT_ORPHAN_GRACE_MS',
+    'ATTACHMENT_RECONCILIATION_SCAN_BATCH_SIZE',
+    'ATTACHMENT_RECONCILIATION_MISSING_BATCH_SIZE'
   ] as const;
 
   for (const setting of settings) {
@@ -116,5 +134,14 @@ test('attachment quota and cleanup configuration is strictly parsed', () => {
       ATTACHMENT_PENDING_MAX_BYTES: String(20 * 1024 * 1024)
     }),
     /ATTACHMENT_PENDING_MAX_BYTES: must be at least ATTACHMENT_MAX_BYTES/
+  );
+
+  assert.throws(
+    () => loadEnv({
+      ...requiredEnvironment,
+      ATTACHMENT_DELETION_RETRY_BASE_MS: '60000',
+      ATTACHMENT_DELETION_RETRY_MAX_MS: '5000'
+    }),
+    /ATTACHMENT_DELETION_RETRY_MAX_MS: must be at least ATTACHMENT_DELETION_RETRY_BASE_MS/
   );
 });

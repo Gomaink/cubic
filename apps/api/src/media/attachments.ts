@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, open, stat, statfs, unlink } from 'node:fs/promises';
+import { constants, createWriteStream } from 'node:fs';
+import { link, lstat, mkdir, open, rename, stat, statfs, unlink } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -44,6 +44,29 @@ function safeAttachmentKey(key: string): string {
     throw new Error('Invalid attachment key.');
   }
   return normalized;
+}
+
+export function isManagedAttachmentKey(key: string): boolean {
+  try {
+    safeAttachmentKey(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const STAGING_UPLOAD_SUFFIX = '.uploading';
+
+export function stagingUploadKeyFromName(name: string): string | null {
+  if (!name.endsWith(STAGING_UPLOAD_SUFFIX)) return null;
+  const key = name.slice(0, -STAGING_UPLOAD_SUFFIX.length);
+  return isManagedAttachmentKey(key) ? key : null;
+}
+
+function unsafeEntryError(): NodeJS.ErrnoException {
+  const error = new Error('Unsafe attachment storage entry.') as NodeJS.ErrnoException;
+  error.code = 'CUBIC_ATTACHMENT_UNSAFE_ENTRY';
+  return error;
 }
 
 function sanitizeFileName(name: string): string {
@@ -292,13 +315,15 @@ function detectAttachment(
 
 export class AttachmentStore {
   readonly root: string;
+  readonly stagingRoot: string;
 
   constructor(mediaRoot: string) {
     this.root = join(mediaRoot, 'attachments');
+    this.stagingRoot = join(this.root, '.staging');
   }
 
   async prepare(): Promise<void> {
-    await mkdir(this.root, { recursive: true });
+    await mkdir(this.stagingRoot, { recursive: true });
     await statfs(this.root, { bigint: true });
   }
 
@@ -322,10 +347,11 @@ export class AttachmentStore {
       maxBytes: number;
     }
   ): Promise<StoredAttachment> {
-    await mkdir(this.root, { recursive: true });
+    await mkdir(this.stagingRoot, { recursive: true });
 
     const key = randomUUID();
-    const target = join(this.root, key);
+    const target = join(this.stagingRoot, `${key}.uploading`);
+    const stagedTarget = join(this.stagingRoot, key);
     let sizeBytes = 0;
 
     const limiter = new Transform({
@@ -366,6 +392,8 @@ export class AttachmentStore {
         options.claimedMime.toLowerCase()
       );
 
+      await rename(target, stagedTarget);
+
       return {
         key,
         originalName: sanitizeFileName(options.originalName),
@@ -377,12 +405,45 @@ export class AttachmentStore {
       };
     } catch (error) {
       await unlink(target).catch(() => {});
+      await unlink(stagedTarget).catch(() => {});
       throw error;
     }
   }
 
-  open(key: string) {
-    return createReadStream(join(this.root, safeAttachmentKey(key)));
+  async publish(key: string): Promise<void> {
+    const normalized = safeAttachmentKey(key);
+    const staged = join(this.stagingRoot, normalized);
+    await link(staged, join(this.root, normalized));
+    await unlink(staged);
+  }
+
+  async discardStaged(key: string | null | undefined): Promise<void> {
+    if (!key) return;
+    await this.deleteManagedFile(this.stagingRoot, safeAttachmentKey(key));
+  }
+
+  async discardStagingUpload(key: string): Promise<void> {
+    await this.deleteManagedFile(
+      this.stagingRoot,
+      `${safeAttachmentKey(key)}${STAGING_UPLOAD_SUFFIX}`
+    );
+  }
+
+  async open(key: string) {
+    const normalized = safeAttachmentKey(key);
+    const handle = await open(
+      join(this.root, normalized),
+      constants.O_RDONLY | constants.O_NOFOLLOW
+    );
+
+    try {
+      const metadata = await handle.stat();
+      if (!metadata.isFile()) throw unsafeEntryError();
+      return handle.createReadStream({ autoClose: true });
+    } catch (error) {
+      await handle.close().catch(() => {});
+      throw error;
+    }
   }
 
   async size(key: string): Promise<number> {
@@ -392,9 +453,49 @@ export class AttachmentStore {
 
   async delete(key: string | null | undefined): Promise<void> {
     if (!key) return;
+    await this.deleteManagedFile(this.root, safeAttachmentKey(key));
+  }
 
+  async inspect(
+    key: string,
+    location: 'final' | 'staging' = 'final'
+  ): Promise<{ exists: boolean; regular: boolean; modifiedAtMs: number }> {
+    const normalized = safeAttachmentKey(key);
+    const directory = location === 'final' ? this.root : this.stagingRoot;
+    return this.inspectPath(join(directory, normalized));
+  }
+
+  async inspectStagingUpload(
+    key: string
+  ): Promise<{ exists: boolean; regular: boolean; modifiedAtMs: number }> {
+    const normalized = safeAttachmentKey(key);
+    return this.inspectPath(join(this.stagingRoot, `${normalized}${STAGING_UPLOAD_SUFFIX}`));
+  }
+
+  private async inspectPath(
+    target: string
+  ): Promise<{ exists: boolean; regular: boolean; modifiedAtMs: number }> {
     try {
-      await unlink(join(this.root, safeAttachmentKey(key)));
+      const metadata = await lstat(target);
+      return {
+        exists: true,
+        regular: metadata.isFile() && !metadata.isSymbolicLink(),
+        modifiedAtMs: Math.max(metadata.mtimeMs, metadata.ctimeMs)
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { exists: false, regular: false, modifiedAtMs: 0 };
+      }
+      throw error;
+    }
+  }
+
+  private async deleteManagedFile(directory: string, key: string): Promise<void> {
+    const target = join(directory, key);
+    try {
+      const metadata = await lstat(target);
+      if (!metadata.isFile() || metadata.isSymbolicLink()) throw unsafeEntryError();
+      await unlink(target);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }

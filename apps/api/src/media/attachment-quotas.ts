@@ -1,5 +1,6 @@
 import type { Database } from '@cubic/database';
 import type { StoredAttachment } from './attachments.js';
+import { lockAttachmentStorageKey } from './attachment-locks.js';
 
 const QUOTA_LOCK_NAMESPACE = 'cubic:pending-attachment-quota:';
 
@@ -26,7 +27,8 @@ export class PendingAttachmentQuotaError extends Error {
 export async function insertPendingAttachmentWithinQuota(
   database: Database,
   attachment: PendingAttachmentInsert,
-  quota: PendingAttachmentQuota
+  quota: PendingAttachmentQuota,
+  beforeCommit?: () => Promise<void>
 ): Promise<any> {
   const client = await database.pool.connect();
 
@@ -62,6 +64,8 @@ export async function insertPendingAttachmentWithinQuota(
       throw new PendingAttachmentQuotaError('bytes');
     }
 
+    await lockAttachmentStorageKey(client, attachment.key);
+
     const result = await client.query(
       `insert into attachments (
          conversation_id,
@@ -87,6 +91,8 @@ export async function insertPendingAttachmentWithinQuota(
         attachment.height
       ]
     );
+
+    await beforeCommit?.();
 
     await client.query('commit');
     return result.rows[0];

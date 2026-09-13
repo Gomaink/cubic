@@ -26,6 +26,17 @@ const app = await createApp({
   attachmentCleanupIntervalMs: env.ATTACHMENT_CLEANUP_INTERVAL_MS,
   attachmentStaleAgeMs: env.ATTACHMENT_STALE_AGE_MS,
   attachmentCleanupBatchSize: env.ATTACHMENT_CLEANUP_BATCH_SIZE,
+  attachmentDeletionIntervalMs: env.ATTACHMENT_DELETION_INTERVAL_MS,
+  attachmentDeletionBatchSize: env.ATTACHMENT_DELETION_BATCH_SIZE,
+  attachmentDeletionLeaseMs: env.ATTACHMENT_DELETION_LEASE_MS,
+  attachmentDeletionRetryBaseMs: env.ATTACHMENT_DELETION_RETRY_BASE_MS,
+  attachmentDeletionRetryMaxMs: env.ATTACHMENT_DELETION_RETRY_MAX_MS,
+  attachmentReconciliationIntervalMs: env.ATTACHMENT_RECONCILIATION_INTERVAL_MS,
+  attachmentOrphanGraceMs: env.ATTACHMENT_ORPHAN_GRACE_MS,
+  attachmentReconciliationScanBatchSize:
+    env.ATTACHMENT_RECONCILIATION_SCAN_BATCH_SIZE,
+  attachmentReconciliationMissingBatchSize:
+    env.ATTACHMENT_RECONCILIATION_MISSING_BATCH_SIZE,
   livekitPublicUrl: env.LIVEKIT_PUBLIC_URL,
   livekitApiKey: env.LIVEKIT_API_KEY,
   livekitApiSecret: env.LIVEKIT_API_SECRET,

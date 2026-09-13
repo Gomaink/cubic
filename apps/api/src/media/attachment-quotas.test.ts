@@ -15,6 +15,7 @@ type QuotaRow = {
 
 class QuotaDatabase {
   rows: QuotaRow[] = [];
+  calls: string[] = [];
 
   pool = {
     connect: async () => {
@@ -22,6 +23,7 @@ class QuotaDatabase {
       return {
         query: async (sql: string, params: any[] = []) => {
           const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase();
+          this.calls.push(normalized);
           if (normalized === 'begin') {
             snapshot = this.rows.map((row) => ({ ...row }));
             return { rows: [], rowCount: 0 };
@@ -102,6 +104,31 @@ test('pending count quota rejects only the over-limit insert and leaves no row',
     (error: unknown) => error instanceof PendingAttachmentQuotaError && error.reason === 'count'
   );
   assert.equal(database.rows.length, 1);
+});
+
+test('publication runs after metadata insert and before commit, and publication failure rolls back metadata', async () => {
+  const database = new QuotaDatabase();
+  await insertPendingAttachmentWithinQuota(
+    database as never,
+    pending(userA, '00000000-0000-4000-8000-000000000010'),
+    { maxCount: 2, maxBytes: 100 },
+    async () => { database.calls.push('publish'); }
+  );
+  assert.ok(database.calls.findIndex((call) => call.startsWith('insert into attachments')) < database.calls.indexOf('publish'));
+  assert.ok(database.calls.indexOf('publish') < database.calls.indexOf('commit'));
+
+  const failing = new QuotaDatabase();
+  await assert.rejects(
+    () => insertPendingAttachmentWithinQuota(
+      failing as never,
+      pending(userA, '00000000-0000-4000-8000-000000000011'),
+      { maxCount: 2, maxBytes: 100 },
+      async () => { throw new Error('rename failed'); }
+    ),
+    /rename failed/
+  );
+  assert.equal(failing.rows.length, 0);
+  assert.ok(failing.calls.includes('rollback'));
 });
 
 test('pending byte quota is uploader-scoped and excludes bound attachments', async () => {

@@ -186,7 +186,7 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
         }
 
         if (part.file.truncated || stored.sizeBytes > options.attachmentMaxBytes) {
-          await options.attachmentStore.delete(stored.key).catch(() => {});
+          await options.attachmentStore.discardStaged(stored.key).catch(() => {});
           return reply.code(413).send({
             error:
               `Attachment exceeds the ` +
@@ -194,6 +194,7 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
           });
         }
 
+        let published = false;
         try {
           const row = await options.insertPendingAttachment(
             options.database,
@@ -205,6 +206,10 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
             {
               maxCount: options.attachmentPendingMaxCount,
               maxBytes: options.attachmentPendingMaxBytes
+            },
+            async () => {
+              await options.attachmentStore.publish(stored.key);
+              published = true;
             }
           );
 
@@ -212,7 +217,14 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
             attachment: dto(row)
           });
         } catch (error) {
-          await options.attachmentStore.delete(stored.key).catch(() => {});
+          if (!published) {
+            await options.attachmentStore.discardStaged(stored.key).catch(() => {});
+          } else {
+            request.log.warn(
+              { errorCode: (error as NodeJS.ErrnoException).code ?? 'UNKNOWN' },
+              'Attachment metadata transaction failed after file publication; reconciliation will recover the orphan'
+            );
+          }
 
           if (error instanceof PendingAttachmentQuotaError) {
             const countQuota = error.reason === 'count';
@@ -281,6 +293,20 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
           return reply.code(404).send({ error: 'Attachment not found.' });
         }
 
+        let content;
+        try {
+          content = await options.attachmentStore.open(row.storage_key);
+        } catch (error) {
+          request.log.warn(
+            {
+              attachmentId: row.id,
+              errorCode: (error as NodeJS.ErrnoException).code ?? 'UNKNOWN'
+            },
+            'Attachment metadata references unavailable storage bytes'
+          );
+          return reply.code(404).send({ error: 'Attachment not found.' });
+        }
+
         const safeInline = new Set([
           'image/png',
           'image/jpeg',
@@ -309,7 +335,7 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
           `${safeInline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodedName}`
         );
 
-        return reply.send(options.attachmentStore.open(row.storage_key));
+        return reply.send(content);
       }
     );
 
@@ -327,28 +353,17 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
         }
 
         const result = await options.database.pool.query(
-          `select id, storage_key
-             from attachments
+          `delete from attachments
             where id = $1
               and uploader_id = $2
               and message_id is null
-            limit 1`,
+          returning id`,
           [params.data.id, request.auth.user.id]
         );
 
-        const row = result.rows[0];
-        if (!row) {
+        if (!result.rowCount) {
           return reply.code(404).send({ error: 'Attachment not found.' });
         }
-
-        await options.attachmentStore.delete(row.storage_key);
-
-        await options.database.pool.query(
-          `delete from attachments
-            where id = $1
-              and message_id is null`,
-          [params.data.id]
-        );
 
         return reply.code(204).send();
       }

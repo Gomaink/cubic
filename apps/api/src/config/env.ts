@@ -13,7 +13,16 @@ export const ATTACHMENT_DEFAULTS = {
   uploadRateLimitWindowMs: 60 * 1000,
   cleanupIntervalMs: 15 * 60 * 1000,
   staleAgeMs: 24 * 60 * 60 * 1000,
-  cleanupBatchSize: 250
+  cleanupBatchSize: 250,
+  deletionIntervalMs: 30 * 1000,
+  deletionBatchSize: 100,
+  deletionLeaseMs: 5 * 60 * 1000,
+  deletionRetryBaseMs: 5 * 1000,
+  deletionRetryMaxMs: 60 * 60 * 1000,
+  reconciliationIntervalMs: 15 * 60 * 1000,
+  orphanGraceMs: 24 * 60 * 60 * 1000,
+  reconciliationScanBatchSize: 500,
+  reconciliationMissingBatchSize: 250
 } as const;
 
 function strictPositiveInteger(defaultValue: number, minimum: number, maximum: number) {
@@ -89,6 +98,51 @@ const envSchema = z
       1,
       10_000
     ),
+    ATTACHMENT_DELETION_INTERVAL_MS: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.deletionIntervalMs,
+      1_000,
+      24 * 60 * 60 * 1000
+    ),
+    ATTACHMENT_DELETION_BATCH_SIZE: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.deletionBatchSize,
+      1,
+      10_000
+    ),
+    ATTACHMENT_DELETION_LEASE_MS: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.deletionLeaseMs,
+      1_000,
+      24 * 60 * 60 * 1000
+    ),
+    ATTACHMENT_DELETION_RETRY_BASE_MS: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.deletionRetryBaseMs,
+      1_000,
+      60 * 60 * 1000
+    ),
+    ATTACHMENT_DELETION_RETRY_MAX_MS: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.deletionRetryMaxMs,
+      1_000,
+      24 * 60 * 60 * 1000
+    ),
+    ATTACHMENT_RECONCILIATION_INTERVAL_MS: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.reconciliationIntervalMs,
+      60_000,
+      7 * 24 * 60 * 60 * 1000
+    ),
+    ATTACHMENT_ORPHAN_GRACE_MS: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.orphanGraceMs,
+      60_000,
+      365 * 24 * 60 * 60 * 1000
+    ),
+    ATTACHMENT_RECONCILIATION_SCAN_BATCH_SIZE: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.reconciliationScanBatchSize,
+      1,
+      100_000
+    ),
+    ATTACHMENT_RECONCILIATION_MISSING_BATCH_SIZE: strictPositiveInteger(
+      ATTACHMENT_DEFAULTS.reconciliationMissingBatchSize,
+      1,
+      10_000
+    ),
     LIVEKIT_PUBLIC_URL: z.string().min(1),
     LIVEKIT_API_KEY: z.string().min(3),
     LIVEKIT_API_SECRET: z.string().min(32)
@@ -107,6 +161,14 @@ const envSchema = z
         code: 'custom',
         path: ['ATTACHMENT_PENDING_MAX_BYTES'],
         message: 'must be at least ATTACHMENT_MAX_BYTES'
+      });
+    }
+
+    if (env.ATTACHMENT_DELETION_RETRY_MAX_MS < env.ATTACHMENT_DELETION_RETRY_BASE_MS) {
+      context.addIssue({
+        code: 'custom',
+        path: ['ATTACHMENT_DELETION_RETRY_MAX_MS'],
+        message: 'must be at least ATTACHMENT_DELETION_RETRY_BASE_MS'
       });
     }
   });
