@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ATTACHMENT_DEFAULTS, SESSION_DEFAULTS, loadEnv } from './env.js';
+import {
+  ATTACHMENT_DEFAULTS,
+  LIVEKIT_AUTHORIZATION_DEFAULTS,
+  SESSION_DEFAULTS,
+  loadEnv
+} from './env.js';
 
 const requiredEnvironment = {
   DATABASE_URL: 'postgresql://cubic:local-test-password@localhost:5432/cubic',
   LIVEKIT_PUBLIC_URL: 'ws://localhost:7880',
+  LIVEKIT_API_URL: 'http://localhost:7880',
   LIVEKIT_API_KEY: 'local-test-key',
   LIVEKIT_API_SECRET: 'local-test-secret-with-at-least-32-characters',
   TRUST_PROXY_CIDRS: '127.0.0.1/32,::1/128'
@@ -18,6 +24,24 @@ test('production requires secure session cookies', () => {
   assert.throws(
     () => loadEnv({ ...requiredEnvironment, NODE_ENV: 'production', SESSION_COOKIE_SECURE: 'false' }),
     /SESSION_COOKIE_SECURE: must be true when NODE_ENV is production/
+  );
+});
+
+test('LiveKit authorization reconciliation uses a bounded 30 second default', () => {
+  const env = loadEnv(requiredEnvironment);
+  assert.equal(
+    env.LIVEKIT_AUTHORIZATION_RECONCILE_MS,
+    LIVEKIT_AUTHORIZATION_DEFAULTS.reconciliationIntervalMs
+  );
+  for (const invalid of ['0', '4999', '300001', '1e4']) {
+    assert.throws(
+      () => loadEnv({ ...requiredEnvironment, LIVEKIT_AUTHORIZATION_RECONCILE_MS: invalid }),
+      /LIVEKIT_AUTHORIZATION_RECONCILE_MS:/
+    );
+  }
+  assert.throws(
+    () => loadEnv({ ...requiredEnvironment, LIVEKIT_API_URL: 'wss://voice.example.test' }),
+    /LIVEKIT_API_URL: must use http or https/
   );
 });
 

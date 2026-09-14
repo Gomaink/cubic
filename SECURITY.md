@@ -56,6 +56,10 @@ Particularly important areas include:
   browser receives only a random session UUID management handle, coarse client
   label and session timestamps, never the session token or stored digest
 - session presentation metadata excludes raw User-Agent values and IP addresses
+- LiveKit participation is continuously revalidated against Cubic sessions,
+  account state, conversation membership, DM blocks and accepted-call state
+- LiveKit participant identities contain an opaque room-scoped session tag, not
+  a Cubic session UUID, session token or stored token digest
 - secrets must never be committed to the repository
 - destructive security fixes must be reviewed rather than blindly automated
 

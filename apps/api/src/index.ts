@@ -4,11 +4,25 @@ import { loadEnv } from './config/env.js';
 import { createRealtimeEvents } from './realtime/events.js';
 import { attachRealtime } from './realtime/socket.js';
 import { createSessionService } from './security/session.js';
+import {
+  LiveKitAuthorizationService,
+  createDatabaseVoiceAuthorizationStore
+} from './voice/authorization.js';
 
 const env = loadEnv();
 const database = createDatabase(env.DATABASE_URL);
 const realtimeEvents = createRealtimeEvents();
 const sessionService = createSessionService(database, env.SESSION_IDLE_TIMEOUT_MS);
+const livekitAuthorization = new LiveKitAuthorizationService({
+  apiKey: env.LIVEKIT_API_KEY,
+  apiSecret: env.LIVEKIT_API_SECRET,
+  apiUrl: env.LIVEKIT_API_URL,
+  publicUrl: env.LIVEKIT_PUBLIC_URL,
+  sessionService,
+  store: createDatabaseVoiceAuthorizationStore(database),
+  events: realtimeEvents,
+  reconciliationIntervalMs: env.LIVEKIT_AUTHORIZATION_RECONCILE_MS
+});
 const app = await createApp({
   database,
   corsOrigin: env.CORS_ORIGIN,
@@ -40,9 +54,7 @@ const app = await createApp({
     env.ATTACHMENT_RECONCILIATION_SCAN_BATCH_SIZE,
   attachmentReconciliationMissingBatchSize:
     env.ATTACHMENT_RECONCILIATION_MISSING_BATCH_SIZE,
-  livekitPublicUrl: env.LIVEKIT_PUBLIC_URL,
-  livekitApiKey: env.LIVEKIT_API_KEY,
-  livekitApiSecret: env.LIVEKIT_API_SECRET,
+  livekitAuthorization,
   realtimeEvents,
   logger: env.NODE_ENV !== 'test'
 });

@@ -324,7 +324,10 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
         for (const sessionId of registry.sessionIds()) {
           try {
             const identity = await options.sessionService.validateId(sessionId, { activity: false });
-            if (!identity) registry.disconnectSession(sessionId);
+            if (!identity) {
+              options.events.emitSessionRevoked({ sessionId });
+              registry.disconnectSession(sessionId);
+            }
           } catch {
             // Database uncertainty is not proof of revocation. Retry on the next sweep.
           }
@@ -370,7 +373,12 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
           finished.call,
           finished.state,
           finished.actorId
-        ).catch(() => {}).finally(() => {
+        ).then(() => {
+          options.events.emitCallAuthorizationEnded({
+            callId: finished.call.id,
+            conversationId: finished.call.conversationId
+          });
+        }).catch(() => {}).finally(() => {
           emitCallState(finished.call, finished.state, finished.actorId);
         });
       }
@@ -407,6 +415,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     try {
       const current = await options.sessionService.validateId(identity.sessionId, { activity: false });
       if (!current) {
+        options.events.emitSessionRevoked({ sessionId: identity.sessionId });
         registry.disconnectSession(identity.sessionId);
         return;
       }
@@ -421,6 +430,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
         const current = await options.sessionService.validateId(identity.sessionId, { activity: true });
         if (!current) {
           acknowledgePacketFailure(packet, 'Authentication required.');
+          options.events.emitSessionRevoked({ sessionId: identity.sessionId });
           registry.disconnectSession(identity.sessionId);
           return next(new Error('Authentication required.'));
         }
@@ -615,6 +625,10 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
             finished.actorId
           );
           clearRingTimer(finished.call.id);
+          options.events.emitCallAuthorizationEnded({
+            callId: finished.call.id,
+            conversationId: finished.call.conversationId
+          });
           const wire = toWireCall(finished.call, finished.state, finished.actorId);
           acknowledge?.({ ok: true, call: wire });
           emitCallState(finished.call, finished.state, finished.actorId);
@@ -642,6 +656,10 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
             finished.actorId
           );
           clearRingTimer(finished.call.id);
+          options.events.emitCallAuthorizationEnded({
+            callId: finished.call.id,
+            conversationId: finished.call.conversationId
+          });
           const wire = toWireCall(finished.call, finished.state, finished.actorId);
           acknowledge?.({ ok: true, call: wire });
           emitCallState(finished.call, finished.state, finished.actorId);
@@ -669,6 +687,10 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
             finished.actorId
           );
           clearRingTimer(finished.call.id);
+          options.events.emitCallAuthorizationEnded({
+            callId: finished.call.id,
+            conversationId: finished.call.conversationId
+          });
           const wire = toWireCall(finished.call, finished.state, finished.actorId);
           acknowledge?.({ ok: true, call: wire });
           emitCallState(finished.call, finished.state, finished.actorId);
@@ -731,6 +753,26 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     registry.disconnectSession(event.sessionId);
   });
 
+  const unsubscribeDirectBlocked = options.events.onDirectBlocked((event) => {
+    const finished = calls.terminateForBlock(event.conversationId, event.blockerId);
+    if (!finished) return;
+    clearRingTimer(finished.call.id);
+    void persistCallFinished(
+      options.database,
+      finished.call,
+      finished.state,
+      finished.actorId
+    ).then(() => {
+      if (finished.state === 'ended') {
+        options.events.emitCallAuthorizationEnded({
+          callId: finished.call.id,
+          conversationId: finished.call.conversationId
+        });
+      }
+      emitCallState(finished.call, finished.state, finished.actorId);
+    }).catch(() => {});
+  });
+
   return {
     registry,
     async close() {
@@ -747,6 +789,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
       unsubscribeRemoved();
       unsubscribeInvites();
       unsubscribeSessionRevoked();
+      unsubscribeDirectBlocked();
       io.disconnectSockets(true);
       await new Promise<void>((resolve) => io.close(() => resolve()));
     }

@@ -24,7 +24,10 @@ test('default Compose requires private deployment credentials', async () => {
   assert.match(environmentExample, /^TRUST_PROXY_CIDRS=$/m);
   assert.doesNotMatch(`${compose}\n${environmentExample}`, /TRUST_PROXY_HOPS/);
   assert.match(compose, /web:[\s\S]*TRUST_PROXY_CIDRS: \$\{TRUST_PROXY_CIDRS:\?/);
+  assert.match(compose, /LIVEKIT_API_URL: \$\{LIVEKIT_API_URL:-http:\/\/livekit:7880\}/);
+  assert.match(environmentExample, /^LIVEKIT_API_URL=http:\/\/livekit:7880$/m);
   for (const setting of [
+    'LIVEKIT_AUTHORIZATION_RECONCILE_MS',
     'ATTACHMENT_PENDING_MAX_COUNT',
     'ATTACHMENT_PENDING_MAX_BYTES',
     'ATTACHMENT_MIN_FREE_BYTES',

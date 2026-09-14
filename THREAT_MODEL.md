@@ -227,6 +227,44 @@ Cubic performs authorization before issuing them.
 
 Possession of a LiveKit token must not authenticate a user to the Cubic API.
 
+The ten-minute LiveKit token lifetime is an entry/reconnect window, not the
+revocation mechanism for an established participant. The single API process
+maintains an issued-participant registry keyed to the authoritative Cubic
+session, consumes post-commit session/membership/block/call events, and uses
+LiveKit's server API to remove participants or delete ended direct-call rooms.
+Periodic reconciliation defaults to 30 seconds and independently checks active
+Cubic-managed rooms against PostgreSQL. Confirmed invalid participants are
+removed; database uncertainty is not treated as proof of revocation.
+
+Direct calls use a room derived from the accepted call ID, while group voice
+retains its conversation-derived room. A direct token is issued only while that
+call is accepted. Participant identities include a versioned, room-scoped
+HMAC tag and a random participant instance UUID. They never contain the Cubic
+session UUID, session token or stored token digest. LiveKit attributes retain
+only the existing Cubic user and conversation identifiers and participants
+cannot update their own metadata.
+
+LiveKit 1.13.6 cannot remove or pre-revoke an issued identity that has never
+connected because `RemoveParticipant` returns not-found for an absent
+participant. Such a JWT remains an entry capability until its ten-minute
+expiry. Call-specific direct rooms prevent it from authorizing a future call,
+and reconciliation removes it if it appears after Cubic authorization has
+changed. Eliminating that residual admission window requires additional
+LiveKit admission/custom-server integration and is outside this slice.
+
+If the LiveKit administrative control plane is known to be unavailable, Cubic
+denies new media tickets with a generic temporary-unavailability response.
+Established media may continue until bounded in-memory retries or reconciliation
+can reach LiveKit again. A direct/manual SQL account disable is discovered
+within the reconciliation interval plus LiveKit administrative latency; a
+future application account-disable mutation must emit its authorization event
+only after the database mutation commits.
+
+These immediate event and registry guarantees are process-local. A future
+multi-process API deployment requires distributed authorization events and
+Socket.IO coordination; this release does not add Redis, NATS or PostgreSQL
+notification infrastructure.
+
 ## Future servers/roles
 
 Permission evaluation should become centralized and deterministic.

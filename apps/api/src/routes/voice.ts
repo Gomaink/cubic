@@ -1,24 +1,17 @@
-import { and, eq, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { Database } from '@cubic/database';
-import {
-  blocks,
-  conversationMembers,
-  conversations,
-  directConversationPairs
-} from '@cubic/database/schema';
 import { createRequireAuth } from '../auth/guard.js';
 import type { SessionService } from '../security/session.js';
-import { createVoiceJoinToken } from '../voice/token.js';
+import {
+  LiveKitControlPlaneUnavailableError,
+  VoiceAuthorizationDeniedError,
+  type LiveKitAuthorizationService
+} from '../voice/authorization.js';
 
 export interface VoiceRoutesOptions {
-  database: Database;
   cookieName: string;
   sessionService: SessionService;
-  livekitPublicUrl: string;
-  livekitApiKey: string;
-  livekitApiSecret: string;
+  livekitAuthorization: LiveKitAuthorizationService;
 }
 
 const conversationParams = z.object({
@@ -43,70 +36,23 @@ export async function voiceRoutes(
       }
 
       const { conversationId } = parsed.data;
-      const userId = request.auth.user.id;
-
-      const memberships = await options.database.db
-        .select({
-          conversationId: conversationMembers.conversationId,
-          kind: conversations.kind
-        })
-        .from(conversationMembers)
-        .innerJoin(conversations, eq(conversationMembers.conversationId, conversations.id))
-        .where(
-          and(
-            eq(conversationMembers.conversationId, conversationId),
-            eq(conversationMembers.userId, userId)
-          )
-        )
-        .limit(1);
-
-      const membership = memberships[0];
-      if (!membership) {
-        return reply.code(403).send({ error: 'You are not a member of this conversation.' });
-      }
-
-      if (membership.kind === 'direct') {
-        const pairs = await options.database.db
-          .select({
-            userLowId: directConversationPairs.userLowId,
-            userHighId: directConversationPairs.userHighId
-          })
-          .from(directConversationPairs)
-          .where(eq(directConversationPairs.conversationId, conversationId))
-          .limit(1);
-
-        const pair = pairs[0];
-        if (!pair) {
-          return reply.code(409).send({ error: 'Direct conversation pair is missing.' });
+      try {
+        const ticket = await options.livekitAuthorization.issueJoinTicket({
+          sessionId: request.auth.sessionId,
+          userId: request.auth.user.id,
+          displayName: request.auth.user.displayName,
+          conversationId
+        });
+        return reply.send(ticket);
+      } catch (error) {
+        if (error instanceof LiveKitControlPlaneUnavailableError) {
+          return reply.code(503).send({ error: 'Voice service is temporarily unavailable.' });
         }
-
-        const peerId = pair.userLowId === userId ? pair.userHighId : pair.userLowId;
-        const blockRows = await options.database.db
-          .select({ id: blocks.id })
-          .from(blocks)
-          .where(
-            or(
-              and(eq(blocks.blockerId, userId), eq(blocks.blockedId, peerId)),
-              and(eq(blocks.blockerId, peerId), eq(blocks.blockedId, userId))
-            )
-          )
-          .limit(1);
-
-        if (blockRows.length > 0) {
-          return reply.code(403).send({ error: 'Voice is unavailable for this conversation.' });
+        if (error instanceof VoiceAuthorizationDeniedError) {
+          return reply.code(403).send({ error: 'Voice is unavailable.' });
         }
+        throw error;
       }
-
-      const ticket = await createVoiceJoinToken({
-        apiKey: options.livekitApiKey,
-        apiSecret: options.livekitApiSecret,
-        publicUrl: options.livekitPublicUrl,
-        conversationId,
-        userId,
-        displayName: request.auth.user.displayName
-      });
-
-      return reply.send(ticket);
     }
   );
 }

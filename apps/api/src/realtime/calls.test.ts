@@ -86,3 +86,28 @@ test('only the recipient can accept and only the caller can cancel', () => {
     (error: unknown) => error instanceof CallLifecycleError && error.code === 'forbidden'
   );
 });
+
+test('blocking ends accepted calls and uses existing ringing terminal states', () => {
+  const acceptedManager = coordinator();
+  const accepted = start(acceptedManager);
+  acceptedManager.accept(accepted.id, accepted.calleeId, 'socket-b');
+  assert.equal(
+    acceptedManager.terminateForBlock(accepted.conversationId, accepted.calleeId)?.state,
+    'ended'
+  );
+
+  const callerManager = coordinator();
+  const callerRinging = start(callerManager);
+  assert.equal(
+    callerManager.terminateForBlock(callerRinging.conversationId, callerRinging.callerId)?.state,
+    'cancelled'
+  );
+
+  const calleeManager = coordinator();
+  const calleeRinging = start(calleeManager);
+  assert.equal(
+    calleeManager.terminateForBlock(calleeRinging.conversationId, calleeRinging.calleeId)?.state,
+    'declined'
+  );
+  assert.equal(calleeManager.getForConversation(calleeRinging.conversationId), null);
+});

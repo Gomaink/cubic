@@ -30,6 +30,10 @@ export const SESSION_DEFAULTS = {
   socketRevalidateMs: 5 * 60 * 1000
 } as const;
 
+export const LIVEKIT_AUTHORIZATION_DEFAULTS = {
+  reconciliationIntervalMs: 30 * 1_000
+} as const;
+
 function strictPositiveInteger(defaultValue: number, minimum: number, maximum: number) {
   return z.string()
     .regex(/^[1-9][0-9]*$/, 'must be a base-10 positive integer')
@@ -159,6 +163,15 @@ const envSchema = z
       10_000
     ),
     LIVEKIT_PUBLIC_URL: z.string().min(1),
+    LIVEKIT_API_URL: z.string().url().refine((value) => {
+      const protocol = new URL(value).protocol;
+      return protocol === 'http:' || protocol === 'https:';
+    }, 'must use http or https'),
+    LIVEKIT_AUTHORIZATION_RECONCILE_MS: strictPositiveInteger(
+      LIVEKIT_AUTHORIZATION_DEFAULTS.reconciliationIntervalMs,
+      5_000,
+      5 * 60 * 1_000
+    ),
     LIVEKIT_API_KEY: z.string().min(3),
     LIVEKIT_API_SECRET: z.string().min(32)
   })

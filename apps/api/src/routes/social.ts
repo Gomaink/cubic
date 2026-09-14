@@ -1,10 +1,18 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { and, eq, or } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Database } from '@cubic/database';
-import { blocks, friendRequests, friendships, users } from '@cubic/database/schema';
+import {
+  blocks,
+  calls,
+  directConversationPairs,
+  friendRequests,
+  friendships,
+  users
+} from '@cubic/database/schema';
 import { createRequireAuth } from '../auth/guard.js';
 import type { SessionService } from '../security/session.js';
+import type { RealtimeEvents } from '../realtime/events.js';
 
 const userIdSchema = z.object({ userId: z.string().uuid() });
 const requestIdParamsSchema = z.object({ id: z.string().uuid() });
@@ -29,6 +37,7 @@ export interface SocialRoutesOptions {
   database: Database;
   cookieName: string;
   sessionService: SessionService;
+  realtimeEvents: RealtimeEvents;
 }
 
 export const socialRoutes: FastifyPluginAsync<SocialRoutesOptions> = async (app, options) => {
@@ -235,11 +244,39 @@ export const socialRoutes: FastifyPluginAsync<SocialRoutesOptions> = async (app,
     const target = parsed.data.userId;
     const [low, high] = orderedPair(me, target);
 
-    await options.database.db.transaction(async (tx) => {
+    const directConversations = await options.database.db.transaction(async (tx) => {
       await tx.insert(blocks).values({ blockerId: me, blockedId: target }).onConflictDoNothing();
       await tx.delete(friendships).where(and(eq(friendships.userLowId, low), eq(friendships.userHighId, high)));
       await tx.update(friendRequests).set({ status: 'cancelled', respondedAt: new Date() }).where(or(and(eq(friendRequests.senderId, me), eq(friendRequests.receiverId, target), eq(friendRequests.status, 'pending')), and(eq(friendRequests.senderId, target), eq(friendRequests.receiverId, me), eq(friendRequests.status, 'pending'))));
+      return tx
+        .select({
+          conversationId: directConversationPairs.conversationId,
+          callId: calls.id
+        })
+        .from(directConversationPairs)
+        .leftJoin(
+          calls,
+          and(
+            eq(calls.conversationId, directConversationPairs.conversationId),
+            eq(calls.status, 'accepted'),
+            isNull(calls.endedAt)
+          )
+        )
+        .where(
+          and(
+            eq(directConversationPairs.userLowId, low),
+            eq(directConversationPairs.userHighId, high)
+          )
+        );
     });
+    for (const direct of directConversations) {
+      options.realtimeEvents.emitDirectBlocked({
+        conversationId: direct.conversationId,
+        blockerId: me,
+        blockedId: target,
+        callId: direct.callId
+      });
+    }
     return reply.code(201).send({ ok: true });
   });
 

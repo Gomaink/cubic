@@ -32,6 +32,7 @@ import {
 } from './media/attachment-reconciliation.js';
 import { ATTACHMENT_DEFAULTS } from './config/env.js';
 import type { SessionService } from './security/session.js';
+import type { LiveKitAuthorizationService } from './voice/authorization.js';
 
 export interface CreateAppOptions {
   database: Database;
@@ -62,9 +63,7 @@ export interface CreateAppOptions {
   attachmentOrphanGraceMs?: number;
   attachmentReconciliationScanBatchSize?: number;
   attachmentReconciliationMissingBatchSize?: number;
-  livekitPublicUrl: string;
-  livekitApiKey: string;
-  livekitApiSecret: string;
+  livekitAuthorization: LiveKitAuthorizationService;
   logger?: boolean;
   realtimeEvents?: RealtimeEvents;
 }
@@ -80,6 +79,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
       (options.attachmentMaxBytes ?? ATTACHMENT_DEFAULTS.maxBytes) + 1024 * 1024
     )
   });
+  options.livekitAuthorization.setLogger(app.log);
 
   await app.register(cookie);
   await app.register(multipart, {
@@ -146,7 +146,8 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     prefix: '/api/v1/social',
     database: options.database,
     cookieName: options.cookieName,
-    sessionService: options.sessionService
+    sessionService: options.sessionService,
+    realtimeEvents
   });
 
   await app.register(conversationRoutes, {
@@ -258,13 +259,13 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
 
   await app.register(voiceRoutes, {
     prefix: '/api/v1/voice',
-    database: options.database,
     cookieName: options.cookieName,
     sessionService: options.sessionService,
-    livekitPublicUrl: options.livekitPublicUrl,
-    livekitApiKey: options.livekitApiKey,
-    livekitApiSecret: options.livekitApiSecret
+    livekitAuthorization: options.livekitAuthorization
   });
+
+  app.addHook('onReady', async () => options.livekitAuthorization.start());
+  app.addHook('onClose', async () => options.livekitAuthorization.stop());
 
   await app.register(callHistoryRoutes, {
     prefix: '/api/v1/calls',

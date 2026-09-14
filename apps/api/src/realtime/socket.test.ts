@@ -650,16 +650,23 @@ test('direct database revocation and later account disabling are found by shared
   const second = harness.repository.add('disable-later', '10000000-0000-4000-8000-000000000002');
   const revokedSocket = await connectClient(harness, 'direct-revoke');
   const disabledSocket = await connectClient(harness, 'disable-later');
+  const revokedSessionIds: string[] = [];
+  const unsubscribe = harness.events.onSessionRevoked((event) => {
+    revokedSessionIds.push(event.sessionId);
+  });
 
   const revokedDisconnect = waitForEvent(revokedSocket, 'disconnect');
   harness.repository.records.delete(first.session.id);
   await revokedDisconnect;
+  assert.ok(revokedSessionIds.includes(first.session.id));
   assert.equal(disabledSocket.connected, true);
 
   const disabledDisconnect = waitForEvent(disabledSocket, 'disconnect');
   second.user.disabledAt = new Date();
   await disabledDisconnect;
+  assert.ok(revokedSessionIds.includes(second.session.id));
   assert.equal(harness.realtime.registry.socketCount, 0);
+  unsubscribe();
 });
 
 test('an invalidated session cannot run another client-originated application event', async (context) => {
@@ -760,7 +767,10 @@ test('shared revalidation checks unique sessions sequentially without overlappin
   harness.repository.maximumConcurrentFindById = 0;
   harness.repository.findByIdDelayMs = 30;
 
-  await delay(90);
+  const deadline = Date.now() + 1_000;
+  while (harness.repository.maximumConcurrentFindById === 0 && Date.now() < deadline) {
+    await delay(10);
+  }
 
   assert.equal(harness.repository.maximumConcurrentFindById, 1);
   first.close();
@@ -859,6 +869,30 @@ test('direct-call signalling still starts and accepts across authenticated socke
   );
   assert.equal(accepted.ok, true);
   assert.equal((await acceptedState).state, 'accepted');
+
+  const endedState = new Promise<any>((resolve) => {
+    const listener = (payload: any) => {
+      if (payload.id === started.call.id && payload.state === 'ended') {
+        caller.off('call:state', listener);
+        resolve(payload);
+      }
+    };
+    caller.on('call:state', listener);
+  });
+  const authorizationEnded = new Promise<{ callId: string }>((resolve) => {
+    const unsubscribe = harness.events.onCallAuthorizationEnded((event) => {
+      unsubscribe();
+      resolve(event);
+    });
+  });
+  harness.events.emitDirectBlocked({
+    conversationId,
+    blockerId: callerId,
+    blockedId: calleeId,
+    callId: started.call.id
+  });
+  assert.equal((await endedState).actorId, callerId);
+  assert.equal((await authorizationEnded).callId, started.call.id);
   caller.close();
   callee.close();
 });
