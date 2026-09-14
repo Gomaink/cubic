@@ -71,18 +71,19 @@ test('old UUID orphan is queued but not directly removed, while recent and unexp
   const oldKey = '00000000-0000-4000-8000-000000000001';
   const recentKey = '00000000-0000-4000-8000-000000000002';
   const malformed = 'do-not-delete.txt';
-  const now = new Date('2026-09-15T12:00:00.000Z');
+  const gracePeriodMs = 24 * 60 * 60 * 1000;
+  const now = new Date(Date.now() + gracePeriodMs * 2);
   await writeFile(join(store.root, oldKey), 'old');
   await writeFile(join(store.root, recentKey), 'recent');
   await writeFile(join(store.root, malformed), 'unexpected');
-  await utimes(join(store.root, oldKey), new Date('2026-09-10T12:00:00.000Z'), new Date('2026-09-10T12:00:00.000Z'));
+  await utimes(join(store.root, oldKey), new Date(now.getTime() - gracePeriodMs * 2), new Date(now.getTime() - gracePeriodMs * 2));
   await utimes(join(store.root, recentKey), now, now);
 
   const database = new ReconciliationDatabase();
   const reconciler = new AttachmentReconciler({
     database: database as never,
     attachmentStore: store,
-    gracePeriodMs: 24 * 60 * 60 * 1000,
+    gracePeriodMs,
     scanBatchSize: 100,
     missingBatchSize: 100,
     logger: logger()
