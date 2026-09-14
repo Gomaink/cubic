@@ -40,6 +40,8 @@ function attachment(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
 class AttachmentRouteDatabase {
   attachments = [attachment()];
   members = new Set([uploader, member]);
+  conversationKind: 'direct' | 'group' = 'group';
+  blocked = false;
   contentQuery = '';
 
   pool = {
@@ -60,13 +62,16 @@ class AttachmentRouteDatabase {
         return { rows, rowCount: rows.length };
       }
 
-      if (normalized.includes('from conversation_members')) {
-        const rows = params[0] === conversation && this.members.has(params[1]) ? [{}] : [];
+      if (normalized.includes("c.kind in ('direct', 'group')")) {
+        const rows = params[0] === conversation && this.members.has(params[1])
+          ? [{ conversation_id: conversation, kind: this.conversationKind, role: 'member' }]
+          : [];
         return { rows, rowCount: rows.length };
       }
 
       if (normalized.includes('from direct_conversation_pairs dp')) {
-        return { rows: [], rowCount: 0 };
+        const rows = this.blocked ? [{}] : [];
+        return { rows, rowCount: rows.length };
       }
 
       if (normalized.startsWith('select id, storage_key from attachments')) {
@@ -306,6 +311,30 @@ test('normal upload persists a pending row and returns its attachment DTO', asyn
     harness.routeOptions.get('POST /conversations/:id/attachments').config.rateLimit,
     false
   );
+});
+
+test('upload authorization preserves membership and bilateral direct-block semantics', async () => {
+  const outsiderDatabase = new AttachmentRouteDatabase();
+  const outsiderHarness = await routeHarness(outsiderDatabase);
+  const outsiderResponse = await outsiderHarness.invoke(
+    'POST',
+    '/conversations/:id/attachments',
+    outsider
+  );
+  assert.equal(outsiderResponse.statusCode, 404);
+  assert.deepEqual(outsiderHarness.publishedKeys, []);
+
+  const blockedDatabase = new AttachmentRouteDatabase();
+  blockedDatabase.conversationKind = 'direct';
+  blockedDatabase.blocked = true;
+  const blockedHarness = await routeHarness(blockedDatabase);
+  const blockedResponse = await blockedHarness.invoke(
+    'POST',
+    '/conversations/:id/attachments'
+  );
+  assert.equal(blockedResponse.statusCode, 403);
+  assert.deepEqual(blockedResponse.payload, { error: 'Messaging is not allowed.' });
+  assert.deepEqual(blockedHarness.publishedKeys, []);
 });
 
 test('quota rejection removes the just-written file and leaves no pending DB row', async () => {

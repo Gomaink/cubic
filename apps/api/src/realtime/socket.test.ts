@@ -255,6 +255,9 @@ class RealtimeSessionRepository implements SessionRepository {
 
 class RealtimeDatabase {
   readonly selectResults: any[][] = [];
+  readonly conversationMemberships = new Map<string, Set<string>>();
+  readonly directPairs = new Map<string, { lowId: string; highId: string }>();
+  readonly blockedConversations = new Set<string>();
 
   db = {
     select: () => {
@@ -278,7 +281,35 @@ class RealtimeDatabase {
       query: async () => ({ rows: [], rowCount: 0 }),
       release() {}
     }),
-    query: async () => ({ rows: [], rowCount: 0 })
+    query: async (sql: string, params: any[] = []) => {
+      const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (normalized.includes("c.kind in ('direct', 'group')")) {
+        const pair = this.directPairs.get(params[0]);
+        const member = this.conversationMemberships.get(params[0])?.has(params[1]);
+        const rows = member
+          ? [{
+              conversation_id: params[0],
+              kind: pair ? 'direct' : 'group',
+              role: 'member'
+            }]
+          : [];
+        return { rows, rowCount: rows.length };
+      }
+      if (normalized.includes("c.kind = 'direct'")) {
+        const pair = this.directPairs.get(params[0]);
+        const member = this.conversationMemberships.get(params[0])?.has(params[1]);
+        const inPair = pair && (pair.lowId === params[1] || pair.highId === params[1]);
+        const rows = member && inPair
+          ? [{
+              conversation_id: params[0],
+              peer_user_id: pair.lowId === params[1] ? pair.highId : pair.lowId,
+              blocked: this.blockedConversations.has(params[0])
+            }]
+          : [];
+        return { rows, rowCount: rows.length };
+      }
+      return { rows: [], rowCount: 0 };
+    }
   };
 }
 
@@ -805,8 +836,16 @@ test('conversation authorization and message mutation propagation remain intact'
   harness.repository.add('outsider-token', '10000000-0000-4000-8000-000000000002');
   const member = await connectClient(harness, 'member-token', [conversationId]);
   const outsider = await connectClient(harness, 'outsider-token');
+  harness.database.conversationMemberships.set(
+    conversationId,
+    new Set(['10000000-0000-4000-8000-000000000001'])
+  );
 
-  harness.database.selectResults.push([]);
+  const joined = await new Promise<any>((resolve) =>
+    member.emit('conversation:join', { conversationId }, resolve)
+  );
+  assert.deepEqual(joined, { ok: true });
+
   const denied = await new Promise<any>((resolve) =>
     outsider.emit('conversation:join', { conversationId }, resolve)
   );
@@ -866,9 +905,8 @@ test('direct-call signalling still starts and accepts across authenticated socke
   const caller = await connectClient(harness, 'caller-token', [conversationId]);
   const callee = await connectClient(harness, 'callee-token', [conversationId]);
 
-  harness.database.selectResults.push([
-    { kind: 'direct', userLowId: callerId, userHighId: calleeId }
-  ], []);
+  harness.database.conversationMemberships.set(conversationId, new Set([callerId, calleeId]));
+  harness.database.directPairs.set(conversationId, { lowId: callerId, highId: calleeId });
   const incoming = waitForEvent<any>(callee, 'call:incoming');
   const started = await new Promise<any>((resolve) =>
     caller.emit('call:start', { conversationId }, resolve)
@@ -916,4 +954,34 @@ test('direct-call signalling still starts and accepts across authenticated socke
   assert.equal((await authorizationEnded).callId, started.call.id);
   caller.close();
   callee.close();
+});
+
+test('direct-call start rejects missing membership and bilateral blocks', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const callerId = '10000000-0000-4000-8000-000000000001';
+  const calleeId = '10000000-0000-4000-8000-000000000002';
+  harness.repository.add('caller-token', callerId);
+  const caller = await connectClient(harness, 'caller-token');
+  harness.database.directPairs.set(conversationId, { lowId: callerId, highId: calleeId });
+
+  const missingMembership = await new Promise<any>((resolve) =>
+    caller.emit('call:start', { conversationId }, resolve)
+  );
+  assert.deepEqual(missingMembership, {
+    ok: false,
+    error: 'Direct conversation not found.'
+  });
+
+  harness.database.conversationMemberships.set(conversationId, new Set([callerId]));
+  harness.database.blockedConversations.add(conversationId);
+  const blocked = await new Promise<any>((resolve) =>
+    caller.emit('call:start', { conversationId }, resolve)
+  );
+  assert.deepEqual(blocked, {
+    ok: false,
+    error: 'Voice is unavailable for this conversation.'
+  });
+
+  caller.close();
 });

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Database } from '@cubic/database';
 import { createRequireAuth } from '../auth/guard.js';
 import type { SessionService } from '../security/session.js';
+import { authorizeConversationContentCreation } from '../authorization/conversations.js';
 import {
   AttachmentStorageReserveError,
   attachmentDeliveryPolicy,
@@ -33,47 +34,6 @@ export interface AttachmentRoutesOptions {
   attachmentMinFreeBytes: number;
   uploadRateLimit?: preHandlerAsyncHookHandler;
   insertPendingAttachment: typeof insertPendingAttachmentWithinQuota;
-}
-
-async function isMember(
-  database: Database,
-  conversationId: string,
-  userId: string
-): Promise<boolean> {
-  const result = await database.pool.query(
-    `select 1
-       from conversation_members
-      where conversation_id = $1
-        and user_id = $2
-      limit 1`,
-    [conversationId, userId]
-  );
-
-  return Boolean(result.rowCount);
-}
-
-async function messagingBlocked(
-  database: Database,
-  conversationId: string
-): Promise<boolean> {
-  const result = await database.pool.query(
-    `select 1
-       from direct_conversation_pairs dp
-       join blocks b
-         on (
-           b.blocker_id = dp.user_low_id
-           and b.blocked_id = dp.user_high_id
-         )
-         or (
-           b.blocker_id = dp.user_high_id
-           and b.blocked_id = dp.user_low_id
-         )
-      where dp.conversation_id = $1
-      limit 1`,
-    [conversationId]
-  );
-
-  return Boolean(result.rowCount);
 }
 
 function dto(row: any) {
@@ -118,12 +78,15 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
         const conversationId = params.data.id;
         const me = request.auth.user.id;
 
-        if (!(await isMember(options.database, conversationId, me))) {
-          return reply.code(404).send({ error: 'Conversation not found.' });
-        }
-
-        if (await messagingBlocked(options.database, conversationId)) {
-          return reply.code(403).send({ error: 'Messaging is not allowed.' });
+        const contentAuthorization = await authorizeConversationContentCreation(
+          options.database,
+          conversationId,
+          me
+        );
+        if (!contentAuthorization.allowed) {
+          return contentAuthorization.reason === 'not_member'
+            ? reply.code(404).send({ error: 'Conversation not found.' })
+            : reply.code(403).send({ error: 'Messaging is not allowed.' });
         }
 
         try {

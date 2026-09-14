@@ -5,6 +5,10 @@ import type { Database } from '@cubic/database';
 import { attachments, blocks, conversationMembers, conversations, directConversationPairs, friendships, messages, users } from '@cubic/database/schema';
 import { createRequireAuth } from '../auth/guard.js';
 import { normalizeLegacyAvatarUrl } from '../auth/identity.js';
+import {
+  authorizeConversationContentCreation,
+  resolveConversationMembership
+} from '../authorization/conversations.js';
 import type { SessionService } from '../security/session.js';
 import type { RealtimeEvents, RealtimeMessage, RealtimeReaction } from '../realtime/events.js';
 
@@ -44,12 +48,6 @@ const reactionBodySchema = z.object({ reaction: z.enum(SUPPORTED_REACTIONS) });
 function orderedPair(a: string, b: string): [string, string] { return a < b ? [a, b] : [b, a]; }
 
 export interface ConversationRoutesOptions { database: Database; cookieName: string; sessionService: SessionService; realtimeEvents?: RealtimeEvents; }
-
-async function isMember(database: Database, conversationId: string, userId: string): Promise<boolean> {
-  const rows = await database.db.select({ userId: conversationMembers.userId }).from(conversationMembers)
-    .where(and(eq(conversationMembers.conversationId, conversationId), eq(conversationMembers.userId, userId))).limit(1);
-  return Boolean(rows[0]);
-}
 
 export type AttachmentDto = {
   id: string;
@@ -395,7 +393,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     const params = conversationParamsSchema.safeParse(request.params);
     const query = messagesQuerySchema.safeParse(request.query);
     if (!params.success || !query.success) return reply.code(400).send({ error: 'Invalid request.' });
-    if (!(await isMember(options.database, params.data.id, request.auth.user.id))) return reply.code(404).send({ error: 'Conversation not found.' });
+    if (!(await resolveConversationMembership(options.database, params.data.id, request.auth.user.id))) return reply.code(404).send({ error: 'Conversation not found.' });
 
     const conditions = [eq(messages.conversationId, params.data.id)];
     if (query.data.before) conditions.push(lt(messages.createdAt, new Date(query.data.before)));
@@ -423,23 +421,36 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     const parsed = messageBodySchema.safeParse(request.body);
     if (!params.success || !parsed.success) return reply.code(400).send({ error: 'Invalid message.' });
     const me = request.auth.user.id;
-    if (!(await isMember(options.database, params.data.id, me))) return reply.code(404).send({ error: 'Conversation not found.' });
-
-    const blocked = await options.database.pool.query(
-      `select 1 from direct_conversation_pairs dp
-       join blocks b on (b.blocker_id = dp.user_low_id and b.blocked_id = dp.user_high_id) or (b.blocker_id = dp.user_high_id and b.blocked_id = dp.user_low_id)
-       where dp.conversation_id = $1 limit 1`, [params.data.id]
+    const contentAuthorization = await authorizeConversationContentCreation(
+      options.database,
+      params.data.id,
+      me
     );
-    if (blocked.rowCount) return reply.code(403).send({ error: 'Messaging is not allowed.' });
+    if (!contentAuthorization.allowed) {
+      return contentAuthorization.reason === 'not_member'
+        ? reply.code(404).send({ error: 'Conversation not found.' })
+        : reply.code(403).send({ error: 'Messaging is not allowed.' });
+    }
 
-    const existing = await options.database.db.select().from(messages)
-      .where(and(eq(messages.senderId, me), eq(messages.clientMessageId, parsed.data.clientMessageId))).limit(1);
+    const existingResult = await options.database.pool.query(
+      `select id, conversation_id
+         from messages
+        where conversation_id = $1
+          and sender_id = $2
+          and client_message_id = $3
+        limit 1`,
+      [params.data.id, me, parsed.data.clientMessageId]
+    );
+    const existing = existingResult.rows[0] as {
+      id: string;
+      conversation_id: string;
+    } | undefined;
 
-    if (existing[0]) {
+    if (existing) {
       const existingMessage = await fetchMessage(
         options.database,
-        existing[0].conversationId,
-        existing[0].id
+        existing.conversation_id,
+        existing.id
       );
       if (!existingMessage) throw new Error('Failed to load existing message.');
       const [serialized] = await serializeMessages(options.database, [existingMessage], me);
@@ -548,6 +559,13 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
         });
       }
 
+      if (
+        (error as NodeJS.ErrnoException).code === '23505' &&
+        (error as { constraint?: string }).constraint === 'messages_sender_client_uq'
+      ) {
+        return reply.code(409).send({ error: 'Message id is already in use.' });
+      }
+
       throw error;
     } finally {
       client.release();
@@ -593,7 +611,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     if (!params.success || !parsed.success) return reply.code(400).send({ error: 'Invalid message.' });
 
     const me = request.auth.user.id;
-    if (!(await isMember(options.database, params.data.id, me))) {
+    if (!(await resolveConversationMembership(options.database, params.data.id, me))) {
       return reply.code(404).send({ error: 'Conversation not found.' });
     }
 
@@ -640,7 +658,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     if (!params.success) return reply.code(400).send({ error: 'Invalid message.' });
 
     const me = request.auth.user.id;
-    if (!(await isMember(options.database, params.data.id, me))) {
+    if (!(await resolveConversationMembership(options.database, params.data.id, me))) {
       return reply.code(404).send({ error: 'Conversation not found.' });
     }
 
@@ -697,7 +715,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     if (!parsed.success) return reply.code(400).send({ error: 'Unsupported reaction.' });
 
     const me = request.auth.user.id;
-    if (!(await isMember(options.database, params.data.id, me))) {
+    if (!(await resolveConversationMembership(options.database, params.data.id, me))) {
       return reply.code(404).send({ error: 'Conversation not found.' });
     }
 
@@ -736,7 +754,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     if (!parsed.success) return reply.code(400).send({ error: 'Unsupported reaction.' });
 
     const me = request.auth.user.id;
-    if (!(await isMember(options.database, params.data.id, me))) {
+    if (!(await resolveConversationMembership(options.database, params.data.id, me))) {
       return reply.code(404).send({ error: 'Conversation not found.' });
     }
 

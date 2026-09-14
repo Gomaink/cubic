@@ -1,14 +1,13 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
-import { and, eq, or } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { Server } from 'socket.io';
 import { z } from 'zod';
 import type { Database } from '@cubic/database';
+import { conversationMembers } from '@cubic/database/schema';
 import {
-  blocks,
-  conversationMembers,
-  conversations,
-  directConversationPairs
-} from '@cubic/database/schema';
+  authorizeDirectCallStart,
+  resolveConversationMembership
+} from '../authorization/conversations.js';
 import type { SessionIdentity, SessionService } from '../security/session.js';
 import { createTrustedProxyCheck } from '../config/proxy.js';
 import { SessionSocketRegistry } from './session-sockets.js';
@@ -489,18 +488,13 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
           return;
         }
 
-        const membership = await options.database.db
-          .select({ conversationId: conversationMembers.conversationId })
-          .from(conversationMembers)
-          .where(
-            and(
-              eq(conversationMembers.conversationId, parsed.data.conversationId),
-              eq(conversationMembers.userId, identity.userId)
-            )
-          )
-          .limit(1);
+        const membership = await resolveConversationMembership(
+          options.database,
+          parsed.data.conversationId,
+          identity.userId
+        );
 
-        if (!membership[0]) {
+        if (!membership) {
           acknowledge?.({ ok: false, error: 'Conversation not found.' });
           return;
         }
@@ -525,49 +519,21 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
         }
 
         try {
-          const rows = await options.database.db
-            .select({
-              kind: conversations.kind,
-              userLowId: directConversationPairs.userLowId,
-              userHighId: directConversationPairs.userHighId
-            })
-            .from(conversations)
-            .innerJoin(
-              directConversationPairs,
-              eq(directConversationPairs.conversationId, conversations.id)
-            )
-            .where(eq(conversations.id, parsed.data.conversationId))
-            .limit(1);
-
-          const direct = rows[0];
-          if (!direct || direct.kind !== 'direct') {
+          const direct = await authorizeDirectCallStart(
+            options.database,
+            parsed.data.conversationId,
+            identity.userId
+          );
+          if (!direct.allowed && direct.reason === 'not_found') {
             acknowledge?.({ ok: false, error: 'Direct conversation not found.' });
             return;
           }
-
-          if (direct.userLowId !== identity.userId && direct.userHighId !== identity.userId) {
-            acknowledge?.({ ok: false, error: 'Direct conversation not found.' });
-            return;
-          }
-
-          const calleeId =
-            direct.userLowId === identity.userId ? direct.userHighId : direct.userLowId;
-
-          const blockRows = await options.database.db
-            .select({ id: blocks.id })
-            .from(blocks)
-            .where(
-              or(
-                and(eq(blocks.blockerId, identity.userId), eq(blocks.blockedId, calleeId)),
-                and(eq(blocks.blockerId, calleeId), eq(blocks.blockedId, identity.userId))
-              )
-            )
-            .limit(1);
-
-          if (blockRows.length > 0) {
+          if (!direct.allowed) {
             acknowledge?.({ ok: false, error: 'Voice is unavailable for this conversation.' });
             return;
           }
+
+          const calleeId = direct.peerUserId;
 
           const call = calls.start({
             conversationId: parsed.data.conversationId,

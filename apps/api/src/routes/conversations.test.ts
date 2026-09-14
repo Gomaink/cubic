@@ -150,6 +150,26 @@ class RouteDatabase {
     }
     if (normalized.includes('from direct_conversation_pairs dp') && normalized.includes('join blocks')) return this.result();
 
+    if (normalized.includes("c.kind in ('direct', 'group')")) {
+      const authorized = this.selectResults.shift() ?? [];
+      return authorized.length
+        ? this.result([{
+            conversation_id: params[0],
+            kind: 'group',
+            role: 'member'
+          }])
+        : this.result();
+    }
+
+    if (normalized.startsWith('select id, conversation_id from messages')) {
+      const row = [...this.messages.values()].find((message) =>
+        message.conversation_id === params[0] &&
+        message.sender_id === params[1] &&
+        message.client_message_id === params[2]
+      );
+      return this.result(row ? [{ id: row.id, conversation_id: row.conversation_id }] : []);
+    }
+
     if (normalized.includes('from messages m') && normalized.includes('join users u')) {
       const row = this.messages.get(params[0]);
       if (!row || row.conversation_id !== params[1]) return this.result();
@@ -234,6 +254,15 @@ class RouteDatabase {
     }
 
     if (normalized.startsWith('insert into messages')) {
+      const duplicate = [...this.messages.values()].some((message) =>
+        message.sender_id === params[1] && message.client_message_id === params[2]
+      );
+      if (duplicate) {
+        throw Object.assign(new Error('duplicate client message id'), {
+          code: '23505',
+          constraint: 'messages_sender_client_uq'
+        });
+      }
       const row = rawMessage({
         id: `30000000-0000-4000-8000-${String(this.nextMessage++).padStart(12, '0')}`,
         conversation_id: params[0],
@@ -331,7 +360,7 @@ test('reply creation validates membership and same-conversation targets, then em
   const harness = await routeHarness(database);
   const createdEvents: RealtimeMessage[] = [];
   harness.events.onMessageCreated((event) => createdEvents.push(event.message));
-  database.selectResults.push([{ userId: me }], []);
+  database.selectResults.push([{ userId: me }]);
 
   const response = await harness.invoke('POST', '/:id/messages', {
     params: { id: conversation },
@@ -343,7 +372,7 @@ test('reply creation validates membership and same-conversation targets, then em
   assert.deepEqual(createdEvents, [response.payload.message]);
 
   database.messages.get(firstMessage)!.deleted_at = createdAt;
-  database.selectResults.push([{ userId: me }], []);
+  database.selectResults.push([{ userId: me }]);
   const deletedTarget = await harness.invoke('POST', '/:id/messages', {
     params: { id: conversation },
     body: sendBody({ clientMessageId: thirdClient, replyToMessageId: firstMessage })
@@ -355,7 +384,7 @@ test('reply creation validates membership and same-conversation targets, then em
 
   const missing = new RouteDatabase();
   const missingHarness = await routeHarness(missing);
-  missing.selectResults.push([{ userId: me }], []);
+  missing.selectResults.push([{ userId: me }]);
   const missingResponse = await missingHarness.invoke('POST', '/:id/messages', {
     params: { id: conversation },
     body: sendBody({ replyToMessageId: firstMessage })
@@ -365,7 +394,7 @@ test('reply creation validates membership and same-conversation targets, then em
   const cross = new RouteDatabase();
   cross.messages.set(firstMessage, rawMessage({ conversation_id: otherConversation }));
   const crossHarness = await routeHarness(cross);
-  cross.selectResults.push([{ userId: me }], []);
+  cross.selectResults.push([{ userId: me }]);
   const crossResponse = await crossHarness.invoke('POST', '/:id/messages', {
     params: { id: conversation },
     body: sendBody({ replyToMessageId: firstMessage })
@@ -522,7 +551,7 @@ test('normal text, attachment-only, text-plus-attachment, and client idempotency
     ['Text and file', [attachmentId]]
   ] as const) {
     const database = new RouteDatabase();
-    database.selectResults.push([{ userId: me }], []);
+    database.selectResults.push([{ userId: me }]);
     const harness = await routeHarness(database);
     const response = await harness.invoke('POST', '/:id/messages', {
       params: { id: conversation }, body: sendBody({ body, attachmentIds: [...attachmentIds] })
@@ -535,7 +564,7 @@ test('normal text, attachment-only, text-plus-attachment, and client idempotency
   const database = new RouteDatabase();
   const existing = rawMessage();
   database.messages.set(existing.id, existing);
-  database.selectResults.push([{ userId: me }], [camelMessage(existing)]);
+  database.selectResults.push([{ userId: me }]);
   const harness = await routeHarness(database);
   const response = await harness.invoke('POST', '/:id/messages', {
     params: { id: conversation }, body: sendBody()
@@ -544,6 +573,24 @@ test('normal text, attachment-only, text-plus-attachment, and client idempotency
   assert.equal(response.payload.duplicate, true);
   assert.equal(response.payload.message.id, existing.id);
   assert.equal(database.messages.size, 1);
+
+  const crossConversation = new RouteDatabase();
+  crossConversation.messages.set(firstMessage, rawMessage({
+    conversation_id: otherConversation
+  }));
+  crossConversation.selectResults.push([{ userId: me }]);
+  const crossConversationHarness = await routeHarness(crossConversation);
+  const crossConversationResponse = await crossConversationHarness.invoke(
+    'POST',
+    '/:id/messages',
+    { params: { id: conversation }, body: sendBody() }
+  );
+  assert.equal(crossConversationResponse.statusCode, 409);
+  assert.deepEqual(crossConversationResponse.payload, {
+    error: 'Message id is already in use.'
+  });
+  assert.equal(crossConversation.messages.get(firstMessage)?.conversation_id, otherConversation);
+  assert.equal(crossConversation.messages.size, 1);
 });
 
 test('attachment binding rejects foreign ownership and cross-conversation IDs without partial state', async () => {
@@ -552,7 +599,7 @@ test('attachment binding rejects foreign ownership and cross-conversation IDs wi
     [otherConversation, me]
   ] as const) {
     const database = new RouteDatabase();
-    database.selectResults.push([{ userId }], []);
+    database.selectResults.push([{ userId }]);
     const harness = await routeHarness(database);
     const response = await harness.invoke('POST', '/:id/messages', {
       params: { id: targetConversation },
@@ -576,7 +623,7 @@ test('mixed valid and invalid attachment IDs roll back the message and every bin
     uploader_id: peer,
     storage_key: 'fixture-key-2'
   }));
-  database.selectResults.push([{ userId: me }], []);
+  database.selectResults.push([{ userId: me }]);
   const harness = await routeHarness(database);
 
   const response = await harness.invoke('POST', '/:id/messages', {
@@ -597,7 +644,7 @@ test('multiple valid pending attachments bind atomically to one message', async 
     original_name: 'notes.txt',
     kind: 'file'
   }));
-  database.selectResults.push([{ userId: me }], []);
+  database.selectResults.push([{ userId: me }]);
   const harness = await routeHarness(database);
 
   const response = await harness.invoke('POST', '/:id/messages', {
@@ -724,4 +771,30 @@ test('reaction routes reject invalid authentication, membership, message, value,
   });
   assert.equal(deletedResponse.statusCode, 409);
   assert.equal(deletedDatabase.reactions.length, 0);
+});
+
+test('outsiders retain not-found semantics across every conversation message operation', async () => {
+  const operations = [
+    { method: 'GET', path: '/:id/messages', query: { limit: 50 } },
+    { method: 'POST', path: '/:id/messages', body: sendBody() },
+    { method: 'PATCH', path: '/:id/messages/:messageId', body: { body: 'Changed' } },
+    { method: 'DELETE', path: '/:id/messages/:messageId' },
+    { method: 'PUT', path: '/:id/messages/:messageId/reactions', body: { reaction: '👍' } },
+    { method: 'DELETE', path: '/:id/messages/:messageId/reactions', body: { reaction: '👍' } }
+  ];
+
+  for (const operation of operations) {
+    const database = new RouteDatabase();
+    database.messages.set(firstMessage, rawMessage());
+    database.selectResults.push([]);
+    const harness = await routeHarness(database);
+    const response = await harness.invoke(operation.method, operation.path, {
+      params: { id: conversation, messageId: firstMessage },
+      query: operation.query,
+      body: operation.body,
+      userId: outsider
+    });
+    assert.equal(response.statusCode, 404, `${operation.method} ${operation.path}`);
+    assert.deepEqual(response.payload, { error: 'Conversation not found.' });
+  }
 });

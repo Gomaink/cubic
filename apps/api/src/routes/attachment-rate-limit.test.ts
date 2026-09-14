@@ -45,8 +45,11 @@ async function rateLimitApp() {
     pool: {
       query: async (sql: string) => {
         const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase();
-        if (normalized.includes('from conversation_members')) {
-          return { rows: [{}], rowCount: 1 };
+        if (normalized.includes("c.kind in ('direct', 'group')")) {
+          return {
+            rows: [{ conversation_id: conversationId, kind: 'group', role: 'member' }],
+            rowCount: 1
+          };
         }
         if (normalized.includes('from direct_conversation_pairs dp')) {
           return { rows: [], rowCount: 0 };
