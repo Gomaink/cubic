@@ -95,11 +95,12 @@ export function createForwardedHeaderPolicy(cidrs) {
     }
 
     const forwardedProtocol = trustedPeer ? lastHeaderValue(headers['x-forwarded-proto']) : undefined;
-    const protocol = forwardedProtocol === 'http' || forwardedProtocol === 'https'
-      ? forwardedProtocol
-      : encrypted
-        ? 'https'
-        : 'http';
+    const normalizedForwardedProtocol = forwardedProtocol === 'https' || forwardedProtocol === 'wss'
+      ? 'https'
+      : forwardedProtocol === 'http' || forwardedProtocol === 'ws'
+        ? 'http'
+        : undefined;
+    const protocol = normalizedForwardedProtocol ?? (encrypted ? 'https' : 'http');
 
     const forwardedHost = trustedPeer ? lastHeaderValue(headers['x-forwarded-host']) : undefined;
     const host = validHost(forwardedHost) ? forwardedHost : headers.host;

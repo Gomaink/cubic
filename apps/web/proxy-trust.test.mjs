@@ -54,3 +54,38 @@ test('trusted edge values are canonicalized at the first untrusted client', () =
     trustedPeer: true
   });
 });
+
+test('trusted websocket forwarding normalizes ws and wss to HTTP semantics', () => {
+  const applyPolicy = createForwardedHeaderPolicy(parseTrustedProxyCidrs('172.30.0.0/16'));
+  const base = {
+    remoteAddress: '172.30.0.1',
+    encrypted: false,
+    headers: { host: 'cubic.example:3010' }
+  };
+
+  assert.equal(applyPolicy({ ...base, headers: { ...base.headers, 'x-forwarded-proto': 'wss' } }).protocol, 'https');
+  assert.equal(applyPolicy({ ...base, headers: { ...base.headers, 'x-forwarded-proto': 'ws' } }).protocol, 'http');
+  assert.equal(applyPolicy({ ...base, headers: { ...base.headers, 'x-forwarded-proto': 'https' } }).protocol, 'https');
+  assert.equal(applyPolicy({ ...base, headers: { ...base.headers, 'x-forwarded-proto': 'http' } }).protocol, 'http');
+});
+
+test('untrusted websocket forwarding cannot assert HTTPS', () => {
+  const applyPolicy = createForwardedHeaderPolicy(parseTrustedProxyCidrs('172.30.0.0/16'));
+  const result = applyPolicy({
+    remoteAddress: '192.168.15.50',
+    encrypted: false,
+    headers: {
+      host: 'cubic.example:3010',
+      'x-forwarded-proto': 'wss'
+    }
+  });
+  assert.equal(result.protocol, 'http');
+  assert.equal(result.trustedPeer, false);
+});
+
+test('unknown forwarded protocols retain encrypted-socket fallback behavior', () => {
+  const applyPolicy = createForwardedHeaderPolicy(parseTrustedProxyCidrs('172.30.0.0/16'));
+  const headers = { host: 'cubic.example:3010', 'x-forwarded-proto': 'quic' };
+  assert.equal(applyPolicy({ remoteAddress: '172.30.0.1', encrypted: true, headers }).protocol, 'https');
+  assert.equal(applyPolicy({ remoteAddress: '172.30.0.1', encrypted: false, headers }).protocol, 'http');
+});
