@@ -55,6 +55,7 @@ const app = await createApp({
   attachmentReconciliationMissingBatchSize:
     env.ATTACHMENT_RECONCILIATION_MISSING_BATCH_SIZE,
   livekitAuthorization,
+  livekitPublicUrl: env.LIVEKIT_PUBLIC_URL,
   realtimeEvents,
   logger: env.NODE_ENV !== 'test'
 });
@@ -66,6 +67,7 @@ const realtime = attachRealtime({
   sessionService,
   revalidateIntervalMs: env.SESSION_SOCKET_REVALIDATE_MS,
   trustedProxyCidrs: env.TRUST_PROXY_CIDRS,
+  browserOrigin: env.CORS_ORIGIN,
   events: realtimeEvents
 });
 

@@ -26,6 +26,13 @@ test('default Compose requires private deployment credentials', async () => {
   assert.match(compose, /web:[\s\S]*TRUST_PROXY_CIDRS: \$\{TRUST_PROXY_CIDRS:\?/);
   assert.match(compose, /LIVEKIT_API_URL: \$\{LIVEKIT_API_URL:-http:\/\/livekit:7880\}/);
   assert.match(environmentExample, /^LIVEKIT_API_URL=http:\/\/livekit:7880$/m);
+  const livekitPublicAssignments = compose.match(
+    /LIVEKIT_PUBLIC_URL: \$\{LIVEKIT_PUBLIC_URL:-ws:\/\/localhost:7880\}/g
+  ) ?? [];
+  assert.equal(livekitPublicAssignments.length, 2, 'API and web build must share LIVEKIT_PUBLIC_URL');
+  const webDockerfile = await readFile(new URL('infra/docker/web.Dockerfile', repositoryRoot), 'utf8');
+  assert.match(webDockerfile, /ARG LIVEKIT_PUBLIC_URL=/);
+  assert.match(webDockerfile, /ENV LIVEKIT_PUBLIC_URL=\$LIVEKIT_PUBLIC_URL/);
   for (const setting of [
     'LIVEKIT_AUTHORIZATION_RECONCILE_MS',
     'ATTACHMENT_PENDING_MAX_COUNT',

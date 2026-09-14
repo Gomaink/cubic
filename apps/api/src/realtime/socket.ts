@@ -19,6 +19,7 @@ import {
   type TerminalDirectCallState
 } from './calls.js';
 import type { RealtimeEvents } from './events.js';
+import { browserOriginMatches, canonicalBrowserOrigin } from '../security/browser-request.js';
 
 const joinSchema = z.object({ conversationId: z.string().uuid() });
 const callStartSchema = z.object({ conversationId: z.string().uuid() });
@@ -61,7 +62,8 @@ export function readCookie(header: string | undefined, name: string): string | n
 
 export function isSameOriginRequest(
   request: IncomingMessage,
-  isTrustedProxy: (address: string) => boolean
+  isTrustedProxy: (address: string) => boolean,
+  expectedOrigin?: string
 ): boolean {
   const origin = request.headers.origin;
   if (!origin) return true;
@@ -74,10 +76,21 @@ export function isSameOriginRequest(
       : forwardedHost ?? request.headers.host
     : request.headers.host;
 
-  if (!host) return false;
+  const forwardedProto = request.headers['x-forwarded-proto'];
+  const protocol = isTrustedProxy(remoteAddress)
+    ? Array.isArray(forwardedProto)
+      ? forwardedProto[0]
+      : forwardedProto
+    : (request.socket as typeof request.socket & { encrypted?: boolean }).encrypted
+      ? 'https'
+      : 'http';
+
+  if (!host || (protocol !== 'http' && protocol !== 'https')) return false;
 
   try {
-    return new URL(origin).host === host;
+    const requestOrigin = canonicalBrowserOrigin(`${protocol}://${host}`);
+    return browserOriginMatches(origin, expectedOrigin ?? requestOrigin) &&
+      (!expectedOrigin || requestOrigin === expectedOrigin);
   } catch {
     return false;
   }
@@ -90,6 +103,7 @@ export interface AttachRealtimeOptions {
   sessionService: SessionService;
   revalidateIntervalMs: number;
   trustedProxyCidrs: string[];
+  browserOrigin: string;
   events: RealtimeEvents;
   pingIntervalMs?: number;
   pingTimeoutMs?: number;
@@ -302,11 +316,11 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     ...(options.pingIntervalMs === undefined ? {} : { pingInterval: options.pingIntervalMs }),
     ...(options.pingTimeoutMs === undefined ? {} : { pingTimeout: options.pingTimeoutMs }),
     cors: {
-      origin: true,
+      origin: options.browserOrigin,
       credentials: true
     },
     allowRequest: (request, callback) => {
-      const allowed = isSameOriginRequest(request, isTrustedProxy);
+      const allowed = isSameOriginRequest(request, isTrustedProxy, options.browserOrigin);
       callback(allowed ? null : 'Origin not allowed.', allowed);
     }
   });

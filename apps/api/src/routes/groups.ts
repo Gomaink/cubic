@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Database } from '@cubic/database';
 import { conversationMembers, conversations, friendships } from '@cubic/database/schema';
 import { createRequireAuth } from '../auth/guard.js';
+import { normalizeLegacyAvatarUrl } from '../auth/identity.js';
 import type { SessionService } from '../security/session.js';
 import type { LocalMediaStore } from '../media/local.js';
 import type { RealtimeEvents } from '../realtime/events.js';
@@ -167,7 +168,7 @@ async function serializeGroup(database: Database, conversationId: string, userId
       id: member.id,
       username: member.username,
       displayName: member.display_name,
-      avatarUrl: member.avatar_url,
+      avatarUrl: normalizeLegacyAvatarUrl(member.avatar_url),
       role: member.role as GroupRole,
       joinedAt: new Date(member.joined_at).toISOString()
     })),
@@ -177,7 +178,7 @@ async function serializeGroup(database: Database, conversationId: string, userId
         id: invite.invitee_id,
         username: invite.username,
         displayName: invite.display_name,
-        avatarUrl: invite.avatar_url
+        avatarUrl: normalizeLegacyAvatarUrl(invite.avatar_url)
       },
       createdAt: new Date(invite.created_at).toISOString()
     }))
@@ -384,6 +385,9 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     try {
       const media = await options.mediaStore.readGroupAvatar(avatarKey);
       reply.header('cache-control', 'private, max-age=86400, immutable');
+      reply.header('x-content-type-options', 'nosniff');
+      const extension = media.contentType === 'image/png' ? 'png' : media.contentType === 'image/jpeg' ? 'jpg' : 'webp';
+      reply.header('content-disposition', `inline; filename="group-avatar.${extension}"`);
       return reply.type(media.contentType).send(media.buffer);
     } catch {
       return reply.code(404).send({ error: 'Avatar not found.' });

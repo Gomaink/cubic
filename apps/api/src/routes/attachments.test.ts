@@ -98,6 +98,7 @@ async function routeHarness(
     save?: () => Promise<any>;
     insertPendingAttachment?: (...args: any[]) => Promise<any>;
     open?: (key: string) => unknown;
+    detectForDelivery?: (key: string, claimedMime: string) => Promise<string>;
   } = {}
 ) {
   const handlers = new Map<string, Handler>();
@@ -120,6 +121,7 @@ async function routeHarness(
   };
   const store = {
     open: overrides.open ?? ((key: string) => Readable.from([key])),
+    detectForDelivery: overrides.detectForDelivery ?? (async (_key: string, claimedMime: string) => claimedMime),
     delete: async (key: string) => { deletedKeys.push(key); },
     discardStaged: async (key: string) => { deletedKeys.push(key); },
     publish: async (key: string) => { publishedKeys.push(key); },
@@ -193,10 +195,8 @@ test('pending attachment content is visible only to its uploader', async () => {
   assert.equal(ownerResponse.headers['content-type'], 'text/plain');
   assert.equal(ownerResponse.headers['x-content-type-options'], 'nosniff');
   assert.equal(ownerResponse.headers['cache-control'], 'private, no-store');
-  assert.equal(
-    ownerResponse.headers['content-disposition'],
-    "inline; filename*=UTF-8''report%20final.txt"
-  );
+  assert.equal(ownerResponse.headers['content-disposition'],
+    "attachment; filename=\"report final.txt\"; filename*=UTF-8''report%20final.txt");
 
   for (const userId of [member, outsider]) {
     const response = await harness.invoke('GET', '/attachments/:id/content', userId);
@@ -246,9 +246,29 @@ test('scriptable and unknown attachment types remain download-only', async () =>
   for (const contentType of ['image/svg+xml', 'text/html', 'application/octet-stream']) {
     const database = new AttachmentRouteDatabase();
     database.attachments[0] = attachment({ content_type: contentType });
-    const response = await (await routeHarness(database)).invoke('GET', '/attachments/:id/content');
+    const response = await (await routeHarness(database, {
+      detectForDelivery: async () => 'application/octet-stream'
+    })).invoke('GET', '/attachments/:id/content');
     assert.match(response.headers['content-disposition'] ?? '', /^attachment;/);
+    assert.equal(response.headers['content-type'], 'application/octet-stream');
   }
+});
+
+test('PDF content is explicitly download-only', async () => {
+  const database = new AttachmentRouteDatabase();
+  database.attachments[0] = attachment({ content_type: 'application/pdf' });
+  const response = await (await routeHarness(database)).invoke('GET', '/attachments/:id/content');
+  assert.equal(response.headers['content-type'], 'application/pdf');
+  assert.match(response.headers['content-disposition'] ?? '', /^attachment;/);
+});
+
+test('delivery sanitizes legacy control, bidi, path, and Unicode filenames', async () => {
+  const database = new AttachmentRouteDatabase();
+  database.attachments[0] = attachment({ original_name: '../résumé\r\n\u202etest.txt' });
+  const response = await (await routeHarness(database)).invoke('GET', '/attachments/:id/content');
+  const header = response.headers['content-disposition'] ?? '';
+  assert.doesNotMatch(header, /[\r\n\u202e\\/]/u);
+  assert.match(header, /filename\*=UTF-8''/);
 });
 
 test('recognized image and video types retain inline content serving', async () => {

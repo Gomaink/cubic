@@ -9,6 +9,7 @@ import {
 
 const requiredEnvironment = {
   DATABASE_URL: 'postgresql://cubic:local-test-password@localhost:5432/cubic',
+  CORS_ORIGIN: 'http://localhost:3010',
   LIVEKIT_PUBLIC_URL: 'ws://localhost:7880',
   LIVEKIT_API_URL: 'http://localhost:7880',
   LIVEKIT_API_KEY: 'local-test-key',
@@ -25,6 +26,35 @@ test('production requires secure session cookies', () => {
     () => loadEnv({ ...requiredEnvironment, NODE_ENV: 'production', SESSION_COOKIE_SECURE: 'false' }),
     /SESSION_COOKIE_SECURE: must be true when NODE_ENV is production/
   );
+});
+
+test('browser origin is explicit, canonical, and HTTPS in production', () => {
+  assert.throws(
+    () => loadEnv({ ...requiredEnvironment, CORS_ORIGIN: undefined }),
+    /CORS_ORIGIN:/
+  );
+  for (const invalid of [
+    '*', 'null', 'file:///app', 'https://user@example.test',
+    'https://example.test/path', 'https://example.test?query=1',
+    'https://example.test#fragment', 'https://one.test,https://two.test'
+  ]) {
+    assert.throws(() => loadEnv({ ...requiredEnvironment, CORS_ORIGIN: invalid }), /CORS_ORIGIN:/);
+  }
+  assert.throws(
+    () => loadEnv({
+      ...requiredEnvironment,
+      NODE_ENV: 'production',
+      SESSION_COOKIE_SECURE: 'true'
+    }),
+    /CORS_ORIGIN: must use https when NODE_ENV is production/
+  );
+  const production = loadEnv({
+    ...requiredEnvironment,
+    NODE_ENV: 'production',
+    SESSION_COOKIE_SECURE: 'true',
+    CORS_ORIGIN: 'https://CUBIC.example:443/'
+  });
+  assert.equal(production.CORS_ORIGIN, 'https://cubic.example');
 });
 
 test('LiveKit authorization reconciliation uses a bounded 30 second default', () => {
@@ -49,7 +79,8 @@ test('production accepts explicitly enabled secure session cookies', () => {
   const env = loadEnv({
     ...requiredEnvironment,
     NODE_ENV: 'production',
-    SESSION_COOKIE_SECURE: 'true'
+    SESSION_COOKIE_SECURE: 'true',
+    CORS_ORIGIN: 'https://cubic.example'
   });
 
   assert.equal(env.SESSION_COOKIE_SECURE, true);

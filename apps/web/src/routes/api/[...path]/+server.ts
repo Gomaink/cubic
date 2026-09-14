@@ -15,7 +15,16 @@ const proxy: RequestHandler = async ({ request, params, url, fetch, getClientAdd
   const upstreamUrl = `${apiUrl}/api/${params.path ?? ''}${url.search}`;
   const headers = new Headers();
 
-  for (const name of ['accept', 'content-type', 'cookie', 'user-agent']) {
+  for (const name of [
+    'accept',
+    'content-type',
+    'cookie',
+    'origin',
+    'sec-fetch-site',
+    'sec-fetch-mode',
+    'sec-fetch-dest',
+    'user-agent'
+  ]) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
@@ -25,6 +34,8 @@ const proxy: RequestHandler = async ({ request, params, url, fetch, getClientAdd
   } catch {
     // Adapter may not expose an address in every development environment.
   }
+  headers.set('x-forwarded-proto', url.protocol.slice(0, -1));
+  headers.set('x-forwarded-host', url.host);
 
   const method = request.method.toUpperCase();
   const init: RequestInit = { method, headers, redirect: 'manual' };

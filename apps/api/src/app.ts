@@ -33,6 +33,8 @@ import {
 import { ATTACHMENT_DEFAULTS } from './config/env.js';
 import type { SessionService } from './security/session.js';
 import type { LiveKitAuthorizationService } from './voice/authorization.js';
+import { browserCorsOptions, createBrowserMutationProtection } from './security/browser-request.js';
+import { securityRoutes } from './routes/security.js';
 
 export interface CreateAppOptions {
   database: Database;
@@ -64,6 +66,7 @@ export interface CreateAppOptions {
   attachmentReconciliationScanBatchSize?: number;
   attachmentReconciliationMissingBatchSize?: number;
   livekitAuthorization: LiveKitAuthorizationService;
+  livekitPublicUrl: string;
   logger?: boolean;
   realtimeEvents?: RealtimeEvents;
 }
@@ -92,11 +95,9 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     }
   });
 
-  await app.register(cors, {
-    origin: options.corsOrigin,
-    credentials: true,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS']
-  });
+  await app.register(cors, browserCorsOptions(options.corsOrigin));
+
+  app.addHook('onRequest', createBrowserMutationProtection(options.corsOrigin));
 
   await app.register(rateLimit, {
     global: true,
@@ -108,8 +109,6 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
 
   app.addHook('onSend', async (_request, reply, payload) => {
     reply.header('x-content-type-options', 'nosniff');
-    reply.header('referrer-policy', 'no-referrer');
-    reply.header('x-frame-options', 'DENY');
     return payload;
   });
 
@@ -122,6 +121,12 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   await app.register(healthRoutes, {
     prefix: '/api/v1',
     pool: options.database.pool
+  });
+
+  await app.register(securityRoutes, {
+    prefix: '/api/v1/security',
+    browserOrigin: options.corsOrigin,
+    livekitPublicUrl: options.livekitPublicUrl
   });
 
   await app.register(authRoutes, {

@@ -1,5 +1,7 @@
 FROM node:24-alpine AS build
 WORKDIR /app
+ARG LIVEKIT_PUBLIC_URL=ws://localhost:7880
+ENV LIVEKIT_PUBLIC_URL=$LIVEKIT_PUBLIC_URL
 
 COPY package.json ./
 COPY package-lock.json ./

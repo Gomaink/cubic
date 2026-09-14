@@ -11,6 +11,7 @@ import {
   users
 } from '@cubic/database/schema';
 import { createRequireAuth } from '../auth/guard.js';
+import { normalizeLegacyAvatarUrl } from '../auth/identity.js';
 import type { SessionService } from '../security/session.js';
 import type { RealtimeEvents } from '../realtime/events.js';
 
@@ -28,7 +29,7 @@ function publicUser(row: typeof users.$inferSelect) {
     id: row.id,
     username: row.username,
     displayName: row.displayName,
-    avatarUrl: row.avatarUrl,
+    avatarUrl: normalizeLegacyAvatarUrl(row.avatarUrl),
     createdAt: row.createdAt.toISOString()
   };
 }
@@ -64,7 +65,7 @@ export const socialRoutes: FastifyPluginAsync<SocialRoutesOptions> = async (app,
         id: row.id,
         username: row.username,
         displayName: row.display_name,
-        avatarUrl: row.avatar_url,
+        avatarUrl: normalizeLegacyAvatarUrl(row.avatar_url),
         createdAt: new Date(row.created_at).toISOString()
       }))
     });
@@ -87,7 +88,7 @@ export const socialRoutes: FastifyPluginAsync<SocialRoutesOptions> = async (app,
         id: row.id,
         username: row.username,
         displayName: row.display_name,
-        avatarUrl: row.avatar_url,
+        avatarUrl: normalizeLegacyAvatarUrl(row.avatar_url),
         createdAt: new Date(row.created_at).toISOString()
       }))
     });
@@ -114,8 +115,8 @@ export const socialRoutes: FastifyPluginAsync<SocialRoutesOptions> = async (app,
         direction: row.sender_id === userId ? 'outgoing' : 'incoming',
         createdAt: new Date(row.created_at).toISOString(),
         user: row.sender_id === userId
-          ? { id: row.receiver_id, username: row.receiver_username, displayName: row.receiver_display_name, avatarUrl: row.receiver_avatar_url }
-          : { id: row.sender_id, username: row.sender_username, displayName: row.sender_display_name, avatarUrl: row.sender_avatar_url }
+          ? { id: row.receiver_id, username: row.receiver_username, displayName: row.receiver_display_name, avatarUrl: normalizeLegacyAvatarUrl(row.receiver_avatar_url) }
+          : { id: row.sender_id, username: row.sender_username, displayName: row.sender_display_name, avatarUrl: normalizeLegacyAvatarUrl(row.sender_avatar_url) }
       }))
     });
   });
@@ -233,7 +234,7 @@ export const socialRoutes: FastifyPluginAsync<SocialRoutesOptions> = async (app,
        where b.blocker_id = $1 order by b.created_at desc`,
       [request.auth.user.id]
     );
-    return reply.send({ blocks: result.rows.map((row) => ({ id: row.id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, blockedAt: new Date(row.created_at).toISOString() })) });
+    return reply.send({ blocks: result.rows.map((row) => ({ id: row.id, username: row.username, displayName: row.display_name, avatarUrl: normalizeLegacyAvatarUrl(row.avatar_url), blockedAt: new Date(row.created_at).toISOString() })) });
   });
 
   app.post('/blocks', { preHandler: requireAuth }, async (request, reply) => {

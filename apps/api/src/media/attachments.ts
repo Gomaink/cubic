@@ -79,6 +79,79 @@ function sanitizeFileName(name: string): string {
   return normalized || 'attachment';
 }
 
+const FILE_NAME_CONTROLS = /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/gu;
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  let result = '';
+  for (const character of value) {
+    const safeCharacter = /[\uD800-\uDFFF]/u.test(character) ? '_' : character;
+    if (Buffer.byteLength(result + safeCharacter, 'utf8') > maxBytes) break;
+    result += safeCharacter;
+  }
+  return result;
+}
+
+export function safeAttachmentContentDisposition(
+  originalName: unknown,
+  disposition: 'inline' | 'attachment'
+): string {
+  const source = typeof originalName === 'string' ? originalName : '';
+  let unicodeName = source
+    .normalize('NFC')
+    .replace(FILE_NAME_CONTROLS, '')
+    .replace(/[\\/]/gu, '_')
+    .trim();
+  if (!unicodeName || unicodeName === '.' || unicodeName === '..') unicodeName = 'attachment';
+  unicodeName = unicodeName.replace(/^\.+/u, '_');
+  unicodeName = truncateUtf8(unicodeName, 180) || 'attachment';
+
+  let asciiName = unicodeName
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/gu, '')
+    .replace(/[^A-Za-z0-9._ -]/gu, '_')
+    .replace(/^\.+/u, '_')
+    .trim()
+    .slice(0, 100);
+  if (!asciiName || asciiName === '.' || asciiName === '..') asciiName = 'attachment';
+
+  const encodedName = encodeURIComponent(unicodeName)
+    .replace(/['()*]/gu, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${disposition}; filename="${asciiName}"; filename*=UTF-8''${encodedName}`;
+}
+
+const INLINE_ATTACHMENT_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'audio/wav',
+  'audio/ogg',
+  'audio/mpeg',
+  'video/mp4',
+  'video/webm',
+  'video/ogg'
+]);
+
+export function attachmentDeliveryPolicy(detectedContentType: string): {
+  contentType: string;
+  disposition: 'inline' | 'attachment';
+} {
+  if (INLINE_ATTACHMENT_TYPES.has(detectedContentType)) {
+    return { contentType: detectedContentType, disposition: 'inline' };
+  }
+  if (
+    detectedContentType === 'application/pdf' ||
+    detectedContentType === 'application/zip' ||
+    detectedContentType === 'text/plain' ||
+    detectedContentType === 'text/csv' ||
+    detectedContentType === 'text/markdown' ||
+    detectedContentType === 'application/json'
+  ) {
+    return { contentType: detectedContentType, disposition: 'attachment' };
+  }
+  return { contentType: 'application/octet-stream', disposition: 'attachment' };
+}
+
 function jpegDimensions(buffer: Buffer): { width: number; height: number } | null {
   if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
 
@@ -443,6 +516,27 @@ export class AttachmentStore {
     } catch (error) {
       await handle.close().catch(() => {});
       throw error;
+    }
+  }
+
+  async detectForDelivery(key: string, claimedMime: string): Promise<string> {
+    const normalized = safeAttachmentKey(key);
+    const handle = await open(
+      join(this.root, normalized),
+      constants.O_RDONLY | constants.O_NOFOLLOW
+    );
+    try {
+      const metadata = await handle.stat();
+      if (!metadata.isFile()) throw unsafeEntryError();
+      const sniffLength = Math.min(metadata.size, 64 * 1024);
+      const sniffBuffer = Buffer.alloc(sniffLength);
+      const { bytesRead } = await handle.read(sniffBuffer, 0, sniffLength, 0);
+      return detectAttachment(
+        sniffBuffer.subarray(0, bytesRead),
+        claimedMime.toLowerCase()
+      ).contentType;
+    } finally {
+      await handle.close().catch(() => {});
     }
   }
 

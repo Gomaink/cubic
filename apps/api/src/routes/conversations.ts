@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Database } from '@cubic/database';
 import { attachments, blocks, conversationMembers, conversations, directConversationPairs, friendships, messages, users } from '@cubic/database/schema';
 import { createRequireAuth } from '../auth/guard.js';
+import { normalizeLegacyAvatarUrl } from '../auth/identity.js';
 import type { SessionService } from '../security/session.js';
 import type { RealtimeEvents, RealtimeMessage, RealtimeReaction } from '../realtime/events.js';
 
@@ -302,7 +303,7 @@ async function fetchMessage(
     deletedAt: row.deleted_at ? new Date(row.deleted_at) : null,
     senderUsername: row.sender_username,
     senderDisplayName: row.sender_display_name,
-    senderAvatarUrl: row.sender_avatar_url
+    senderAvatarUrl: normalizeLegacyAvatarUrl(row.sender_avatar_url)
   };
 }
 
@@ -337,7 +338,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
       id: row.id, kind: row.kind, title: row.title, currentRole: row.current_role, memberCount: row.member_count ?? 0,
       avatarUrl: row.kind === 'group' && row.avatar_key ? `/api/v1/groups/${row.id}/avatar?v=${new Date(row.updated_at).getTime()}` : null,
       createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
-      peer: row.peer_id ? { id: row.peer_id, username: row.peer_username, displayName: row.peer_display_name, avatarUrl: row.peer_avatar_url } : null,
+      peer: row.peer_id ? { id: row.peer_id, username: row.peer_username, displayName: row.peer_display_name, avatarUrl: normalizeLegacyAvatarUrl(row.peer_avatar_url) } : null,
       lastMessage: row.last_message_id ? { id: row.last_message_id, body: row.last_message_body, createdAt: new Date(row.last_message_at).toISOString(), senderId: row.last_message_sender_id } : null
     })) });
   });

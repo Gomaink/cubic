@@ -34,7 +34,8 @@ test('isSameOriginRequest uses forwarded host only for a trusted proxy', () => {
     headers: {
       origin: 'http://192.168.15.172:3010',
       host: 'api:3001',
-      'x-forwarded-host': '192.168.15.172:3010'
+      'x-forwarded-host': '192.168.15.172:3010',
+      'x-forwarded-proto': 'http'
     },
     socket: { remoteAddress: '172.30.0.5' }
   } as unknown as IncomingMessage;
@@ -43,7 +44,8 @@ test('isSameOriginRequest uses forwarded host only for a trusted proxy', () => {
     headers: {
       origin: 'https://evil.example',
       host: 'api:3001',
-      'x-forwarded-host': '192.168.15.172:3010'
+      'x-forwarded-host': '192.168.15.172:3010',
+      'x-forwarded-proto': 'http'
     },
     socket: { remoteAddress: '172.30.0.5' }
   } as unknown as IncomingMessage;
@@ -60,6 +62,23 @@ test('isSameOriginRequest uses forwarded host only for a trusted proxy', () => {
   assert.equal(isSameOriginRequest(accepted, trustCubicNetwork), true);
   assert.equal(isSameOriginRequest(rejected, trustCubicNetwork), false);
   assert.equal(isSameOriginRequest(untrustedSpoof, trustCubicNetwork), false);
+
+  const httpsRequest = {
+    headers: {
+      origin: 'https://cubic.example:443',
+      host: 'api:3001',
+      'x-forwarded-host': 'cubic.example',
+      'x-forwarded-proto': 'https'
+    },
+    socket: { remoteAddress: '172.30.0.5' }
+  } as unknown as IncomingMessage;
+  assert.equal(isSameOriginRequest(httpsRequest, trustCubicNetwork, 'https://cubic.example'), true);
+  httpsRequest.headers.origin = 'http://cubic.example';
+  assert.equal(isSameOriginRequest(httpsRequest, trustCubicNetwork, 'https://cubic.example'), false);
+  httpsRequest.headers.origin = 'https://cubic.example:444';
+  assert.equal(isSameOriginRequest(httpsRequest, trustCubicNetwork, 'https://cubic.example'), false);
+  httpsRequest.headers.origin = 'null';
+  assert.equal(isSameOriginRequest(httpsRequest, trustCubicNetwork, 'https://cubic.example'), false);
 });
 
 const conversationId = '20000000-0000-4000-8000-000000000001';
@@ -298,6 +317,11 @@ async function startRealtimeHarness(options: {
   });
   await app.ready();
 
+  await app.listen({ host: '127.0.0.1', port: 0 });
+  const address = app.server.address();
+  if (!address || typeof address === 'string') throw new Error('Test server did not bind TCP.');
+  const url = `http://127.0.0.1:${address.port}`;
+
   const realtime = attachRealtime({
     server: app.server,
     database: database as unknown as Database,
@@ -308,13 +332,10 @@ async function startRealtimeHarness(options: {
       ? {}
       : { pingIntervalMs: options.pingIntervalMs, pingTimeoutMs: 50 }),
     trustedProxyCidrs: ['127.0.0.1/32', '::1/128'],
+    browserOrigin: url,
     events
   });
-
-  await app.listen({ host: '127.0.0.1', port: 0 });
-  const address = app.server.address();
-  if (!address || typeof address === 'string') throw new Error('Test server did not bind TCP.');
-  return { app, database, events, repository, realtime, url: `http://127.0.0.1:${address.port}` };
+  return { app, database, events, repository, realtime, url };
 }
 
 async function closeRealtimeHarness(harness: RealtimeHarness): Promise<void> {

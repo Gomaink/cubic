@@ -60,6 +60,20 @@ Particularly important areas include:
   account state, conversation membership, DM blocks and accepted-call state
 - LiveKit participant identities contain an opaque room-scoped session tag, not
   a Cubic session UUID, session token or stored token digest
+- cookie-authenticated browser mutations require the exact configured browser
+  Origin; Fetch Metadata may further restrict a request but never relaxes that
+  check, and no JavaScript-readable CSRF credential is introduced
+- the web application enforces a nonce-aware Content Security Policy after the
+  alpha.8 0C report-only compatibility rollout; violation reports retain only
+  bounded directive and target categories, never full URLs
+- legacy user avatar URLs are exposed only when they are bounded,
+  credential-free absolute HTTPS URLs; unsafe stored values serialize as null
+- private group avatars and attachments are opened without following symlinks,
+  checked as regular files, and re-sniffed before delivery; PDF files are
+  download-only and active or unknown formats are octet-stream downloads
+- HSTS remains owned by the operator-managed Traefik Cubic HTTPS router. Its
+  later rollout starts at `max-age=300`, without `includeSubDomains` or
+  `preload`, and increases only after runtime validation
 - secrets must never be committed to the repository
 - destructive security fixes must be reviewed rather than blindly automated
 

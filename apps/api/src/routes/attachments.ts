@@ -5,6 +5,8 @@ import { createRequireAuth } from '../auth/guard.js';
 import type { SessionService } from '../security/session.js';
 import {
   AttachmentStorageReserveError,
+  attachmentDeliveryPolicy,
+  safeAttachmentContentDisposition,
   type AttachmentStore
 } from '../media/attachments.js';
 import {
@@ -293,7 +295,12 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
         }
 
         let content;
+        let detectedContentType: string;
         try {
+          detectedContentType = await options.attachmentStore.detectForDelivery(
+            row.storage_key,
+            row.content_type
+          );
           content = await options.attachmentStore.open(row.storage_key);
         } catch (error) {
           request.log.warn(
@@ -306,32 +313,15 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
           return reply.code(404).send({ error: 'Attachment not found.' });
         }
 
-        const safeInline = new Set([
-          'image/png',
-          'image/jpeg',
-          'image/webp',
-          'image/gif',
-          'audio/wav',
-          'audio/ogg',
-          'audio/mpeg',
-          'video/mp4',
-          'video/webm',
-          'video/ogg',
-          'application/pdf',
-          'text/plain',
-          'text/csv',
-          'text/markdown'
-        ]).has(row.content_type);
+        const delivery = attachmentDeliveryPolicy(detectedContentType);
 
-        const encodedName = encodeURIComponent(row.original_name);
-
-        reply.header('Content-Type', row.content_type);
+        reply.header('Content-Type', delivery.contentType);
         reply.header('Content-Length', String(row.size_bytes));
         reply.header('X-Content-Type-Options', 'nosniff');
         reply.header('Cache-Control', 'private, no-store');
         reply.header(
           'Content-Disposition',
-          `${safeInline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodedName}`
+          safeAttachmentContentDisposition(row.original_name, delivery.disposition)
         );
 
         return reply.send(content);

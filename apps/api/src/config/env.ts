@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { parseTrustedProxyCidrs } from './proxy.js';
+import { canonicalBrowserOrigin } from '../security/browser-request.js';
 
 const booleanString = z.enum(['true', 'false']).default('false').transform((value) => value === 'true');
 const enabledString = z.enum(['true', 'false']).default('true').transform((value) => value === 'true');
@@ -48,7 +49,17 @@ const envSchema = z
     API_HOST: z.string().min(1).default('0.0.0.0'),
     API_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
     DATABASE_URL: z.string().min(1),
-    CORS_ORIGIN: z.string().min(1).default('http://localhost:3000'),
+    CORS_ORIGIN: z.string().transform((value, context) => {
+      try {
+        return canonicalBrowserOrigin(value);
+      } catch (error) {
+        context.addIssue({
+          code: 'custom',
+          message: error instanceof Error ? error.message : 'must be one exact HTTP or HTTPS origin'
+        });
+        return z.NEVER;
+      }
+    }),
     TRUST_PROXY_CIDRS: z.string().min(1).transform((value, context) => {
       try {
         return parseTrustedProxyCidrs(value);
@@ -176,6 +187,14 @@ const envSchema = z
     LIVEKIT_API_SECRET: z.string().min(32)
   })
   .superRefine((env, context) => {
+    if (env.NODE_ENV === 'production' && !env.CORS_ORIGIN.startsWith('https://')) {
+      context.addIssue({
+        code: 'custom',
+        path: ['CORS_ORIGIN'],
+        message: 'must use https when NODE_ENV is production'
+      });
+    }
+
     if (env.NODE_ENV === 'production' && !env.SESSION_COOKIE_SECURE) {
       context.addIssue({
         code: 'custom',

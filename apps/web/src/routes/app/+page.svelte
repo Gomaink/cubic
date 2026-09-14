@@ -152,8 +152,7 @@
   type StreamVolumeMenuState = {
     identity: string;
     name: string;
-    x: number;
-    y: number;
+    placement: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
     volume: number;
     audioAvailable: boolean;
   };
@@ -1704,16 +1703,13 @@
     event.preventDefault();
     event.stopPropagation();
 
-    const width = 270;
-    const height = 160;
-    const x = Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8));
-    const y = Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8));
+    const vertical = event.clientY < window.innerHeight / 2 ? 'top' : 'bottom';
+    const horizontal = event.clientX < window.innerWidth / 2 ? 'left' : 'right';
 
     streamVolumeMenu = {
       identity: participant.identity,
       name: participant.name,
-      x,
-      y,
+      placement: `${vertical}-${horizontal}`,
       volume: savedStreamVolume(participant.identity),
       audioAvailable: participant.screenShareAudioEnabled
     };
@@ -3403,12 +3399,12 @@
               </div>
 
               {#if item.status === 'uploading'}
-                <div
+                <progress
                   class="cubic-upload-progress"
+                  max="100"
+                  value={item.progress}
                   aria-label={`Uploading ${item.fileName}: ${item.progress}%`}
-                >
-                  <span style={`width: ${item.progress}%`}></span>
-                </div>
+                ></progress>
               {/if}
 
               <button
@@ -4119,7 +4115,10 @@
 
     <section
       class="stream-volume-menu"
-      style={`left:${streamVolumeMenu.x}px;top:${streamVolumeMenu.y}px`}
+      class:top-left={streamVolumeMenu.placement === 'top-left'}
+      class:top-right={streamVolumeMenu.placement === 'top-right'}
+      class:bottom-left={streamVolumeMenu.placement === 'bottom-left'}
+      class:bottom-right={streamVolumeMenu.placement === 'bottom-right'}
       aria-label={`${streamVolumeMenu.name}'s stream volume`}
     >
       <header>
