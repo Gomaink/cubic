@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { io, type Socket } from 'socket.io-client';
+  import { recoverAfterServerDisconnect } from '$lib/realtime/server-disconnect.js';
   import { Room, RoomEvent, Track } from 'livekit-client';
   import Icon from '$lib/ui/Icon.svelte';
   import VideoTile from '$lib/ui/VideoTile.svelte';
@@ -2813,12 +2814,7 @@
     socket.on('disconnect', (reason) => {
       realtimeConnected = false;
       if (reason === 'io server disconnect') {
-        fetch('/api/v1/auth/session', { credentials: 'include' })
-          .then((response) => response.ok ? response.json() : null)
-          .then((session) => {
-            if (session && session.authenticated === false) window.location.assign('/login');
-          })
-          .catch(() => {});
+        void recoverAfterServerDisconnect(socket, () => realtimeSocket === socket);
       }
     });
     socket.on('connect_error', () => { realtimeConnected = false; });
