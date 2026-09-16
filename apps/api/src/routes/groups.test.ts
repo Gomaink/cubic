@@ -50,6 +50,8 @@ const groupId = '20000000-0000-4000-8000-000000000001';
 const actorId = '10000000-0000-4000-8000-000000000001';
 const targetId = '10000000-0000-4000-8000-000000000002';
 const otherId = '10000000-0000-4000-8000-000000000003';
+const invitedId = '10000000-0000-4000-8000-000000000004';
+const inviteId = '30000000-0000-4000-8000-000000000001';
 
 type Role = 'owner' | 'admin' | 'member';
 type RouteHandler = (request: any, reply: any) => Promise<any>;
@@ -537,5 +539,372 @@ test('group deletion rollback publishes no event and removes no avatar', async (
 
   assert.ok(database.sequence.includes('rollback'));
   assert.deepEqual(harness.deletedAvatarKeys, []);
+  assert.equal(harness.events.length, 0);
+});
+
+type InviteStatus = 'pending' | 'accepted' | 'declined' | 'cancelled';
+
+class InviteRouteDatabase {
+  precheckRoles = new Map<string, Role>([[actorId, 'admin'], [targetId, 'member']]);
+  lockedRoles = new Map<string, Role>([[actorId, 'admin'], [targetId, 'member']]);
+  members = new Set([actorId, targetId]);
+  invite: {
+    id: string;
+    conversation_id: string;
+    inviter_id: string;
+    invitee_id: string;
+    status: InviteStatus;
+  } | null = {
+    id: inviteId,
+    conversation_id: groupId,
+    inviter_id: actorId,
+    invitee_id: invitedId,
+    status: 'pending'
+  };
+  sequence: string[] = [];
+  failTransition = false;
+  private snapshot: { members: Set<string>; invite: InviteRouteDatabase['invite'] } | null = null;
+
+  db = {
+    select: () => {
+      const builder: any = {
+        from: () => builder,
+        where: () => builder,
+        limit: async () => [{ id: 'friendship' }]
+      };
+      return builder;
+    }
+  };
+
+  pool = {
+    query: async (sql: string, params: any[] = []) => this.query(sql, params, false),
+    connect: async () => ({
+      query: async (sql: string, params: any[] = []) => this.query(sql, params, true),
+      release: () => { this.sequence.push('release'); }
+    })
+  };
+
+  private result(rows: any[] = [], rowCount = rows.length) {
+    return { rows, rowCount };
+  }
+
+  private copyInvite() {
+    return this.invite ? { ...this.invite } : null;
+  }
+
+  async query(sql: string, params: any[], locked: boolean) {
+    const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase();
+    if (normalized === 'begin') {
+      this.snapshot = { members: new Set(this.members), invite: this.copyInvite() };
+      this.sequence.push('begin');
+      return this.result();
+    }
+    if (normalized === 'commit') {
+      this.snapshot = null;
+      this.sequence.push('commit');
+      return this.result();
+    }
+    if (normalized === 'rollback') {
+      if (this.snapshot) {
+        this.members = new Set(this.snapshot.members);
+        this.invite = this.snapshot.invite ? { ...this.snapshot.invite } : null;
+      }
+      this.snapshot = null;
+      this.sequence.push('rollback');
+      return this.result();
+    }
+    if (normalized.includes('pg_advisory_xact_lock')) {
+      this.sequence.push('lock-group');
+      return this.result();
+    }
+    if (normalized === 'select conversation_id from group_invites where id = $1 limit 1') {
+      this.sequence.push('locate-invite');
+      const invite = this.invite;
+      return this.result(invite && invite.id === params[0] ? [{ conversation_id: invite.conversation_id }] : []);
+    }
+    if (normalized.includes('select id, conversation_id, inviter_id, invitee_id, status from group_invites') && normalized.includes('for update')) {
+      this.sequence.push('lock-invite');
+      const invite = this.invite;
+      return this.result(invite && invite.id === params[0] && invite.conversation_id === params[1] ? [this.copyInvite()] : []);
+    }
+    if (normalized.includes('join conversation_members m on m.conversation_id = c.id')) {
+      const role = (locked ? this.lockedRoles : this.precheckRoles).get(params[1]);
+      this.sequence.push(`${locked ? 'locked' : 'precheck'}:${params[1]}:${role ?? 'missing'}`);
+      return this.result(params[0] === groupId && role ? [{
+        id: groupId,
+        avatar_key: null,
+        role
+      }] : []);
+    }
+    if (normalized.startsWith('select 1 from blocks')) return this.result();
+    if (normalized.startsWith('select 1 from conversations')) return this.result([{ '?column?': 1 }]);
+    if (normalized.startsWith('select 1 from conversation_members')) {
+      return this.result(this.members.has(params[1]) ? [{ '?column?': 1 }] : []);
+    }
+    if (normalized.startsWith('select id, status from group_invites')) {
+      this.sequence.push('lock-invite-pair');
+      const invite = this.invite;
+      return this.result(
+        invite && invite.conversation_id === params[0] && invite.invitee_id === params[1]
+          ? [{ id: invite.id, status: invite.status }]
+          : []
+      );
+    }
+    if (normalized.startsWith('select (select count(*)::int from conversation_members')) {
+      return this.result([{
+        members: this.members.size,
+        invites: this.invite?.status === 'pending' ? 1 : 0
+      }]);
+    }
+    if (normalized.startsWith('select count(*)::int as count from conversation_members')) {
+      return this.result([{ count: this.members.size }]);
+    }
+    if (normalized.startsWith('insert into group_invites')) {
+      this.sequence.push('upsert-invite');
+      this.invite = {
+        id: this.invite?.id ?? inviteId,
+        conversation_id: params[0],
+        inviter_id: params[1],
+        invitee_id: params[2],
+        status: 'pending'
+      };
+      return this.result([{ id: this.invite.id }]);
+    }
+    if (normalized.startsWith('insert into conversation_members')) {
+      this.sequence.push('insert-member');
+      this.members.add(params[1]);
+      this.lockedRoles.set(params[1], 'member');
+      return this.result([], 1);
+    }
+    if (normalized.startsWith('update group_invites')) {
+      if (this.failTransition) throw new Error('invite transition failed');
+      if (!this.invite || this.invite.id !== params[0] || this.invite.status !== 'pending') return this.result();
+      if (normalized.includes("status = 'accepted'")) this.invite.status = 'accepted';
+      else if (normalized.includes("status = 'declined'")) this.invite.status = 'declined';
+      else if (normalized.includes("status = 'cancelled'")) this.invite.status = 'cancelled';
+      this.sequence.push(`transition:${this.invite.status}`);
+      return this.result([{ id: this.invite.id }]);
+    }
+    if (normalized.startsWith('update conversations set updated_at')) return this.result([], 1);
+    if (normalized.startsWith('select user_id from conversation_members')) {
+      this.sequence.push('snapshot-users');
+      return this.result([...this.members].map((user_id) => ({ user_id })));
+    }
+    if (normalized.includes('join conversation_members mine')) {
+      const role = this.lockedRoles.get(params[1]);
+      return this.result(role ? [{
+        id: groupId,
+        title: 'Group',
+        avatar_key: null,
+        created_by: actorId,
+        created_at: new Date('2026-09-16T12:00:00.000Z'),
+        updated_at: new Date('2026-09-16T12:00:00.000Z'),
+        role
+      }] : []);
+    }
+    if (normalized.includes('from conversation_members cm join users u')) {
+      return this.result([...this.members].map((id) => ({
+        id,
+        username: `user-${id.at(-1)}`,
+        display_name: `User ${id.at(-1)}`,
+        avatar_url: null,
+        role: this.lockedRoles.get(id) ?? 'member',
+        joined_at: new Date('2026-09-16T12:00:00.000Z')
+      })));
+    }
+    if (normalized.includes('from group_invites gi join users u')) return this.result();
+    throw new Error(`Unexpected invite fixture SQL: ${normalized}`);
+  }
+}
+
+async function inviteRouteHarness(database = new InviteRouteDatabase()) {
+  const handlers = new Map<string, RouteHandler>();
+  const app = {
+    get(path: string, _options: unknown, handler: RouteHandler) { handlers.set(`GET ${path}`, handler); },
+    post(path: string, _options: unknown, handler: RouteHandler) { handlers.set(`POST ${path}`, handler); },
+    patch(path: string, _options: unknown, handler: RouteHandler) { handlers.set(`PATCH ${path}`, handler); },
+    delete(path: string, _options: unknown, handler: RouteHandler) { handlers.set(`DELETE ${path}`, handler); }
+  };
+  const events: Array<{ type: string; payload: any }> = [];
+  const realtimeEvents = {
+    emitConversationOpened(payload: any) { database.sequence.push('event:opened'); events.push({ type: 'opened', payload }); },
+    emitConversationChanged(payload: any) { database.sequence.push('event:changed'); events.push({ type: 'changed', payload }); },
+    emitConversationRemoved(payload: any) { events.push({ type: 'removed', payload }); },
+    emitGroupInvitesChanged(payload: any) { database.sequence.push('event:invites'); events.push({ type: 'invites', payload }); }
+  };
+
+  await groupRoutes(app as never, {
+    database: database as never,
+    cookieName: 'session',
+    sessionService: {} as never,
+    mediaStore: {} as never,
+    realtimeEvents: realtimeEvents as never,
+    groupAvatarMaxBytes: 2_000_000
+  });
+
+  async function invoke(
+    method: string,
+    path: string,
+    options: { userId?: string; params?: Record<string, string>; body?: unknown } = {}
+  ) {
+    const state = { statusCode: 200, payload: undefined as any };
+    const reply = {
+      code(code: number) { state.statusCode = code; return reply; },
+      send(payload?: any) { state.payload = payload; return payload; }
+    };
+    const request = {
+      auth: { user: { id: options.userId ?? actorId } },
+      params: { id: groupId, inviteId, ...(options.params ?? {}) },
+      body: options.body
+    };
+    await handlers.get(`${method} ${path}`)!(request, reply);
+    return state;
+  }
+
+  return { database, events, invoke };
+}
+
+test('invite create/reopen revalidates current management authority under the group lock', async () => {
+  const harness = await inviteRouteHarness();
+  harness.database.precheckRoles.set(actorId, 'admin');
+  harness.database.lockedRoles.set(actorId, 'member');
+  harness.database.invite!.status = 'declined';
+
+  const response = await harness.invoke('POST', '/:id/invites', { body: { userId: invitedId } });
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(harness.database.invite?.status, 'declined');
+  assert.equal(harness.database.sequence.includes('upsert-invite'), false);
+  assert.equal(harness.events.length, 0);
+  assert.ok(harness.database.sequence.indexOf('lock-group') < harness.database.sequence.indexOf(`locked:${actorId}:member`));
+});
+
+test('invite reopen locks group then invite row and publishes only after commit', async () => {
+  const harness = await inviteRouteHarness();
+  harness.database.invite!.status = 'declined';
+
+  const response = await harness.invoke('POST', '/:id/invites', { body: { userId: invitedId } });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(harness.database.invite?.status, 'pending');
+  assert.ok(harness.database.sequence.indexOf('lock-group') < harness.database.sequence.indexOf('lock-invite-pair'));
+  assert.ok(harness.database.sequence.indexOf('lock-invite-pair') < harness.database.sequence.indexOf('upsert-invite'));
+  assert.ok(harness.database.sequence.indexOf('commit') < harness.database.sequence.indexOf('event:invites'));
+  assert.ok(harness.database.sequence.indexOf('commit') < harness.database.sequence.indexOf('event:changed'));
+});
+
+test('invite acceptance locks group before invite and atomically adds membership', async () => {
+  const harness = await inviteRouteHarness();
+
+  const response = await harness.invoke('POST', '/invites/:inviteId/accept', { userId: invitedId });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(harness.database.invite?.status, 'accepted');
+  assert.equal(harness.database.members.has(invitedId), true);
+  assert.ok(harness.database.sequence.indexOf('locate-invite') < harness.database.sequence.indexOf('lock-group'));
+  assert.ok(harness.database.sequence.indexOf('lock-group') < harness.database.sequence.indexOf('lock-invite'));
+  assert.ok(harness.database.sequence.indexOf('transition:accepted') < harness.database.sequence.indexOf('commit'));
+  assert.ok(harness.database.sequence.indexOf('commit') < harness.database.sequence.indexOf('event:opened'));
+});
+
+test('duplicate acceptance and a different actor preserve existing response semantics without events', async () => {
+  const wrongActor = await inviteRouteHarness();
+  let response = await wrongActor.invoke('POST', '/invites/:inviteId/accept', { userId: otherId });
+  assert.equal(response.statusCode, 404);
+  assert.equal(wrongActor.database.invite?.status, 'pending');
+  assert.equal(wrongActor.events.length, 0);
+
+  const duplicate = await inviteRouteHarness();
+  duplicate.database.invite!.status = 'accepted';
+  duplicate.database.members.add(invitedId);
+  response = await duplicate.invoke('POST', '/invites/:inviteId/accept', { userId: invitedId });
+  assert.equal(response.statusCode, 409);
+  assert.equal(duplicate.database.members.has(invitedId), true);
+  assert.equal(duplicate.events.length, 0);
+});
+
+test('invite creation and acceptance enforce capacity from locked group state', async () => {
+  const create = await inviteRouteHarness();
+  create.database.invite!.status = 'pending';
+  for (let index = 0; index < 48; index += 1) create.database.members.add(`member-${index}`);
+  let response = await create.invoke('POST', '/:id/invites', { body: { userId: invitedId } });
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.payload?.error, 'Group is full.');
+  assert.equal(create.database.sequence.includes('upsert-invite'), false);
+  assert.equal(create.events.length, 0);
+
+  const accept = await inviteRouteHarness();
+  for (let index = 0; index < 48; index += 1) accept.database.members.add(`member-${index}`);
+  response = await accept.invoke('POST', '/invites/:inviteId/accept', { userId: invitedId });
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.payload?.error, 'Group is full.');
+  assert.equal(accept.database.invite?.status, 'pending');
+  assert.equal(accept.database.members.has(invitedId), false);
+  assert.equal(accept.events.length, 0);
+});
+
+test('decline is invitee-only, serialized, and emits only after commit', async () => {
+  const wrongActor = await inviteRouteHarness();
+  let response = await wrongActor.invoke('POST', '/invites/:inviteId/decline', { userId: otherId });
+  assert.equal(response.statusCode, 404);
+  assert.equal(wrongActor.database.invite?.status, 'pending');
+  assert.equal(wrongActor.events.length, 0);
+
+  const invitee = await inviteRouteHarness();
+  response = await invitee.invoke('POST', '/invites/:inviteId/decline', { userId: invitedId });
+  assert.equal(response.statusCode, 204);
+  assert.equal(invitee.database.invite?.status, 'declined');
+  assert.ok(invitee.database.sequence.indexOf('lock-group') < invitee.database.sequence.indexOf('lock-invite'));
+  assert.ok(invitee.database.sequence.indexOf('commit') < invitee.database.sequence.indexOf('event:invites'));
+  assert.ok(invitee.database.sequence.indexOf('commit') < invitee.database.sequence.indexOf('event:changed'));
+});
+
+test('original inviter may cancel after membership loss while unauthorized third parties remain forbidden', async () => {
+  const inviter = await inviteRouteHarness();
+  inviter.database.invite!.inviter_id = otherId;
+  inviter.database.precheckRoles.delete(otherId);
+  inviter.database.lockedRoles.delete(otherId);
+  inviter.database.members.delete(otherId);
+
+  let response = await inviter.invoke('DELETE', '/invites/:inviteId', { userId: otherId });
+  assert.equal(response.statusCode, 204);
+  assert.equal(inviter.database.invite?.status, 'cancelled');
+  assert.ok(inviter.database.sequence.indexOf('commit') < inviter.database.sequence.indexOf('event:invites'));
+
+  const thirdParty = await inviteRouteHarness();
+  response = await thirdParty.invoke('DELETE', '/invites/:inviteId', { userId: targetId });
+  assert.equal(response.statusCode, 403);
+  assert.equal(thirdParty.database.invite?.status, 'pending');
+  assert.equal(thirdParty.events.length, 0);
+
+  thirdParty.database.invite = null;
+  response = await thirdParty.invoke('DELETE', '/invites/:inviteId', { userId: targetId });
+  assert.equal(response.statusCode, 404);
+});
+
+test('current admin may cancel an invite created by someone else', async () => {
+  const harness = await inviteRouteHarness();
+  harness.database.invite!.inviter_id = otherId;
+
+  const response = await harness.invoke('DELETE', '/invites/:inviteId', { userId: actorId });
+
+  assert.equal(response.statusCode, 204);
+  assert.equal(harness.database.invite?.status, 'cancelled');
+  assert.ok(harness.database.sequence.indexOf('lock-group') < harness.database.sequence.indexOf(`locked:${actorId}:admin`));
+  assert.ok(harness.database.sequence.indexOf('commit') < harness.database.sequence.indexOf('event:invites'));
+});
+
+test('failed invite transition rolls back and publishes no success event', async () => {
+  const harness = await inviteRouteHarness();
+  harness.database.failTransition = true;
+
+  await assert.rejects(
+    harness.invoke('POST', '/invites/:inviteId/accept', { userId: invitedId }),
+    /invite transition failed/
+  );
+
+  assert.equal(harness.database.invite?.status, 'pending');
+  assert.equal(harness.database.members.has(invitedId), false);
+  assert.ok(harness.database.sequence.includes('rollback'));
   assert.equal(harness.events.length, 0);
 });

@@ -15,7 +15,6 @@ import {
   canManageGroup,
   canRemoveGroupMember,
   canTransferGroupOwnership,
-  parseGroupRole,
   resolveGroupMembership,
   type GroupQueryExecutor,
   type GroupRole
@@ -66,6 +65,57 @@ export async function withGroupLock<T>(database: Database, conversationId: strin
 async function groupUserIds(executor: GroupQueryExecutor, conversationId: string): Promise<string[]> {
   const result = await executor.query('select user_id from conversation_members where conversation_id = $1', [conversationId]);
   return result.rows.map((row) => row.user_id as string);
+}
+
+interface LockedGroupInvite {
+  id: string;
+  conversationId: string;
+  inviterId: string;
+  inviteeId: string;
+  status: string;
+}
+
+type LockedGroupInviteResult<T> =
+  | { status: 'missing' }
+  | { status: 'found'; value: T };
+
+export async function withLockedGroupInvite<T>(
+  database: Database,
+  inviteId: string,
+  action: (client: PoolClient, invite: LockedGroupInvite) => Promise<T>
+): Promise<LockedGroupInviteResult<T>> {
+  const located = await database.pool.query(
+    `select conversation_id
+       from group_invites
+      where id = $1
+      limit 1`,
+    [inviteId]
+  );
+  const conversationId = located.rows[0]?.conversation_id as string | undefined;
+  if (!conversationId) return { status: 'missing' };
+
+  return withGroupLock(database, conversationId, async (client) => {
+    const current = await client.query(
+      `select id, conversation_id, inviter_id, invitee_id, status
+         from group_invites
+        where id = $1 and conversation_id = $2
+        for update`,
+      [inviteId, conversationId]
+    );
+    const row = current.rows[0];
+    if (!row) return { status: 'missing' };
+
+    return {
+      status: 'found',
+      value: await action(client, {
+        id: row.id as string,
+        conversationId: row.conversation_id as string,
+        inviterId: row.inviter_id as string,
+        inviteeId: row.invitee_id as string,
+        status: row.status as string
+      })
+    };
+  });
 }
 
 async function ensureFriendAllowed(database: Database, actorId: string, targetId: string): Promise<boolean> {
@@ -198,64 +248,73 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     if (!params.success) return reply.code(400).send({ error: 'Invalid invitation.' });
     const me = request.auth.user.id;
 
-    const client = await options.database.pool.connect();
-    let conversationId: string | null = null;
-    try {
-      await client.query('begin');
-      const inviteResult = await client.query(
-        `select id, conversation_id, invitee_id, status
-           from group_invites
-          where id = $1
-          for update`,
-        [params.data.inviteId]
+    const locked = await withLockedGroupInvite(options.database, params.data.inviteId, async (client, invite) => {
+      if (invite.inviteeId !== me) return { status: 'missing' as const };
+      if (invite.status !== 'pending') return { status: 'stale' as const };
+
+      const group = await client.query(
+        `select 1 from conversations where id = $1 and kind = 'group' limit 1`,
+        [invite.conversationId]
       );
-      const invite = inviteResult.rows[0];
-      if (!invite || invite.invitee_id !== me) {
-        await client.query('rollback');
-        return reply.code(404).send({ error: 'Invitation not found.' });
-      }
-      if (invite.status !== 'pending') {
-        await client.query('rollback');
-        return reply.code(409).send({ error: 'Invitation is no longer pending.' });
-      }
-
-      conversationId = invite.conversation_id;
-      await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [conversationId]);
-      const group = await client.query(`select 1 from conversations where id = $1 and kind = 'group' limit 1`, [conversationId]);
       if (!group.rowCount) {
-        await client.query(`update group_invites set status = 'cancelled', responded_at = now() where id = $1`, [invite.id]);
-        await client.query('commit');
-        return reply.code(410).send({ error: 'Group no longer exists.' });
+        const cancelled = await client.query(
+          `update group_invites
+              set status = 'cancelled', responded_at = now()
+            where id = $1 and status = 'pending'
+          returning id`,
+          [invite.id]
+        );
+        if (!cancelled.rowCount) throw new Error('Pending group invitation changed while locked.');
+        return { status: 'gone' as const };
       }
 
-      const count = await client.query(`select count(*)::int as count from conversation_members where conversation_id = $1`, [conversationId]);
-      const isMember = await client.query(`select 1 from conversation_members where conversation_id = $1 and user_id = $2 limit 1`, [conversationId, me]);
+      const count = await client.query(
+        `select count(*)::int as count from conversation_members where conversation_id = $1`,
+        [invite.conversationId]
+      );
+      const isMember = await client.query(
+        `select 1 from conversation_members where conversation_id = $1 and user_id = $2 limit 1`,
+        [invite.conversationId, me]
+      );
       if (!isMember.rowCount && Number(count.rows[0]?.count ?? 0) >= MAX_GROUP_MEMBERS) {
-        await client.query('rollback');
-        return reply.code(409).send({ error: 'Group is full.' });
+        return { status: 'full' as const };
       }
 
       await client.query(
         `insert into conversation_members (conversation_id, user_id, role)
          values ($1, $2, 'member')
          on conflict (conversation_id, user_id) do nothing`,
-        [conversationId, me]
+        [invite.conversationId, me]
       );
-      await client.query(`update group_invites set status = 'accepted', responded_at = now() where id = $1`, [invite.id]);
-      await client.query(`update conversations set updated_at = now() where id = $1`, [conversationId]);
-      await client.query('commit');
-    } catch (error) {
-      await client.query('rollback').catch(() => {});
-      throw error;
-    } finally {
-      client.release();
-    }
+      const accepted = await client.query(
+        `update group_invites
+            set status = 'accepted', responded_at = now()
+          where id = $1 and status = 'pending'
+        returning id`,
+        [invite.id]
+      );
+      if (!accepted.rowCount) throw new Error('Pending group invitation changed while locked.');
+      await client.query(`update conversations set updated_at = now() where id = $1`, [invite.conversationId]);
+      return {
+        status: 'accepted' as const,
+        conversationId: invite.conversationId,
+        userIds: await groupUserIds(client, invite.conversationId)
+      };
+    });
 
-    if (!conversationId) return reply.code(404).send({ error: 'Invitation not found.' });
-    const userIds = await groupUserIds(options.database.pool, conversationId);
-    options.realtimeEvents?.emitConversationOpened({ conversationId, userIds });
+    if (locked.status === 'missing' || locked.value.status === 'missing') {
+      return reply.code(404).send({ error: 'Invitation not found.' });
+    }
+    if (locked.value.status === 'stale') return reply.code(409).send({ error: 'Invitation is no longer pending.' });
+    if (locked.value.status === 'gone') return reply.code(410).send({ error: 'Group no longer exists.' });
+    if (locked.value.status === 'full') return reply.code(409).send({ error: 'Group is full.' });
+
+    options.realtimeEvents?.emitConversationOpened({
+      conversationId: locked.value.conversationId,
+      userIds: locked.value.userIds
+    });
     options.realtimeEvents?.emitGroupInvitesChanged({ userIds: [me] });
-    return reply.send({ group: await serializeGroup(options.database, conversationId, me) });
+    return reply.send({ group: await serializeGroup(options.database, locked.value.conversationId, me) });
   });
 
   app.post('/invites/:inviteId/decline', { preHandler: requireAuth }, async (request, reply) => {
@@ -263,18 +322,31 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     const params = inviteParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid invitation.' });
     const me = request.auth.user.id;
-    const result = await options.database.pool.query(
-      `update group_invites
-          set status = 'declined', responded_at = now()
-        where id = $1 and invitee_id = $2 and status = 'pending'
-      returning id, conversation_id`,
-      [params.data.inviteId, me]
-    );
-    if (!result.rowCount) return reply.code(404).send({ error: 'Invitation not found.' });
-    const conversationId = result.rows[0].conversation_id as string;
-    const userIds = await groupUserIds(options.database.pool, conversationId);
+    const locked = await withLockedGroupInvite(options.database, params.data.inviteId, async (client, invite) => {
+      if (invite.inviteeId !== me || invite.status !== 'pending') return { status: 'missing' as const };
+      const declined = await client.query(
+        `update group_invites
+            set status = 'declined', responded_at = now()
+          where id = $1 and invitee_id = $2 and status = 'pending'
+        returning id`,
+        [invite.id, me]
+      );
+      if (!declined.rowCount) throw new Error('Pending group invitation changed while locked.');
+      return {
+        status: 'declined' as const,
+        conversationId: invite.conversationId,
+        userIds: await groupUserIds(client, invite.conversationId)
+      };
+    });
+    if (locked.status === 'missing' || locked.value.status === 'missing') {
+      return reply.code(404).send({ error: 'Invitation not found.' });
+    }
+
     options.realtimeEvents?.emitGroupInvitesChanged({ userIds: [me] });
-    options.realtimeEvents?.emitConversationChanged({ conversationId, userIds });
+    options.realtimeEvents?.emitConversationChanged({
+      conversationId: locked.value.conversationId,
+      userIds: locked.value.userIds
+    });
     return reply.code(204).send();
   });
 
@@ -283,25 +355,41 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     const params = inviteParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid invitation.' });
 
-    const inviteResult = await options.database.pool.query(
-      `select gi.id, gi.conversation_id, gi.inviter_id, gi.invitee_id, gi.status, cm.role
-         from group_invites gi
-         left join conversation_members cm on cm.conversation_id = gi.conversation_id and cm.user_id = $2
-        where gi.id = $1
-        limit 1`,
-      [params.data.inviteId, request.auth.user.id]
-    );
-    const invite = inviteResult.rows[0];
-    if (!invite || invite.status !== 'pending') return reply.code(404).send({ error: 'Invitation not found.' });
-    const actorRole = parseGroupRole(invite.role);
-    if (invite.inviter_id !== request.auth.user.id && (!actorRole || !canManageGroup(actorRole))) {
+    const actorId = request.auth.user.id;
+    const locked = await withLockedGroupInvite(options.database, params.data.inviteId, async (client, invite) => {
+      if (invite.status !== 'pending') return { status: 'missing' as const };
+      const membership = await resolveGroupMembership(client, invite.conversationId, actorId);
+      if (invite.inviterId !== actorId && (!membership || !canManageGroup(membership.role))) {
+        return { status: 'forbidden' as const };
+      }
+
+      const cancelled = await client.query(
+        `update group_invites
+            set status = 'cancelled', responded_at = now()
+          where id = $1 and status = 'pending'
+        returning id`,
+        [invite.id]
+      );
+      if (!cancelled.rowCount) throw new Error('Pending group invitation changed while locked.');
+      return {
+        status: 'cancelled' as const,
+        conversationId: invite.conversationId,
+        inviteeId: invite.inviteeId,
+        userIds: await groupUserIds(client, invite.conversationId)
+      };
+    });
+    if (locked.status === 'missing' || locked.value.status === 'missing') {
+      return reply.code(404).send({ error: 'Invitation not found.' });
+    }
+    if (locked.value.status === 'forbidden') {
       return reply.code(403).send({ error: 'You cannot cancel this invitation.' });
     }
 
-    await options.database.pool.query(`update group_invites set status = 'cancelled', responded_at = now() where id = $1`, [invite.id]);
-    options.realtimeEvents?.emitGroupInvitesChanged({ userIds: [invite.invitee_id] });
-    const userIds = await groupUserIds(options.database.pool, invite.conversation_id);
-    options.realtimeEvents?.emitConversationChanged({ conversationId: invite.conversation_id, userIds });
+    options.realtimeEvents?.emitGroupInvitesChanged({ userIds: [locked.value.inviteeId] });
+    options.realtimeEvents?.emitConversationChanged({
+      conversationId: locked.value.conversationId,
+      userIds: locked.value.userIds
+    });
     return reply.code(204).send();
   });
 
@@ -518,8 +606,19 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     if (!(await ensureFriendAllowed(options.database, me, parsed.data.userId))) return reply.code(403).send({ error: 'You can only invite available friends.' });
 
     const invite = await withGroupLock(options.database, params.data.id, async (client) => {
+      const current = await resolveGroupMembership(client, params.data.id, me);
+      if (!current) return { error: 'missing' as const };
+      if (!canManageGroup(current.role)) return { error: 'forbidden' as const };
+
       const exists = await client.query(`select 1 from conversation_members where conversation_id = $1 and user_id = $2 limit 1`, [params.data.id, parsed.data.userId]);
       if (exists.rowCount) return { error: 'member' as const };
+      await client.query(
+        `select id, status
+           from group_invites
+          where conversation_id = $1 and invitee_id = $2
+          for update`,
+        [params.data.id, parsed.data.userId]
+      );
       const counts = await client.query(
         `select
            (select count(*)::int from conversation_members where conversation_id = $1) as members,
@@ -535,17 +634,20 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
          returning id`,
         [params.data.id, me, parsed.data.userId]
       );
-      return { id: result.rows[0].id as string };
+      return {
+        id: result.rows[0].id as string,
+        userIds: await groupUserIds(client, params.data.id)
+      };
     });
     if ('error' in invite) {
-      return invite.error === 'member'
-        ? reply.code(409).send({ error: 'User is already a group member.' })
-        : reply.code(409).send({ error: 'Group is full.' });
+      if (invite.error === 'missing') return reply.code(404).send({ error: 'Group not found.' });
+      if (invite.error === 'forbidden') return reply.code(403).send({ error: 'Group management requires admin permission.' });
+      if (invite.error === 'member') return reply.code(409).send({ error: 'User is already a group member.' });
+      return reply.code(409).send({ error: 'Group is full.' });
     }
 
     options.realtimeEvents?.emitGroupInvitesChanged({ userIds: [parsed.data.userId] });
-    const userIds = await groupUserIds(options.database.pool, params.data.id);
-    options.realtimeEvents?.emitConversationChanged({ conversationId: params.data.id, userIds });
+    options.realtimeEvents?.emitConversationChanged({ conversationId: params.data.id, userIds: invite.userIds });
     return reply.code(201).send({ group: await serializeGroup(options.database, params.data.id, me) });
   });
 

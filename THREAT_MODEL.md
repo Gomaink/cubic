@@ -80,6 +80,12 @@ PostgreSQL advisory transaction lock. Target membership, role and deletion
 snapshots used by the mutation are resolved in that same transaction; realtime
 events and media deletion occur only after a successful commit.
 
+Group invite transitions resolve the group without retaining an invite-row
+lock, acquire that same group advisory lock, and only then lock and revalidate
+the current invite row. Create/reopen, accept, decline and cancel therefore use
+one lock order, serialize capacity and membership changes, and publish their
+existing realtime events only after commit.
+
 Particular attention is required for:
 
 - messages
