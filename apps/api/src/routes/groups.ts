@@ -9,8 +9,17 @@ import { normalizeLegacyAvatarUrl } from '../auth/identity.js';
 import type { SessionService } from '../security/session.js';
 import type { LocalMediaStore } from '../media/local.js';
 import type { RealtimeEvents } from '../realtime/events.js';
-
-export type GroupRole = 'owner' | 'admin' | 'member';
+import {
+  canChangeGroupRole,
+  canDeleteGroup,
+  canManageGroup,
+  canRemoveGroupMember,
+  canTransferGroupOwnership,
+  parseGroupRole,
+  resolveGroupMembership,
+  type GroupQueryExecutor,
+  type GroupRole
+} from '../authorization/groups.js';
 
 const MAX_GROUP_MEMBERS = 50;
 const groupParamsSchema = z.object({ id: z.string().uuid() });
@@ -27,20 +36,6 @@ const transferOwnerSchema = z.object({ userId: z.string().uuid() });
 
 function orderedPair(a: string, b: string): [string, string] {
   return a < b ? [a, b] : [b, a];
-}
-
-export function canManageGroup(role: string): boolean {
-  return role === 'owner' || role === 'admin';
-}
-
-export function canChangeGroupRole(actorRole: string, targetRole: string): boolean {
-  return actorRole === 'owner' && targetRole !== 'owner';
-}
-
-export function canRemoveGroupMember(actorRole: string, targetRole: string): boolean {
-  if (targetRole === 'owner') return false;
-  if (actorRole === 'owner') return true;
-  return actorRole === 'admin' && targetRole === 'member';
 }
 
 export interface GroupRoutesOptions {
@@ -68,32 +63,8 @@ export async function withGroupLock<T>(database: Database, conversationId: strin
   }
 }
 
-async function lockedMembership(client: PoolClient, conversationId: string, userId: string) {
-  const result = await client.query(
-    `select c.id, c.title, c.created_by, c.avatar_key, m.role
-       from conversations c
-       join conversation_members m on m.conversation_id = c.id
-      where c.id = $1 and c.kind = 'group' and m.user_id = $2
-      limit 1`,
-    [conversationId, userId]
-  );
-  return result.rows[0] as { id: string; title: string; created_by: string | null; avatar_key: string | null; role: GroupRole } | undefined;
-}
-
-async function groupMembership(database: Database, conversationId: string, userId: string) {
-  const result = await database.pool.query(
-    `select c.id, c.title, c.created_by, c.avatar_key, m.role
-       from conversations c
-       join conversation_members m on m.conversation_id = c.id
-      where c.id = $1 and c.kind = 'group' and m.user_id = $2
-      limit 1`,
-    [conversationId, userId]
-  );
-  return result.rows[0] as { id: string; title: string; created_by: string | null; avatar_key: string | null; role: GroupRole } | undefined;
-}
-
-async function groupUserIds(database: Database, conversationId: string): Promise<string[]> {
-  const result = await database.pool.query('select user_id from conversation_members where conversation_id = $1', [conversationId]);
+async function groupUserIds(executor: GroupQueryExecutor, conversationId: string): Promise<string[]> {
+  const result = await executor.query('select user_id from conversation_members where conversation_id = $1', [conversationId]);
   return result.rows.map((row) => row.user_id as string);
 }
 
@@ -281,7 +252,7 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     }
 
     if (!conversationId) return reply.code(404).send({ error: 'Invitation not found.' });
-    const userIds = await groupUserIds(options.database, conversationId);
+    const userIds = await groupUserIds(options.database.pool, conversationId);
     options.realtimeEvents?.emitConversationOpened({ conversationId, userIds });
     options.realtimeEvents?.emitGroupInvitesChanged({ userIds: [me] });
     return reply.send({ group: await serializeGroup(options.database, conversationId, me) });
@@ -301,7 +272,7 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     );
     if (!result.rowCount) return reply.code(404).send({ error: 'Invitation not found.' });
     const conversationId = result.rows[0].conversation_id as string;
-    const userIds = await groupUserIds(options.database, conversationId);
+    const userIds = await groupUserIds(options.database.pool, conversationId);
     options.realtimeEvents?.emitGroupInvitesChanged({ userIds: [me] });
     options.realtimeEvents?.emitConversationChanged({ conversationId, userIds });
     return reply.code(204).send();
@@ -322,13 +293,14 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     );
     const invite = inviteResult.rows[0];
     if (!invite || invite.status !== 'pending') return reply.code(404).send({ error: 'Invitation not found.' });
-    if (invite.inviter_id !== request.auth.user.id && !canManageGroup(invite.role ?? '')) {
+    const actorRole = parseGroupRole(invite.role);
+    if (invite.inviter_id !== request.auth.user.id && (!actorRole || !canManageGroup(actorRole))) {
       return reply.code(403).send({ error: 'You cannot cancel this invitation.' });
     }
 
     await options.database.pool.query(`update group_invites set status = 'cancelled', responded_at = now() where id = $1`, [invite.id]);
     options.realtimeEvents?.emitGroupInvitesChanged({ userIds: [invite.invitee_id] });
-    const userIds = await groupUserIds(options.database, invite.conversation_id);
+    const userIds = await groupUserIds(options.database.pool, invite.conversation_id);
     options.realtimeEvents?.emitConversationChanged({ conversationId: invite.conversation_id, userIds });
     return reply.code(204).send();
   });
@@ -398,7 +370,7 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
     const params = groupParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid group.' });
-    const membership = await groupMembership(options.database, params.data.id, request.auth.user.id);
+    const membership = await resolveGroupMembership(options.database.pool, params.data.id, request.auth.user.id);
     if (!membership) return reply.code(404).send({ error: 'Group not found.' });
     if (!canManageGroup(membership.role)) return reply.code(403).send({ error: 'Group management requires admin permission.' });
 
@@ -420,12 +392,42 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
       return reply.code(415).send({ error: 'Use a PNG, JPEG or WebP image.' });
     }
 
-    const previousKey = membership.avatar_key;
-    const now = new Date();
-    await options.database.db.update(conversations).set({ avatarKey: stored.key, updatedAt: now }).where(eq(conversations.id, params.data.id));
-    await options.mediaStore.deleteGroupAvatar(previousKey).catch(() => {});
-    const userIds = await groupUserIds(options.database, params.data.id);
-    options.realtimeEvents?.emitConversationChanged({ conversationId: params.data.id, userIds });
+    let replacement:
+      | { status: 'missing' | 'forbidden' }
+      | { status: 'updated'; previousKey: string | null; userIds: string[] };
+    try {
+      replacement = await withGroupLock(options.database, params.data.id, async (client) => {
+        const current = await resolveGroupMembership(client, params.data.id, request.auth!.user.id);
+        if (!current) return { status: 'missing' as const };
+        if (!canManageGroup(current.role)) return { status: 'forbidden' as const };
+
+        await client.query(
+          `update conversations set avatar_key = $2, updated_at = now() where id = $1`,
+          [params.data.id, stored.key]
+        );
+        return {
+          status: 'updated' as const,
+          previousKey: current.avatarKey,
+          userIds: await groupUserIds(client, params.data.id)
+        };
+      });
+    } catch (error) {
+      await options.mediaStore.deleteGroupAvatar(stored.key).catch(() => {});
+      throw error;
+    }
+
+    if (replacement.status !== 'updated') {
+      await options.mediaStore.deleteGroupAvatar(stored.key).catch(() => {});
+      return replacement.status === 'missing'
+        ? reply.code(404).send({ error: 'Group not found.' })
+        : reply.code(403).send({ error: 'Group management requires admin permission.' });
+    }
+
+    await options.mediaStore.deleteGroupAvatar(replacement.previousKey).catch(() => {});
+    options.realtimeEvents?.emitConversationChanged({
+      conversationId: params.data.id,
+      userIds: replacement.userIds
+    });
     return reply.send({ group: await serializeGroup(options.database, params.data.id, request.auth.user.id) });
   });
 
@@ -433,15 +435,33 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
     const params = groupParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid group.' });
-    const membership = await groupMembership(options.database, params.data.id, request.auth.user.id);
+    const membership = await resolveGroupMembership(options.database.pool, params.data.id, request.auth.user.id);
     if (!membership) return reply.code(404).send({ error: 'Group not found.' });
     if (!canManageGroup(membership.role)) return reply.code(403).send({ error: 'Group management requires admin permission.' });
 
-    const previousKey = membership.avatar_key;
-    await options.database.db.update(conversations).set({ avatarKey: null, updatedAt: new Date() }).where(eq(conversations.id, params.data.id));
-    await options.mediaStore.deleteGroupAvatar(previousKey).catch(() => {});
-    const userIds = await groupUserIds(options.database, params.data.id);
-    options.realtimeEvents?.emitConversationChanged({ conversationId: params.data.id, userIds });
+    const removal = await withGroupLock(options.database, params.data.id, async (client) => {
+      const current = await resolveGroupMembership(client, params.data.id, request.auth!.user.id);
+      if (!current) return { status: 'missing' as const };
+      if (!canManageGroup(current.role)) return { status: 'forbidden' as const };
+
+      await client.query(
+        `update conversations set avatar_key = null, updated_at = now() where id = $1`,
+        [params.data.id]
+      );
+      return {
+        status: 'removed' as const,
+        previousKey: current.avatarKey,
+        userIds: await groupUserIds(client, params.data.id)
+      };
+    });
+    if (removal.status === 'missing') return reply.code(404).send({ error: 'Group not found.' });
+    if (removal.status === 'forbidden') return reply.code(403).send({ error: 'Group management requires admin permission.' });
+
+    await options.mediaStore.deleteGroupAvatar(removal.previousKey).catch(() => {});
+    options.realtimeEvents?.emitConversationChanged({
+      conversationId: params.data.id,
+      userIds: removal.userIds
+    });
     return reply.code(204).send();
   });
 
@@ -459,12 +479,30 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     const params = groupParamsSchema.safeParse(request.params);
     const parsed = renameGroupSchema.safeParse(request.body);
     if (!params.success || !parsed.success) return reply.code(400).send({ error: 'Invalid group.' });
-    const membership = await groupMembership(options.database, params.data.id, request.auth.user.id);
+    const membership = await resolveGroupMembership(options.database.pool, params.data.id, request.auth.user.id);
     if (!membership) return reply.code(404).send({ error: 'Group not found.' });
     if (!canManageGroup(membership.role)) return reply.code(403).send({ error: 'Group management requires admin permission.' });
-    await options.database.db.update(conversations).set({ title: parsed.data.title, updatedAt: new Date() }).where(eq(conversations.id, params.data.id));
-    const userIds = await groupUserIds(options.database, params.data.id);
-    options.realtimeEvents?.emitConversationChanged({ conversationId: params.data.id, userIds });
+    const result = await withGroupLock(options.database, params.data.id, async (client) => {
+      const current = await resolveGroupMembership(client, params.data.id, request.auth!.user.id);
+      if (!current) return { status: 'missing' as const };
+      if (!canManageGroup(current.role)) return { status: 'forbidden' as const };
+
+      await client.query(
+        `update conversations set title = $2, updated_at = now() where id = $1`,
+        [params.data.id, parsed.data.title]
+      );
+      return {
+        status: 'renamed' as const,
+        userIds: await groupUserIds(client, params.data.id)
+      };
+    });
+    if (result.status === 'missing') return reply.code(404).send({ error: 'Group not found.' });
+    if (result.status === 'forbidden') return reply.code(403).send({ error: 'Group management requires admin permission.' });
+
+    options.realtimeEvents?.emitConversationChanged({
+      conversationId: params.data.id,
+      userIds: result.userIds
+    });
     return reply.send({ group: await serializeGroup(options.database, params.data.id, request.auth.user.id) });
   });
 
@@ -474,7 +512,7 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     const parsed = addMemberSchema.safeParse(request.body);
     if (!params.success || !parsed.success) return reply.code(400).send({ error: 'Invalid invitation.' });
     const me = request.auth.user.id;
-    const membership = await groupMembership(options.database, params.data.id, me);
+    const membership = await resolveGroupMembership(options.database.pool, params.data.id, me);
     if (!membership) return reply.code(404).send({ error: 'Group not found.' });
     if (!canManageGroup(membership.role)) return reply.code(403).send({ error: 'Group management requires admin permission.' });
     if (!(await ensureFriendAllowed(options.database, me, parsed.data.userId))) return reply.code(403).send({ error: 'You can only invite available friends.' });
@@ -506,7 +544,7 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     }
 
     options.realtimeEvents?.emitGroupInvitesChanged({ userIds: [parsed.data.userId] });
-    const userIds = await groupUserIds(options.database, params.data.id);
+    const userIds = await groupUserIds(options.database.pool, params.data.id);
     options.realtimeEvents?.emitConversationChanged({ conversationId: params.data.id, userIds });
     return reply.code(201).send({ group: await serializeGroup(options.database, params.data.id, me) });
   });
@@ -518,14 +556,18 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     const parsed = addMemberSchema.safeParse(request.body);
     if (!params.success || !parsed.success) return reply.code(400).send({ error: 'Invalid member.' });
     const me = request.auth.user.id;
-    const membership = await groupMembership(options.database, params.data.id, me);
+    const membership = await resolveGroupMembership(options.database.pool, params.data.id, me);
     if (!membership) return reply.code(404).send({ error: 'Group not found.' });
     if (!canManageGroup(membership.role)) return reply.code(403).send({ error: 'Group management requires admin permission.' });
     if (!(await ensureFriendAllowed(options.database, me, parsed.data.userId))) return reply.code(403).send({ error: 'You can only add available friends.' });
 
     const result = await withGroupLock(options.database, params.data.id, async (client) => {
+      const current = await resolveGroupMembership(client, params.data.id, me);
+      if (!current) return { status: 'missing' as const };
+      if (!canManageGroup(current.role)) return { status: 'forbidden' as const };
+
       const count = await client.query(`select count(*)::int as count from conversation_members where conversation_id = $1`, [params.data.id]);
-      if (Number(count.rows[0]?.count ?? 0) >= MAX_GROUP_MEMBERS) return 'full' as const;
+      if (Number(count.rows[0]?.count ?? 0) >= MAX_GROUP_MEMBERS) return { status: 'full' as const };
       const inserted = await client.query(
         `insert into conversation_members (conversation_id, user_id, role)
          values ($1, $2, 'member')
@@ -533,16 +575,23 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
          returning user_id`,
         [params.data.id, parsed.data.userId]
       );
-      if (!inserted.rowCount) return 'exists' as const;
+      if (!inserted.rowCount) return { status: 'exists' as const };
       await client.query(`update group_invites set status = 'accepted', responded_at = now() where conversation_id = $1 and invitee_id = $2 and status = 'pending'`, [params.data.id, parsed.data.userId]);
       await client.query(`update conversations set updated_at = now() where id = $1`, [params.data.id]);
-      return 'added' as const;
+      return {
+        status: 'added' as const,
+        userIds: await groupUserIds(client, params.data.id)
+      };
     });
-    if (result === 'full') return reply.code(409).send({ error: 'Group is full.' });
-    if (result === 'exists') return reply.code(409).send({ error: 'User is already a group member.' });
+    if (result.status === 'missing') return reply.code(404).send({ error: 'Group not found.' });
+    if (result.status === 'forbidden') return reply.code(403).send({ error: 'Group management requires admin permission.' });
+    if (result.status === 'full') return reply.code(409).send({ error: 'Group is full.' });
+    if (result.status === 'exists') return reply.code(409).send({ error: 'User is already a group member.' });
 
-    const userIds = await groupUserIds(options.database, params.data.id);
-    options.realtimeEvents?.emitConversationOpened({ conversationId: params.data.id, userIds });
+    options.realtimeEvents?.emitConversationOpened({
+      conversationId: params.data.id,
+      userIds: result.userIds
+    });
     options.realtimeEvents?.emitGroupInvitesChanged({ userIds: [parsed.data.userId] });
     return reply.code(201).send({ group: await serializeGroup(options.database, params.data.id, me) });
   });
@@ -554,18 +603,23 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     if (!params.success || !parsed.success) return reply.code(400).send({ error: 'Invalid role change.' });
 
     const result = await withGroupLock(options.database, params.data.id, async (client) => {
-      const actor = await lockedMembership(client, params.data.id, request.auth!.user.id);
-      const target = await lockedMembership(client, params.data.id, params.data.userId);
-      if (!actor || !target) return 'missing' as const;
-      if (!canChangeGroupRole(actor.role, target.role)) return 'forbidden' as const;
+      const actor = await resolveGroupMembership(client, params.data.id, request.auth!.user.id);
+      const target = await resolveGroupMembership(client, params.data.id, params.data.userId);
+      if (!actor || !target) return { status: 'missing' as const };
+      if (!canChangeGroupRole(actor.role, target.role)) return { status: 'forbidden' as const };
       await client.query(`update conversation_members set role = $3 where conversation_id = $1 and user_id = $2`, [params.data.id, params.data.userId, parsed.data.role]);
-      return 'ok' as const;
+      return {
+        status: 'updated' as const,
+        userIds: await groupUserIds(client, params.data.id)
+      };
     });
-    if (result === 'missing') return reply.code(404).send({ error: 'Group member not found.' });
-    if (result === 'forbidden') return reply.code(403).send({ error: 'Only the owner can change admin roles.' });
+    if (result.status === 'missing') return reply.code(404).send({ error: 'Group member not found.' });
+    if (result.status === 'forbidden') return reply.code(403).send({ error: 'Only the owner can change admin roles.' });
 
-    const userIds = await groupUserIds(options.database, params.data.id);
-    options.realtimeEvents?.emitConversationChanged({ conversationId: params.data.id, userIds });
+    options.realtimeEvents?.emitConversationChanged({
+      conversationId: params.data.id,
+      userIds: result.userIds
+    });
     return reply.send({ group: await serializeGroup(options.database, params.data.id, request.auth.user.id) });
   });
 
@@ -576,19 +630,25 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     if (params.data.userId === request.auth.user.id) return reply.code(400).send({ error: 'Use leave group for your own membership.' });
 
     const result = await withGroupLock(options.database, params.data.id, async (client) => {
-      const actor = await lockedMembership(client, params.data.id, request.auth!.user.id);
-      const target = await lockedMembership(client, params.data.id, params.data.userId);
-      if (!actor || !target) return 'missing' as const;
-      if (!canRemoveGroupMember(actor.role, target.role)) return 'forbidden' as const;
+      const actor = await resolveGroupMembership(client, params.data.id, request.auth!.user.id);
+      const target = await resolveGroupMembership(client, params.data.id, params.data.userId);
+      if (!actor || !target) return { status: 'missing' as const };
+      if (!canRemoveGroupMember(actor.role, target.role)) return { status: 'forbidden' as const };
       await client.query(`delete from conversation_members where conversation_id = $1 and user_id = $2`, [params.data.id, params.data.userId]);
       await client.query(`update conversations set updated_at = now() where id = $1`, [params.data.id]);
-      return 'ok' as const;
+      return {
+        status: 'removed' as const,
+        remainingUserIds: await groupUserIds(client, params.data.id)
+      };
     });
-    if (result === 'missing') return reply.code(404).send({ error: 'Group member not found.' });
-    if (result === 'forbidden') return reply.code(403).send({ error: 'You cannot remove this member.' });
+    if (result.status === 'missing') return reply.code(404).send({ error: 'Group member not found.' });
+    if (result.status === 'forbidden') return reply.code(403).send({ error: 'You cannot remove this member.' });
 
-    const remainingUserIds = await groupUserIds(options.database, params.data.id);
-    options.realtimeEvents?.emitConversationRemoved({ conversationId: params.data.id, removedUserIds: [params.data.userId], remainingUserIds });
+    options.realtimeEvents?.emitConversationRemoved({
+      conversationId: params.data.id,
+      removedUserIds: [params.data.userId],
+      remainingUserIds: result.remainingUserIds
+    });
     return reply.send({ group: await serializeGroup(options.database, params.data.id, request.auth.user.id) });
   });
 
@@ -600,21 +660,26 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     const me = request.auth.user.id;
 
     const result = await withGroupLock(options.database, params.data.id, async (client) => {
-      const actor = await lockedMembership(client, params.data.id, me);
-      const target = await lockedMembership(client, params.data.id, parsed.data.userId);
-      if (!actor || !target) return 'missing' as const;
-      if (actor.role !== 'owner') return 'forbidden' as const;
-      if (parsed.data.userId === me) return 'self' as const;
+      const actor = await resolveGroupMembership(client, params.data.id, me);
+      const target = await resolveGroupMembership(client, params.data.id, parsed.data.userId);
+      if (!actor || !target) return { status: 'missing' as const };
+      if (!canTransferGroupOwnership(actor.role)) return { status: 'forbidden' as const };
+      if (parsed.data.userId === me) return { status: 'self' as const };
       await client.query(`update conversation_members set role = 'admin' where conversation_id = $1 and user_id = $2`, [params.data.id, me]);
       await client.query(`update conversation_members set role = 'owner' where conversation_id = $1 and user_id = $2`, [params.data.id, parsed.data.userId]);
-      return 'ok' as const;
+      return {
+        status: 'transferred' as const,
+        userIds: await groupUserIds(client, params.data.id)
+      };
     });
-    if (result === 'missing') return reply.code(404).send({ error: 'Group member not found.' });
-    if (result === 'forbidden') return reply.code(403).send({ error: 'Only the owner can transfer ownership.' });
-    if (result === 'self') return reply.code(400).send({ error: 'You already own this group.' });
+    if (result.status === 'missing') return reply.code(404).send({ error: 'Group member not found.' });
+    if (result.status === 'forbidden') return reply.code(403).send({ error: 'Only the owner can transfer ownership.' });
+    if (result.status === 'self') return reply.code(400).send({ error: 'You already own this group.' });
 
-    const userIds = await groupUserIds(options.database, params.data.id);
-    options.realtimeEvents?.emitConversationChanged({ conversationId: params.data.id, userIds });
+    options.realtimeEvents?.emitConversationChanged({
+      conversationId: params.data.id,
+      userIds: result.userIds
+    });
     return reply.send({ group: await serializeGroup(options.database, params.data.id, me) });
   });
 
@@ -625,22 +690,28 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     const me = request.auth.user.id;
 
     const result = await withGroupLock(options.database, params.data.id, async (client) => {
-      const membership = await lockedMembership(client, params.data.id, me);
-      if (!membership) return 'missing' as const;
+      const membership = await resolveGroupMembership(client, params.data.id, me);
+      if (!membership) return { status: 'missing' as const };
       const count = await client.query(`select count(*)::int as count from conversation_members where conversation_id = $1`, [params.data.id]);
-      if (membership.role === 'owner' && Number(count.rows[0]?.count ?? 0) > 1) return 'transfer' as const;
+      if (membership.role === 'owner' && Number(count.rows[0]?.count ?? 0) > 1) return { status: 'transfer' as const };
       if (membership.role === 'owner') {
         await client.query(`delete from conversations where id = $1`, [params.data.id]);
-        return 'deleted' as const;
+        return { status: 'deleted' as const, remainingUserIds: [] };
       }
       await client.query(`delete from conversation_members where conversation_id = $1 and user_id = $2`, [params.data.id, me]);
-      return 'left' as const;
+      return {
+        status: 'left' as const,
+        remainingUserIds: await groupUserIds(client, params.data.id)
+      };
     });
-    if (result === 'missing') return reply.code(404).send({ error: 'Group not found.' });
-    if (result === 'transfer') return reply.code(409).send({ error: 'Transfer ownership before leaving the group.' });
+    if (result.status === 'missing') return reply.code(404).send({ error: 'Group not found.' });
+    if (result.status === 'transfer') return reply.code(409).send({ error: 'Transfer ownership before leaving the group.' });
 
-    const remainingUserIds = result === 'deleted' ? [] : await groupUserIds(options.database, params.data.id);
-    options.realtimeEvents?.emitConversationRemoved({ conversationId: params.data.id, removedUserIds: [me], remainingUserIds });
+    options.realtimeEvents?.emitConversationRemoved({
+      conversationId: params.data.id,
+      removedUserIds: [me],
+      remainingUserIds: result.remainingUserIds
+    });
     return reply.code(204).send();
   });
 
@@ -649,20 +720,20 @@ export const groupRoutes: FastifyPluginAsync<GroupRoutesOptions> = async (app, o
     const params = groupParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid group.' });
     const me = request.auth.user.id;
-    const before = await groupMembership(options.database, params.data.id, me);
+    const before = await resolveGroupMembership(options.database.pool, params.data.id, me);
     if (!before) return reply.code(404).send({ error: 'Group not found.' });
-    if (before.role !== 'owner') return reply.code(403).send({ error: 'Only the owner can delete the group.' });
-    const userIds = await groupUserIds(options.database, params.data.id);
+    if (!canDeleteGroup(before.role)) return reply.code(403).send({ error: 'Only the owner can delete the group.' });
 
     const deleted = await withGroupLock(options.database, params.data.id, async (client) => {
-      const membership = await lockedMembership(client, params.data.id, me);
-      if (!membership || membership.role !== 'owner') return false;
+      const membership = await resolveGroupMembership(client, params.data.id, me);
+      if (!membership || !canDeleteGroup(membership.role)) return null;
+      const userIds = await groupUserIds(client, params.data.id);
       await client.query(`delete from conversations where id = $1`, [params.data.id]);
-      return true;
+      return { userIds, avatarKey: membership.avatarKey };
     });
     if (!deleted) return reply.code(409).send({ error: 'Group ownership changed. Refresh and try again.' });
-    await options.mediaStore.deleteGroupAvatar(before.avatar_key).catch(() => {});
-    options.realtimeEvents?.emitConversationRemoved({ conversationId: params.data.id, removedUserIds: userIds, remainingUserIds: [] });
+    await options.mediaStore.deleteGroupAvatar(deleted.avatarKey).catch(() => {});
+    options.realtimeEvents?.emitConversationRemoved({ conversationId: params.data.id, removedUserIds: deleted.userIds, remainingUserIds: [] });
     return reply.code(204).send();
   });
 };

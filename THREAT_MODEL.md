@@ -74,6 +74,12 @@ Object identifiers are not authorization.
 
 Every access to private resources must verify membership/permissions.
 
+Group metadata, direct-member, role, ownership, leave and deletion mutations
+revalidate the actor's current membership and role after acquiring the group's
+PostgreSQL advisory transaction lock. Target membership, role and deletion
+snapshots used by the mutation are resolved in that same transaction; realtime
+events and media deletion occur only after a successful commit.
+
 Particular attention is required for:
 
 - messages
