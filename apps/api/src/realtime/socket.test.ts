@@ -258,11 +258,17 @@ class RealtimeDatabase {
   readonly conversationMemberships = new Map<string, Set<string>>();
   readonly directPairs = new Map<string, { lowId: string; highId: string }>();
   readonly blockedConversations = new Set<string>();
+  autoJoinReadGate: ((rows: any[]) => Promise<void>) | null = null;
+  membershipReadGate: ((rows: any[]) => Promise<void>) | null = null;
 
   db = {
     select: () => {
       let result: Promise<any[]> | null = null;
-      const read = () => result ??= Promise.resolve(this.selectResults.shift() ?? []);
+      const read = () => result ??= (async () => {
+        const rows = this.selectResults.shift() ?? [];
+        await this.autoJoinReadGate?.(rows);
+        return rows;
+      })();
       const builder: any = {
         from: () => builder,
         innerJoin: () => builder,
@@ -293,6 +299,7 @@ class RealtimeDatabase {
               role: 'member'
             }]
           : [];
+        await this.membershipReadGate?.(rows);
         return { rows, rowCount: rows.length };
       }
       if (normalized.includes("c.kind = 'direct'")) {
@@ -386,6 +393,31 @@ function waitForEvent<T = unknown>(socket: ClientSocket, event: string, timeoutM
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function readBarrier() {
+  let entered!: () => void;
+  let release!: () => void;
+  return {
+    entered: new Promise<void>((resolve) => { entered = resolve; }),
+    release: () => release(),
+    gate: async () => {
+      entered();
+      await new Promise<void>((resolve) => { release = resolve; });
+    }
+  };
+}
+
+function serverSocketIsInRoom(
+  harness: RealtimeHarness,
+  sessionId: string,
+  roomId: string
+): boolean {
+  const registry = harness.realtime.registry as unknown as {
+    socketsBySession: Map<string, Map<string, { rooms: Set<string> }>>;
+  };
+  return [...(registry.socketsBySession.get(sessionId)?.values() ?? [])]
+    .some((socket) => socket.rooms.has(`conversation:${roomId}`));
 }
 
 async function connectClient(
@@ -893,6 +925,263 @@ test('conversation authorization and message mutation propagation remain intact'
   outsider.close();
   await delay(20);
   assert.equal(harness.realtime.registry.socketCount, 0);
+});
+
+test('a removal invalidates an in-flight explicit join without evicting another member', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const removedUserId = '10000000-0000-4000-8000-000000000001';
+  const otherUserId = '10000000-0000-4000-8000-000000000002';
+  const removedSession = harness.repository.add('race-removed', removedUserId);
+  const otherSession = harness.repository.add('race-other', otherUserId);
+  const removed = await connectClient(harness, 'race-removed', [conversationId]);
+  const other = await connectClient(harness, 'race-other', [conversationId]);
+  harness.database.conversationMemberships.set(conversationId, new Set([removedUserId, otherUserId]));
+  assert.equal(serverSocketIsInRoom(harness, removedSession.session.id, conversationId), true);
+
+  const barrier = readBarrier();
+  harness.database.membershipReadGate = barrier.gate;
+  const acknowledgement = new Promise<any>((resolve) =>
+    removed.emit('conversation:join', { conversationId }, resolve)
+  );
+  await barrier.entered;
+  harness.database.conversationMemberships.get(conversationId)?.delete(removedUserId);
+  const removal = waitForEvent(removed, 'conversation:removed');
+  harness.events.emitConversationRemoved({
+    conversationId,
+    removedUserIds: [removedUserId],
+    remainingUserIds: [otherUserId]
+  });
+  await removal;
+  barrier.release();
+
+  assert.deepEqual(await acknowledgement, { ok: false, error: 'Conversation not found.' });
+  assert.equal(serverSocketIsInRoom(harness, removedSession.session.id, conversationId), false);
+  assert.equal(serverSocketIsInRoom(harness, otherSession.session.id, conversationId), true);
+
+  let removedBroadcasts = 0;
+  removed.on('message:created', () => { removedBroadcasts += 1; });
+  removed.on('message:reactions', () => { removedBroadcasts += 1; });
+  const message = {
+    id: randomUUID(), conversationId, senderId: otherUserId, clientMessageId: randomUUID(),
+    body: 'still private', createdAt: new Date().toISOString(), editedAt: null,
+    deletedAt: null, attachments: [], replyTo: null, reactions: []
+  };
+  const created = waitForEvent(other, 'message:created');
+  harness.events.emitMessageCreated({ conversationId, message });
+  await created;
+  const reactions = waitForEvent(other, 'message:reactions');
+  harness.events.emitMessageReactionsChanged({
+    conversationId, messageId: message.id, userId: otherUserId,
+    reaction: '👍', active: true, reactions: [{ reaction: '👍', count: 1 }]
+  });
+  await reactions;
+  assert.equal(serverSocketIsInRoom(harness, removedSession.session.id, conversationId), false);
+  assert.equal(removedBroadcasts, 0);
+
+  // A fresh authorization after a supported re-add is not tainted by the old admission.
+  harness.database.membershipReadGate = null;
+  harness.database.conversationMemberships.get(conversationId)?.add(removedUserId);
+  const rejoined = await new Promise<any>((resolve) =>
+    removed.emit('conversation:join', { conversationId }, resolve)
+  );
+  assert.deepEqual(rejoined, { ok: true });
+  assert.equal(serverSocketIsInRoom(harness, removedSession.session.id, conversationId), true);
+  removed.close();
+  other.close();
+});
+
+test('a removal invalidates an in-flight initial auto-join', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const userId = '10000000-0000-4000-8000-000000000001';
+  const session = harness.repository.add('auto-join-race', userId);
+  const barrier = readBarrier();
+  harness.database.autoJoinReadGate = barrier.gate;
+  harness.database.selectResults.push([{ conversationId }]);
+  const socket = createClient(harness.url, {
+    path: '/socket.io', transports: ['websocket'], reconnection: false,
+    extraHeaders: { cookie: 'session=auto-join-race' }
+  });
+  context.after(() => socket.close());
+  await barrier.entered;
+  const removal = waitForEvent(socket, 'conversation:removed');
+  harness.events.emitConversationRemoved({
+    conversationId, removedUserIds: [userId], remainingUserIds: []
+  });
+  await removal;
+  const ready = waitForEvent(socket, 'realtime:ready');
+  barrier.release();
+  await ready;
+  assert.equal(serverSocketIsInRoom(harness, session.session.id, conversationId), false);
+});
+
+test('a delayed opened event cannot revive a pre-removal admission, but a fresh join succeeds', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const userId = '10000000-0000-4000-8000-000000000001';
+  const session = harness.repository.add('readd-race', userId);
+  const socket = await connectClient(harness, 'readd-race');
+  harness.database.conversationMemberships.set(conversationId, new Set([userId]));
+  const barrier = readBarrier();
+  harness.database.membershipReadGate = barrier.gate;
+  const acknowledgement = new Promise<any>((resolve) =>
+    socket.emit('conversation:join', { conversationId }, resolve)
+  );
+  await barrier.entered;
+  harness.database.conversationMemberships.get(conversationId)?.delete(userId);
+  harness.events.emitConversationRemoved({
+    conversationId, removedUserIds: [userId], remainingUserIds: []
+  });
+  harness.database.membershipReadGate = null;
+  // This event carries an old member snapshot; no membership has been restored.
+  harness.events.emitConversationOpened({ conversationId, userIds: [userId] });
+  barrier.release();
+  assert.deepEqual(await acknowledgement, { ok: false, error: 'Conversation not found.' });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(serverSocketIsInRoom(harness, session.session.id, conversationId), false);
+  assert.equal(harness.realtime.pendingAdmissionCount, 0);
+
+  harness.database.conversationMemberships.get(conversationId)?.add(userId);
+  const fresh = await new Promise<any>((resolve) =>
+    socket.emit('conversation:join', { conversationId }, resolve)
+  );
+  assert.deepEqual(fresh, { ok: true });
+  assert.equal(serverSocketIsInRoom(harness, session.session.id, conversationId), true);
+  socket.close();
+});
+
+test('disconnect retires a held admission before its positive database result can join', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const userId = '10000000-0000-4000-8000-000000000001';
+  const session = harness.repository.add('disconnect-admission', userId);
+  const socket = await connectClient(harness, 'disconnect-admission');
+  harness.database.conversationMemberships.set(conversationId, new Set([userId]));
+  const barrier = readBarrier();
+  harness.database.membershipReadGate = barrier.gate;
+  socket.emit('conversation:join', { conversationId }, () => {});
+  await barrier.entered;
+  assert.equal(harness.realtime.pendingAdmissionCount, 1);
+  const registry = harness.realtime.registry as unknown as {
+    socketsBySession: Map<string, Map<string, {
+      rooms: Set<string>;
+      once(event: string, listener: () => void): void;
+    }>>;
+  };
+  const serverSocket = [...(registry.socketsBySession.get(session.session.id)?.values() ?? [])][0];
+  assert.ok(serverSocket);
+  const serverDisconnect = new Promise<void>((resolve) => serverSocket.once('disconnect', resolve));
+  socket.disconnect();
+  await serverDisconnect;
+  assert.equal(harness.realtime.pendingAdmissionCount, 0);
+  barrier.release();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(serverSocket.rooms.has(`conversation:${conversationId}`), false);
+  assert.equal(harness.realtime.pendingAdmissionCount, 0);
+});
+
+test('a retired admission cannot erase a newer socket admission for the same user', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const userId = '10000000-0000-4000-8000-000000000001';
+  harness.repository.add('old-socket-admission', userId);
+  harness.repository.add('new-socket-admission', userId);
+  const oldSocket = await connectClient(harness, 'old-socket-admission');
+  harness.database.conversationMemberships.set(conversationId, new Set([userId]));
+  const oldBarrier = readBarrier();
+  harness.database.membershipReadGate = oldBarrier.gate;
+  oldSocket.emit('conversation:join', { conversationId }, () => {});
+  await oldBarrier.entered;
+  const oldServerSocket = [...((harness.realtime.registry as unknown as {
+    socketsBySession: Map<string, Map<string, { once(event: string, listener: () => void): void }>>;
+  }).socketsBySession.values())][0]?.values().next().value;
+  assert.ok(oldServerSocket);
+  const disconnected = new Promise<void>((resolve) => oldServerSocket.once('disconnect', resolve));
+  oldSocket.disconnect();
+  await disconnected;
+
+  const newSocket = await connectClient(harness, 'new-socket-admission');
+  const newBarrier = readBarrier();
+  harness.database.membershipReadGate = newBarrier.gate;
+  const acknowledgement = new Promise<any>((resolve) =>
+    newSocket.emit('conversation:join', { conversationId }, resolve)
+  );
+  await newBarrier.entered;
+  assert.equal(harness.realtime.pendingAdmissionCount, 1);
+  oldBarrier.release();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(harness.realtime.pendingAdmissionCount, 1);
+
+  harness.database.conversationMemberships.get(conversationId)?.delete(userId);
+  harness.events.emitConversationRemoved({
+    conversationId, removedUserIds: [userId], remainingUserIds: []
+  });
+  newBarrier.release();
+  assert.deepEqual(await acknowledgement, { ok: false, error: 'Conversation not found.' });
+  assert.equal(harness.realtime.pendingAdmissionCount, 0);
+  newSocket.close();
+});
+
+test('each socket has a bounded number of pending conversation admissions', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const userId = '10000000-0000-4000-8000-000000000001';
+  harness.repository.add('bounded-admissions', userId);
+  const socket = await connectClient(harness, 'bounded-admissions');
+  harness.database.conversationMemberships.set(conversationId, new Set([userId]));
+  let entered = 0;
+  let reachedBound!: () => void;
+  let release!: () => void;
+  const atBound = new Promise<void>((resolve) => { reachedBound = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  harness.database.membershipReadGate = async () => {
+    entered += 1;
+    if (entered === 8) reachedBound();
+    await held;
+  };
+  const pending = Array.from({ length: 8 }, () =>
+    new Promise<any>((resolve) => socket.emit('conversation:join', { conversationId }, resolve))
+  );
+  await atBound;
+  assert.equal(harness.realtime.pendingAdmissionCount, 8);
+  const excess = await new Promise<any>((resolve) =>
+    socket.emit('conversation:join', { conversationId }, resolve)
+  );
+  assert.deepEqual(excess, { ok: false, error: 'Realtime is busy. Try again.' });
+  assert.equal(harness.realtime.pendingAdmissionCount, 8);
+  release();
+  assert.ok((await Promise.all(pending)).every((result) => result.ok === true));
+  assert.equal(harness.realtime.pendingAdmissionCount, 0);
+  socket.close();
+});
+
+test('many removals retire a held admission instead of growing its marker set', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const userId = '10000000-0000-4000-8000-000000000001';
+  const session = harness.repository.add('many-removals', userId);
+  const barrier = readBarrier();
+  harness.database.autoJoinReadGate = barrier.gate;
+  harness.database.selectResults.push([{ conversationId }]);
+  const socket = createClient(harness.url, {
+    path: '/socket.io', transports: ['websocket'], reconnection: false,
+    extraHeaders: { cookie: 'session=many-removals' }
+  });
+  context.after(() => socket.close());
+  await barrier.entered;
+  assert.equal(harness.realtime.pendingAdmissionCount, 1);
+  for (let index = 0; index < 65; index += 1) {
+    harness.events.emitConversationRemoved({
+      conversationId: index === 0 ? conversationId : randomUUID(),
+      removedUserIds: [userId], remainingUserIds: []
+    });
+  }
+  assert.equal(harness.realtime.pendingAdmissionCount, 0);
+  const ready = waitForEvent(socket, 'realtime:ready');
+  barrier.release();
+  await ready;
+  assert.equal(serverSocketIsInRoom(harness, session.session.id, conversationId), false);
 });
 
 test('direct-call signalling still starts and accepts across authenticated sockets', async (context) => {

@@ -1,6 +1,6 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import { eq } from 'drizzle-orm';
-import { Server } from 'socket.io';
+import { Server, type Socket } from 'socket.io';
 import { z } from 'zod';
 import type { Database } from '@cubic/database';
 import { conversationMembers } from '@cubic/database/schema';
@@ -25,6 +25,8 @@ const callStartSchema = z.object({ conversationId: z.string().uuid() });
 const callIdSchema = z.object({ callId: z.string().uuid() });
 
 const RING_TIMEOUT_MS = 45_000;
+const MAX_PENDING_ADMISSIONS_PER_SOCKET = 8;
+const MAX_REMOVALS_PER_ADMISSION = 64;
 
 function conversationRoom(conversationId: string): string {
   return `conversation:${conversationId}`;
@@ -110,6 +112,7 @@ export interface AttachRealtimeOptions {
 
 export interface RealtimeServer {
   registry: SessionSocketRegistry;
+  readonly pendingAdmissionCount: number;
   close(): Promise<void>;
 }
 
@@ -327,6 +330,55 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
   const calls = new DirectCallCoordinator();
   const ringTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const registry = new SessionSocketRegistry();
+  // Track only in-flight admissions. A removal permanently invalidates work
+  // started before it; a later admission reads current membership from the DB.
+  type Admission = {
+    removedConversations: Set<string>;
+    cancelled: boolean;
+    finish(): void;
+    invalidFor(conversationId: string): boolean;
+  };
+  const admissionsByUser = new Map<string, Set<Admission>>();
+  const admissionsBySocket = new Map<string, Set<Admission>>();
+  const beginAdmission = (socket: Socket, userId: string): Admission | null => {
+    if (!socket.connected) return null;
+    let socketAdmissions = admissionsBySocket.get(socket.id);
+    if (socketAdmissions && socketAdmissions.size >= MAX_PENDING_ADMISSIONS_PER_SOCKET) return null;
+    if (!socketAdmissions) {
+      socketAdmissions = new Set();
+      admissionsBySocket.set(socket.id, socketAdmissions);
+    }
+    let userAdmissions = admissionsByUser.get(userId);
+    if (!userAdmissions) {
+      userAdmissions = new Set();
+      admissionsByUser.set(userId, userAdmissions);
+    }
+    const ownedSocketAdmissions = socketAdmissions;
+    const ownedUserAdmissions = userAdmissions;
+    const admission: Admission = {
+      removedConversations: new Set(),
+      cancelled: false,
+      invalidFor: (conversationId) =>
+        admission.cancelled || !socket.connected || admission.removedConversations.has(conversationId),
+      finish: () => {
+        ownedSocketAdmissions.delete(admission);
+        ownedUserAdmissions.delete(admission);
+        if (ownedSocketAdmissions.size === 0 && admissionsBySocket.get(socket.id) === ownedSocketAdmissions)
+          admissionsBySocket.delete(socket.id);
+        if (ownedUserAdmissions.size === 0 && admissionsByUser.get(userId) === ownedUserAdmissions)
+          admissionsByUser.delete(userId);
+      }
+    };
+    socketAdmissions.add(admission);
+    userAdmissions.add(admission);
+    return admission;
+  };
+  const retireSocketAdmissions = (socketId: string) => {
+    for (const admission of [...(admissionsBySocket.get(socketId) ?? [])]) {
+      admission.cancelled = true;
+      admission.finish();
+    }
+  };
   let activeRevalidation: Promise<void> | null = null;
   void recoverStaleCallRows(options.database).catch(() => {});
 
@@ -424,6 +476,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     }
 
     registry.register(identity.sessionId, socket);
+    socket.once('disconnect', () => retireSocketAdmissions(socket.id));
 
     try {
       const current = await options.sessionService.validateId(identity.sessionId, { activity: false });
@@ -437,6 +490,8 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
       socket.disconnect(true);
       return;
     }
+
+    if (!socket.connected) return;
 
     socket.use(async (packet, next) => {
       try {
@@ -457,6 +512,11 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
 
     socket.join(userRoom(identity.userId));
 
+    const initialAdmission = beginAdmission(socket, identity.userId);
+    if (!initialAdmission) {
+      socket.disconnect(true);
+      return;
+    }
     try {
       const memberships = await options.database.db
         .select({ conversationId: conversationMembers.conversationId })
@@ -464,9 +524,14 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
         .where(eq(conversationMembers.userId, identity.userId));
 
       for (const membership of memberships) {
+        if (initialAdmission.invalidFor(membership.conversationId)) continue;
+        // The configured single-process in-memory adapter joins synchronously.
         socket.join(conversationRoom(membership.conversationId));
+        if (initialAdmission.invalidFor(membership.conversationId))
+          socket.leave(conversationRoom(membership.conversationId));
       }
 
+      if (!socket.connected) return;
       socket.emit('realtime:ready', {
         userId: identity.userId,
         conversationCount: memberships.length
@@ -474,6 +539,8 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     } catch {
       socket.disconnect(true);
       return;
+    } finally {
+      initialAdmission.finish();
     }
 
     socket.on(
@@ -488,19 +555,35 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
           return;
         }
 
-        const membership = await resolveConversationMembership(
-          options.database,
-          parsed.data.conversationId,
-          identity.userId
-        );
-
-        if (!membership) {
-          acknowledge?.({ ok: false, error: 'Conversation not found.' });
+        const admission = beginAdmission(socket, identity.userId);
+        if (!admission) {
+          acknowledge?.({ ok: false, error: 'Realtime is busy. Try again.' });
           return;
         }
+        try {
+          const membership = await resolveConversationMembership(
+            options.database,
+            parsed.data.conversationId,
+            identity.userId
+          );
 
-        await socket.join(conversationRoom(parsed.data.conversationId));
-        acknowledge?.({ ok: true });
+          if (!membership || admission.invalidFor(parsed.data.conversationId)) {
+            if (!socket.connected) return;
+            acknowledge?.({ ok: false, error: 'Conversation not found.' });
+            return;
+          }
+
+          socket.join(conversationRoom(parsed.data.conversationId));
+          if (admission.invalidFor(parsed.data.conversationId)) {
+            socket.leave(conversationRoom(parsed.data.conversationId));
+            if (!socket.connected) return;
+            acknowledge?.({ ok: false, error: 'Conversation not found.' });
+            return;
+          }
+          acknowledge?.({ ok: true });
+        } finally {
+          admission.finish();
+        }
       }
     );
 
@@ -700,7 +783,24 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
   const unsubscribeOpened = options.events.onConversationOpened((event) => {
     for (const userId of event.userIds) {
       const room = userRoom(userId);
-      io.in(room).socketsJoin(conversationRoom(event.conversationId));
+      // Event payloads may contain all group members, not just the new member.
+      // Resolve current membership before admitting any socket from a delayed event.
+      const admissions = [...io.sockets.sockets.values()]
+        .filter((socket) => socket.rooms.has(room))
+        .map((socket) => ({ socket, admission: beginAdmission(socket, userId) }))
+        .filter((entry): entry is { socket: Socket; admission: Admission } => entry.admission !== null);
+      if (admissions.length > 0) {
+        void resolveConversationMembership(options.database, event.conversationId, userId)
+          .then((membership) => {
+            if (!membership) return;
+            for (const { socket, admission } of admissions) {
+              if (!admission.invalidFor(event.conversationId))
+                socket.join(conversationRoom(event.conversationId));
+            }
+          })
+          .catch(() => {})
+          .finally(() => admissions.forEach(({ admission }) => admission.finish()));
+      }
       io.to(room).emit('conversation:updated', { conversationId: event.conversationId });
     }
   });
@@ -713,6 +813,15 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
 
   const unsubscribeRemoved = options.events.onConversationRemoved((event) => {
     for (const userId of event.removedUserIds) {
+      for (const admission of [...(admissionsByUser.get(userId) ?? [])]) {
+        if (admission.removedConversations.size >= MAX_REMOVALS_PER_ADMISSION &&
+            !admission.removedConversations.has(event.conversationId)) {
+          admission.cancelled = true;
+          admission.finish();
+        } else {
+          admission.removedConversations.add(event.conversationId);
+        }
+      }
       const room = userRoom(userId);
       io.in(room).socketsLeave(conversationRoom(event.conversationId));
       io.to(room).emit('conversation:removed', { conversationId: event.conversationId });
@@ -755,6 +864,11 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
 
   return {
     registry,
+    get pendingAdmissionCount() {
+      let count = 0;
+      for (const admissions of admissionsBySocket.values()) count += admissions.size;
+      return count;
+    },
     async close() {
       clearInterval(revalidationTimer);
       await activeRevalidation?.catch(() => {});
