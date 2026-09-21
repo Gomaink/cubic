@@ -114,4 +114,3 @@ When displaying uploads:
 - do not trust filenames
 - do not derive execution behavior from extensions
 - preserve authenticated access controls
-
