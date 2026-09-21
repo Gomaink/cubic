@@ -1,8 +1,19 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, preHandlerAsyncHookHandler } from 'fastify';
 import { z } from 'zod';
 import type { Database } from '@cubic/database';
 import { createRequireAuth } from '../auth/guard.js';
-import type { AttachmentStore } from '../media/attachments.js';
+import type { SessionService } from '../security/session.js';
+import { authorizeConversationContentCreation } from '../authorization/conversations.js';
+import {
+  AttachmentStorageReserveError,
+  attachmentDeliveryPolicy,
+  safeAttachmentContentDisposition,
+  type AttachmentStore
+} from '../media/attachments.js';
+import {
+  PendingAttachmentQuotaError,
+  type insertPendingAttachmentWithinQuota
+} from '../media/attachment-quotas.js';
 
 const conversationParamsSchema = z.object({
   id: z.string().uuid()
@@ -15,49 +26,14 @@ const attachmentParamsSchema = z.object({
 export interface AttachmentRoutesOptions {
   database: Database;
   cookieName: string;
+  sessionService: SessionService;
   attachmentStore: AttachmentStore;
   attachmentMaxBytes: number;
-}
-
-async function isMember(
-  database: Database,
-  conversationId: string,
-  userId: string
-): Promise<boolean> {
-  const result = await database.pool.query(
-    `select 1
-       from conversation_members
-      where conversation_id = $1
-        and user_id = $2
-      limit 1`,
-    [conversationId, userId]
-  );
-
-  return Boolean(result.rowCount);
-}
-
-async function messagingBlocked(
-  database: Database,
-  conversationId: string
-): Promise<boolean> {
-  const result = await database.pool.query(
-    `select 1
-       from direct_conversation_pairs dp
-       join blocks b
-         on (
-           b.blocker_id = dp.user_low_id
-           and b.blocked_id = dp.user_high_id
-         )
-         or (
-           b.blocker_id = dp.user_high_id
-           and b.blocked_id = dp.user_low_id
-         )
-      where dp.conversation_id = $1
-      limit 1`,
-    [conversationId]
-  );
-
-  return Boolean(result.rowCount);
+  attachmentPendingMaxCount: number;
+  attachmentPendingMaxBytes: number;
+  attachmentMinFreeBytes: number;
+  uploadRateLimit?: preHandlerAsyncHookHandler;
+  insertPendingAttachment: typeof insertPendingAttachmentWithinQuota;
 }
 
 function dto(row: any) {
@@ -75,46 +51,20 @@ function dto(row: any) {
   };
 }
 
-async function cleanupStalePending(
-  database: Database,
-  attachmentStore: AttachmentStore
-): Promise<void> {
-  const result = await database.pool.query(
-    `select id, storage_key
-       from attachments
-      where message_id is null
-        and created_at < now() - interval '24 hours'
-      order by created_at asc
-      limit 250`
-  );
-
-  for (const row of result.rows) {
-    try {
-      await attachmentStore.delete(row.storage_key);
-      await database.pool.query(
-        `delete from attachments
-          where id = $1
-            and message_id is null`,
-        [row.id]
-      );
-    } catch {
-      // Retry lazily on a later upload.
-    }
-  }
-}
-
 export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
   async (app, options) => {
-    const requireAuth = createRequireAuth(
-      options.database,
-      options.cookieName
-    );
+    const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
 
-    let cleanupScheduled = false;
+    const uploadPreHandlers = options.uploadRateLimit
+      ? [requireAuth, options.uploadRateLimit]
+      : [requireAuth];
 
     app.post(
       '/conversations/:id/attachments',
-      { preHandler: requireAuth },
+      {
+        config: { rateLimit: false },
+        preHandler: uploadPreHandlers
+      },
       async (request, reply) => {
         if (!request.auth) {
           return reply.code(401).send({ error: 'Authentication required.' });
@@ -128,20 +78,45 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
         const conversationId = params.data.id;
         const me = request.auth.user.id;
 
-        if (!(await isMember(options.database, conversationId, me))) {
-          return reply.code(404).send({ error: 'Conversation not found.' });
+        const contentAuthorization = await authorizeConversationContentCreation(
+          options.database,
+          conversationId,
+          me
+        );
+        if (!contentAuthorization.allowed) {
+          return contentAuthorization.reason === 'not_member'
+            ? reply.code(404).send({ error: 'Conversation not found.' })
+            : reply.code(403).send({ error: 'Messaging is not allowed.' });
         }
 
-        if (await messagingBlocked(options.database, conversationId)) {
-          return reply.code(403).send({ error: 'Messaging is not allowed.' });
-        }
+        try {
+          await options.attachmentStore.assertFreeSpace(
+            options.attachmentMaxBytes,
+            options.attachmentMinFreeBytes
+          );
+        } catch (error) {
+          if (error instanceof AttachmentStorageReserveError) {
+            request.log.warn(
+              {
+                availableBytes: error.availableBytes.toString(),
+                requiredBytes: error.requiredBytes.toString(),
+                reserveBytes: error.reserveBytes.toString()
+              },
+              'Attachment upload rejected to preserve the media storage reserve'
+            );
+            return reply.code(507).send({
+              code: 'ATTACHMENT_STORAGE_RESERVE',
+              error: 'Attachment storage is temporarily full.'
+            });
+          }
 
-        if (!cleanupScheduled) {
-          cleanupScheduled = true;
-          void cleanupStalePending(
-            options.database,
-            options.attachmentStore
-          ).catch(() => {});
+          request.log.error(
+            { errorCode: (error as NodeJS.ErrnoException).code ?? 'UNKNOWN' },
+            'Could not inspect available attachment storage'
+          );
+          return reply.code(503).send({
+            error: 'Attachment storage is temporarily unavailable.'
+          });
         }
 
         const part = await request.file().catch(() => null);
@@ -175,7 +150,7 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
         }
 
         if (part.file.truncated || stored.sizeBytes > options.attachmentMaxBytes) {
-          await options.attachmentStore.delete(stored.key).catch(() => {});
+          await options.attachmentStore.discardStaged(stored.key).catch(() => {});
           return reply.code(413).send({
             error:
               `Attachment exceeds the ` +
@@ -183,38 +158,50 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
           });
         }
 
+        let published = false;
         try {
-          const result = await options.database.pool.query(
-            `insert into attachments (
-               conversation_id,
-               uploader_id,
-               storage_key,
-               original_name,
-               content_type,
-               kind,
-               size_bytes,
-               width,
-               height
-             ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-             returning *`,
-            [
+          const row = await options.insertPendingAttachment(
+            options.database,
+            {
               conversationId,
-              me,
-              stored.key,
-              stored.originalName,
-              stored.contentType,
-              stored.kind,
-              stored.sizeBytes,
-              stored.width,
-              stored.height
-            ]
+              uploaderId: me,
+              ...stored
+            },
+            {
+              maxCount: options.attachmentPendingMaxCount,
+              maxBytes: options.attachmentPendingMaxBytes
+            },
+            async () => {
+              await options.attachmentStore.publish(stored.key);
+              published = true;
+            }
           );
 
           return reply.code(201).send({
-            attachment: dto(result.rows[0])
+            attachment: dto(row)
           });
         } catch (error) {
-          await options.attachmentStore.delete(stored.key).catch(() => {});
+          if (!published) {
+            await options.attachmentStore.discardStaged(stored.key).catch(() => {});
+          } else {
+            request.log.warn(
+              { errorCode: (error as NodeJS.ErrnoException).code ?? 'UNKNOWN' },
+              'Attachment metadata transaction failed after file publication; reconciliation will recover the orphan'
+            );
+          }
+
+          if (error instanceof PendingAttachmentQuotaError) {
+            const countQuota = error.reason === 'count';
+            return reply.code(409).send({
+              code: countQuota
+                ? 'ATTACHMENT_PENDING_COUNT_QUOTA'
+                : 'ATTACHMENT_PENDING_BYTE_QUOTA',
+              error: countQuota
+                ? 'Pending attachment count limit reached. Send or remove pending attachments before uploading more.'
+                : 'Pending attachment storage limit reached. Send or remove pending attachments before uploading more.'
+            });
+          }
+
           throw error;
         }
       }
@@ -251,11 +238,14 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
                 a.message_id is null
                 and a.uploader_id = $2
               )
-              or exists (
-                select 1
-                  from conversation_members cm
-                 where cm.conversation_id = a.conversation_id
-                   and cm.user_id = $2
+              or (
+                a.message_id is not null
+                and exists (
+                  select 1
+                    from conversation_members cm
+                   where cm.conversation_id = a.conversation_id
+                     and cm.user_id = $2
+                )
               )
             )
           limit 1`,
@@ -267,24 +257,37 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
           return reply.code(404).send({ error: 'Attachment not found.' });
         }
 
-        const safeInline =
-          row.content_type.startsWith('image/') ||
-          row.content_type.startsWith('audio/') ||
-          row.content_type.startsWith('video/') ||
-          row.content_type === 'application/pdf' ||
-          row.content_type.startsWith('text/');
+        let content;
+        let detectedContentType: string;
+        try {
+          detectedContentType = await options.attachmentStore.detectForDelivery(
+            row.storage_key,
+            row.content_type
+          );
+          content = await options.attachmentStore.open(row.storage_key);
+        } catch (error) {
+          request.log.warn(
+            {
+              attachmentId: row.id,
+              errorCode: (error as NodeJS.ErrnoException).code ?? 'UNKNOWN'
+            },
+            'Attachment metadata references unavailable storage bytes'
+          );
+          return reply.code(404).send({ error: 'Attachment not found.' });
+        }
 
-        const encodedName = encodeURIComponent(row.original_name);
+        const delivery = attachmentDeliveryPolicy(detectedContentType);
 
-        reply.header('Content-Type', row.content_type);
+        reply.header('Content-Type', delivery.contentType);
         reply.header('Content-Length', String(row.size_bytes));
         reply.header('X-Content-Type-Options', 'nosniff');
+        reply.header('Cache-Control', 'private, no-store');
         reply.header(
           'Content-Disposition',
-          `${safeInline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodedName}`
+          safeAttachmentContentDisposition(row.original_name, delivery.disposition)
         );
 
-        return reply.send(options.attachmentStore.open(row.storage_key));
+        return reply.send(content);
       }
     );
 
@@ -302,28 +305,17 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
         }
 
         const result = await options.database.pool.query(
-          `select id, storage_key
-             from attachments
+          `delete from attachments
             where id = $1
               and uploader_id = $2
               and message_id is null
-            limit 1`,
+          returning id`,
           [params.data.id, request.auth.user.id]
         );
 
-        const row = result.rows[0];
-        if (!row) {
+        if (!result.rowCount) {
           return reply.code(404).send({ error: 'Attachment not found.' });
         }
-
-        await options.attachmentStore.delete(row.storage_key);
-
-        await options.database.pool.query(
-          `delete from attachments
-            where id = $1
-              and message_id is null`,
-          [params.data.id]
-        );
 
         return reply.code(204).send();
       }

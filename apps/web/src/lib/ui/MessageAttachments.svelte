@@ -31,11 +31,11 @@
     return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   }
 
-  function imageRatio(item: Attachment): number {
-    // Reserve space even when dimensions are unavailable or the request is slow.
-    return item.width && item.height
-      ? Math.max(0.75, Math.min(16 / 9, item.width / item.height))
-      : 4 / 3;
+  function imageRatioClass(item: Attachment): 'portrait' | 'square' | 'wide' {
+    const ratio = item.width && item.height ? item.width / item.height : 4 / 3;
+    if (ratio < 0.9) return 'portrait';
+    if (ratio > 1.45) return 'wide';
+    return 'square';
   }
 
   function showLightbox(node: HTMLDialogElement) {
@@ -88,8 +88,10 @@
       {#each images as attachment (attachment.id)}
         <button
           class="cubic-media-image"
+          class:portrait={images.length === 1 && imageRatioClass(attachment) === 'portrait'}
+          class:square={images.length === 1 && imageRatioClass(attachment) === 'square'}
+          class:wide={images.length === 1 && imageRatioClass(attachment) === 'wide'}
           type="button"
-          style:--cubic-media-ratio={images.length === 1 ? imageRatio(attachment) : 1}
           aria-label={`Open ${attachment.originalName}`}
           onclick={(event) => openMedia(attachment.id, event.currentTarget)}
         >
@@ -207,12 +209,16 @@
     min-width: 0;
     padding: 0;
     border: 0;
-    aspect-ratio: var(--cubic-media-ratio);
+    aspect-ratio: 1;
     overflow: hidden;
     background: #1e1f22;
     color: #dbdee1;
     cursor: zoom-in;
   }
+  .cubic-media-gallery.single .cubic-media-image { aspect-ratio: 4 / 3; }
+  .cubic-media-gallery.single .cubic-media-image.portrait { aspect-ratio: 3 / 4; }
+  .cubic-media-gallery.single .cubic-media-image.square { aspect-ratio: 1; }
+  .cubic-media-gallery.single .cubic-media-image.wide { aspect-ratio: 16 / 9; }
   .cubic-media-image img {
     position: absolute;
     inset: 0;

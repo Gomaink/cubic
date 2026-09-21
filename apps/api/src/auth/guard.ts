@@ -1,8 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import type { Database } from '@cubic/database';
-import { resolveSession } from '../security/session.js';
+import { SessionPersistenceError, type SessionService } from '../security/session.js';
 
-export function createRequireAuth(database: Database, cookieName: string) {
+export function createRequireAuth(sessionService: SessionService, cookieName: string) {
   return async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const token = request.cookies[cookieName];
 
@@ -11,7 +10,16 @@ export function createRequireAuth(database: Database, cookieName: string) {
       return;
     }
 
-    const identity = await resolveSession(database, token);
+    let identity;
+    try {
+      identity = await sessionService.resolveToken(token, { activity: true });
+    } catch (error) {
+      if (error instanceof SessionPersistenceError) {
+        await reply.code(503).send({ error: 'Session service is temporarily unavailable.' });
+        return;
+      }
+      throw error;
+    }
 
     if (!identity) {
       reply.clearCookie(cookieName, { path: '/' });

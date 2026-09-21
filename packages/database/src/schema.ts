@@ -1,6 +1,7 @@
 import {
   type AnyPgColumn,
   boolean,
+  check,
   index,
   integer,
   pgTable,
@@ -10,6 +11,7 @@ import {
   uuid,
   varchar
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 export const cubicMeta = pgTable('cubic_meta', {
   key: text('key').primaryKey(),
@@ -58,6 +60,7 @@ export const sessions = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     tokenHash: text('token_hash').notNull(),
+    clientLabel: varchar('client_label', { length: 96 }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull()
@@ -228,6 +231,58 @@ export const attachments = pgTable(
       .on(table.conversationId, table.createdAt),
     index('attachments_pending_uploader_idx')
       .on(table.uploaderId, table.createdAt)
+  ]
+);
+
+export const attachmentFileDeletions = pgTable(
+  'attachment_file_deletions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    attachmentId: uuid('attachment_id'),
+    storageKey: text('storage_key').notNull(),
+    reason: varchar('reason', { length: 32 }).notNull(),
+    state: varchar('state', { length: 16 }).notNull().default('pending'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true, mode: 'date' }),
+    lastErrorCode: varchar('last_error_code', { length: 64 }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow()
+  },
+  (table) => [
+    uniqueIndex('attachment_file_deletions_storage_key_uq').on(table.storageKey),
+    index('attachment_file_deletions_pending_due_idx')
+      .on(table.state, table.nextAttemptAt, table.createdAt),
+    index('attachment_file_deletions_expired_lease_idx')
+      .on(table.state, table.leaseExpiresAt),
+    check(
+      'attachment_file_deletions_storage_key_format_ck',
+      sql`${table.storageKey} ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'`
+    ),
+    check(
+      'attachment_file_deletions_reason_ck',
+      sql`${table.reason} in ('metadata_deleted', 'orphan')`
+    ),
+    check(
+      'attachment_file_deletions_state_ck',
+      sql`${table.state} in ('pending', 'leased')`
+    ),
+    check(
+      'attachment_file_deletions_attempt_count_ck',
+      sql`${table.attemptCount} >= 0`
+    ),
+    check(
+      'attachment_file_deletions_lease_ck',
+      sql`(${table.state} = 'pending' and ${table.leaseToken} is null and ${table.leaseExpiresAt} is null)
+        or (${table.state} = 'leased' and ${table.leaseToken} is not null and ${table.leaseExpiresAt} is not null)`
+    )
   ]
 );
 

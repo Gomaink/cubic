@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { mkdir, open, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 export type StoredImage = {
@@ -42,7 +43,10 @@ function contentTypeForKey(key: string): StoredImage['contentType'] | null {
 
 function safeKey(key: string): string {
   const normalized = basename(key);
-  if (normalized !== key || !/^[0-9a-f-]+\.(png|jpg|webp)$/i.test(normalized)) {
+  if (
+    normalized !== key ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(png|jpg|webp)$/i.test(normalized)
+  ) {
     throw new Error('Invalid media key.');
   }
   return normalized;
@@ -69,9 +73,23 @@ export class LocalMediaStore {
 
   async readGroupAvatar(key: string): Promise<{ buffer: Buffer; contentType: StoredImage['contentType'] }> {
     const normalized = safeKey(key);
-    const contentType = contentTypeForKey(normalized);
-    if (!contentType) throw new Error('Unsupported image format.');
-    return { buffer: await readFile(join(this.groupAvatarRoot, normalized)), contentType };
+    const expectedContentType = contentTypeForKey(normalized);
+    if (!expectedContentType) throw new Error('Unsupported image format.');
+
+    const handle = await open(
+      join(this.groupAvatarRoot, normalized),
+      constants.O_RDONLY | constants.O_NOFOLLOW
+    );
+    try {
+      const metadata = await handle.stat();
+      if (!metadata.isFile()) throw new Error('Unsafe group avatar entry.');
+      const buffer = await handle.readFile();
+      const detectedContentType = detectImage(buffer);
+      if (detectedContentType !== expectedContentType) throw new Error('Group avatar type mismatch.');
+      return { buffer, contentType: detectedContentType };
+    } finally {
+      await handle.close().catch(() => {});
+    }
   }
 
   async deleteGroupAvatar(key: string | null | undefined): Promise<void> {

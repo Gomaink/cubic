@@ -1,15 +1,16 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
-import { and, eq, or } from 'drizzle-orm';
-import { Server } from 'socket.io';
+import { eq } from 'drizzle-orm';
+import { Server, type Socket } from 'socket.io';
 import { z } from 'zod';
 import type { Database } from '@cubic/database';
+import { conversationMembers } from '@cubic/database/schema';
 import {
-  blocks,
-  conversationMembers,
-  conversations,
-  directConversationPairs
-} from '@cubic/database/schema';
-import { resolveSession, type SessionIdentity } from '../security/session.js';
+  authorizeDirectCallStart,
+  resolveConversationMembership
+} from '../authorization/conversations.js';
+import type { SessionIdentity, SessionService } from '../security/session.js';
+import { createTrustedProxyCheck } from '../config/proxy.js';
+import { SessionSocketRegistry } from './session-sockets.js';
 import {
   CallLifecycleError,
   DirectCallCoordinator,
@@ -17,12 +18,16 @@ import {
   type TerminalDirectCallState
 } from './calls.js';
 import type { RealtimeEvents } from './events.js';
+import { browserOriginMatches, canonicalBrowserOrigin } from '../security/browser-request.js';
 
 const joinSchema = z.object({ conversationId: z.string().uuid() });
 const callStartSchema = z.object({ conversationId: z.string().uuid() });
 const callIdSchema = z.object({ callId: z.string().uuid() });
 
 const RING_TIMEOUT_MS = 45_000;
+const MAX_PENDING_ADMISSIONS_PER_SOCKET = 8;
+const MAX_PENDING_CALL_STARTS_PER_SOCKET = 8;
+const MAX_REMOVALS_PER_ADMISSION = 64;
 
 function conversationRoom(conversationId: string): string {
   return `conversation:${conversationId}`;
@@ -30,6 +35,11 @@ function conversationRoom(conversationId: string): string {
 
 function userRoom(userId: string): string {
   return `user:${userId}`;
+}
+
+function acknowledgePacketFailure(packet: unknown[], error: string): void {
+  const acknowledge = packet.at(-1);
+  if (typeof acknowledge === 'function') acknowledge({ ok: false, error });
 }
 
 export function readCookie(header: string | undefined, name: string): string | null {
@@ -52,19 +62,37 @@ export function readCookie(header: string | undefined, name: string): string | n
   return null;
 }
 
-export function isSameOriginRequest(request: IncomingMessage): boolean {
+export function isSameOriginRequest(
+  request: IncomingMessage,
+  isTrustedProxy: (address: string) => boolean,
+  expectedOrigin?: string
+): boolean {
   const origin = request.headers.origin;
   if (!origin) return true;
 
   const forwardedHost = request.headers['x-forwarded-host'];
-  const host = Array.isArray(forwardedHost)
-    ? forwardedHost[0]
-    : forwardedHost ?? request.headers.host;
+  const remoteAddress = request.socket.remoteAddress ?? '';
+  const host = isTrustedProxy(remoteAddress)
+    ? Array.isArray(forwardedHost)
+      ? forwardedHost[0]
+      : forwardedHost ?? request.headers.host
+    : request.headers.host;
 
-  if (!host) return false;
+  const forwardedProto = request.headers['x-forwarded-proto'];
+  const protocol = isTrustedProxy(remoteAddress)
+    ? Array.isArray(forwardedProto)
+      ? forwardedProto[0]
+      : forwardedProto
+    : (request.socket as typeof request.socket & { encrypted?: boolean }).encrypted
+      ? 'https'
+      : 'http';
+
+  if (!host || (protocol !== 'http' && protocol !== 'https')) return false;
 
   try {
-    return new URL(origin).host === host;
+    const requestOrigin = canonicalBrowserOrigin(`${protocol}://${host}`);
+    return browserOriginMatches(origin, expectedOrigin ?? requestOrigin) &&
+      (!expectedOrigin || requestOrigin === expectedOrigin);
   } catch {
     return false;
   }
@@ -74,11 +102,35 @@ export interface AttachRealtimeOptions {
   server: HttpServer;
   database: Database;
   cookieName: string;
+  sessionService: SessionService;
+  revalidateIntervalMs: number;
+  trustedProxyCidrs: string[];
+  browserOrigin: string;
   events: RealtimeEvents;
+  pingIntervalMs?: number;
+  pingTimeoutMs?: number;
 }
 
 export interface RealtimeServer {
+  registry: SessionSocketRegistry;
+  readonly pendingAdmissionCount: number;
   close(): Promise<void>;
+}
+
+export interface SocketSessionIdentity {
+  sessionId: string;
+  userId: string;
+  username: string;
+  displayName: string;
+}
+
+export function toSocketSessionIdentity(identity: SessionIdentity): SocketSessionIdentity {
+  return {
+    sessionId: identity.sessionId,
+    userId: identity.user.id,
+    username: identity.user.username,
+    displayName: identity.user.displayName
+  };
 }
 
 type CallWireState = 'ringing' | 'accepted' | TerminalDirectCallState;
@@ -255,23 +307,163 @@ async function recoverStaleCallRows(database: Database): Promise<void> {
 }
 
 export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
+  if (!Number.isSafeInteger(options.revalidateIntervalMs) || options.revalidateIntervalMs <= 0) {
+    throw new Error('Socket session revalidation interval must be a positive integer.');
+  }
+
+  const isTrustedProxy = createTrustedProxyCheck(options.trustedProxyCidrs);
   const io = new Server(options.server, {
     path: '/socket.io',
     transports: ['websocket', 'polling'],
     maxHttpBufferSize: 64 * 1024,
+    ...(options.pingIntervalMs === undefined ? {} : { pingInterval: options.pingIntervalMs }),
+    ...(options.pingTimeoutMs === undefined ? {} : { pingTimeout: options.pingTimeoutMs }),
     cors: {
-      origin: true,
+      origin: options.browserOrigin,
       credentials: true
     },
     allowRequest: (request, callback) => {
-      const allowed = isSameOriginRequest(request);
+      const allowed = isSameOriginRequest(request, isTrustedProxy, options.browserOrigin);
       callback(allowed ? null : 'Origin not allowed.', allowed);
     }
   });
 
   const calls = new DirectCallCoordinator();
   const ringTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const registry = new SessionSocketRegistry();
+  // Track only in-flight admissions. A removal permanently invalidates work
+  // started before it; a later admission reads current membership from the DB.
+  type Admission = {
+    removedConversations: Set<string>;
+    cancelled: boolean;
+    finish(): void;
+    invalidFor(conversationId: string): boolean;
+  };
+  const admissionsByUser = new Map<string, Set<Admission>>();
+  const admissionsBySocket = new Map<string, Set<Admission>>();
+  type PendingCallStart = {
+    conversationId: string;
+    invalidated: boolean;
+    call: DirectCallSession | null;
+    finished: ReturnType<DirectCallCoordinator['cancel']> | null;
+    finish(): void;
+  };
+  const pendingCallStartsBySocket = new Map<string, Set<PendingCallStart>>();
+  const pendingCallStartsByConversation = new Map<string, Set<PendingCallStart>>();
+  const beginCallStart = (socket: Socket, conversationId: string): PendingCallStart | null => {
+    if (!socket.connected) return null;
+    let bySocket = pendingCallStartsBySocket.get(socket.id);
+    if (bySocket && bySocket.size >= MAX_PENDING_CALL_STARTS_PER_SOCKET) return null;
+    if (!bySocket) pendingCallStartsBySocket.set(socket.id, bySocket = new Set());
+    let byConversation = pendingCallStartsByConversation.get(conversationId);
+    if (!byConversation) pendingCallStartsByConversation.set(conversationId, byConversation = new Set());
+    const socketSet = bySocket;
+    const conversationSet = byConversation;
+    const pending: PendingCallStart = {
+      conversationId,
+      invalidated: false,
+      call: null,
+      finished: null,
+      finish: () => {
+        socketSet.delete(pending);
+        conversationSet.delete(pending);
+        if (socketSet.size === 0 && pendingCallStartsBySocket.get(socket.id) === socketSet)
+          pendingCallStartsBySocket.delete(socket.id);
+        if (conversationSet.size === 0 && pendingCallStartsByConversation.get(conversationId) === conversationSet)
+          pendingCallStartsByConversation.delete(conversationId);
+      }
+    };
+    socketSet.add(pending);
+    conversationSet.add(pending);
+    return pending;
+  };
+  const invalidateCallStart = (pending: PendingCallStart, blockerId?: string) => {
+    pending.invalidated = true;
+    if (!pending.call || pending.finished) return;
+    const call = calls.get(pending.call.id);
+    if (!call) return;
+    pending.finished = blockerId
+      ? calls.terminateForBlock(call.conversationId, blockerId)
+      : call.state === 'ringing'
+        ? calls.cancel(call.id, call.callerId)
+        : calls.end(call.id, call.callerId);
+    if (pending.finished) clearRingTimer(pending.finished.call.id);
+  };
+  const retireSocketCallStarts = (socketId: string) => {
+    for (const pending of [...(pendingCallStartsBySocket.get(socketId) ?? [])]) {
+      invalidateCallStart(pending);
+      pending.finish();
+    }
+  };
+  const beginAdmission = (socket: Socket, userId: string): Admission | null => {
+    if (!socket.connected) return null;
+    let socketAdmissions = admissionsBySocket.get(socket.id);
+    if (socketAdmissions && socketAdmissions.size >= MAX_PENDING_ADMISSIONS_PER_SOCKET) return null;
+    if (!socketAdmissions) {
+      socketAdmissions = new Set();
+      admissionsBySocket.set(socket.id, socketAdmissions);
+    }
+    let userAdmissions = admissionsByUser.get(userId);
+    if (!userAdmissions) {
+      userAdmissions = new Set();
+      admissionsByUser.set(userId, userAdmissions);
+    }
+    const ownedSocketAdmissions = socketAdmissions;
+    const ownedUserAdmissions = userAdmissions;
+    const admission: Admission = {
+      removedConversations: new Set(),
+      cancelled: false,
+      invalidFor: (conversationId) =>
+        admission.cancelled || !socket.connected || admission.removedConversations.has(conversationId),
+      finish: () => {
+        ownedSocketAdmissions.delete(admission);
+        ownedUserAdmissions.delete(admission);
+        if (ownedSocketAdmissions.size === 0 && admissionsBySocket.get(socket.id) === ownedSocketAdmissions)
+          admissionsBySocket.delete(socket.id);
+        if (ownedUserAdmissions.size === 0 && admissionsByUser.get(userId) === ownedUserAdmissions)
+          admissionsByUser.delete(userId);
+      }
+    };
+    socketAdmissions.add(admission);
+    userAdmissions.add(admission);
+    return admission;
+  };
+  const retireSocketAdmissions = (socketId: string) => {
+    for (const admission of [...(admissionsBySocket.get(socketId) ?? [])]) {
+      admission.cancelled = true;
+      admission.finish();
+    }
+  };
+  let activeRevalidation: Promise<void> | null = null;
   void recoverStaleCallRows(options.database).catch(() => {});
+
+  const revalidateActiveSessions = (): Promise<void> => {
+    if (activeRevalidation) return activeRevalidation;
+    activeRevalidation = (async () => {
+      try {
+        for (const sessionId of registry.sessionIds()) {
+          try {
+            const identity = await options.sessionService.validateId(sessionId, { activity: false });
+            if (!identity) {
+              options.events.emitSessionRevoked({ sessionId });
+              registry.disconnectSession(sessionId);
+            }
+          } catch {
+            // Database uncertainty is not proof of revocation. Retry on the next sweep.
+          }
+        }
+      } finally {
+        activeRevalidation = null;
+      }
+    })();
+    return activeRevalidation;
+  };
+
+  const revalidationTimer = setInterval(
+    () => void revalidateActiveSessions(),
+    options.revalidateIntervalMs
+  );
+  revalidationTimer.unref();
 
   const clearRingTimer = (callId: string) => {
     const timer = ringTimers.get(callId);
@@ -301,7 +493,12 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
           finished.call,
           finished.state,
           finished.actorId
-        ).catch(() => {}).finally(() => {
+        ).then(() => {
+          options.events.emitCallAuthorizationEnded({
+            callId: finished.call.id,
+            conversationId: finished.call.conversationId
+          });
+        }).catch(() => {}).finally(() => {
           emitCallState(finished.call, finished.state, finished.actorId);
         });
       }
@@ -315,42 +512,93 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
       const token = readCookie(socket.request.headers.cookie, options.cookieName);
       if (!token) return next(new Error('Authentication required.'));
 
-      const identity = await resolveSession(options.database, token);
+      const identity = await options.sessionService.resolveToken(token, { activity: false });
       if (!identity) return next(new Error('Authentication required.'));
 
-      (socket.data as { identity?: SessionIdentity }).identity = identity;
+      (socket.data as { identity?: SocketSessionIdentity }).identity =
+        toSocketSessionIdentity(identity);
       next();
-    } catch (error) {
-      next(error instanceof Error ? error : new Error('Authentication failed.'));
+    } catch {
+      next(new Error('Authentication failed.'));
     }
   });
 
   io.on('connection', async (socket) => {
-    const identity = (socket.data as { identity?: SessionIdentity }).identity;
+    const identity = (socket.data as { identity?: SocketSessionIdentity }).identity;
     if (!identity) {
       socket.disconnect(true);
       return;
     }
 
-    socket.join(userRoom(identity.user.id));
+    registry.register(identity.sessionId, socket);
+    socket.once('disconnect', () => {
+      retireSocketAdmissions(socket.id);
+      retireSocketCallStarts(socket.id);
+    });
 
+    try {
+      const current = await options.sessionService.validateId(identity.sessionId, { activity: false });
+      if (!current) {
+        options.events.emitSessionRevoked({ sessionId: identity.sessionId });
+        registry.disconnectSession(identity.sessionId);
+        return;
+      }
+      Object.assign(identity, toSocketSessionIdentity(current));
+    } catch {
+      socket.disconnect(true);
+      return;
+    }
+
+    if (!socket.connected) return;
+
+    socket.use(async (packet, next) => {
+      try {
+        const current = await options.sessionService.validateId(identity.sessionId, { activity: true });
+        if (!current) {
+          acknowledgePacketFailure(packet, 'Authentication required.');
+          options.events.emitSessionRevoked({ sessionId: identity.sessionId });
+          registry.disconnectSession(identity.sessionId);
+          return next(new Error('Authentication required.'));
+        }
+        Object.assign(identity, toSocketSessionIdentity(current));
+        next();
+      } catch {
+        acknowledgePacketFailure(packet, 'Session validation is temporarily unavailable.');
+        next(new Error('Session validation is temporarily unavailable.'));
+      }
+    });
+
+    socket.join(userRoom(identity.userId));
+
+    const initialAdmission = beginAdmission(socket, identity.userId);
+    if (!initialAdmission) {
+      socket.disconnect(true);
+      return;
+    }
     try {
       const memberships = await options.database.db
         .select({ conversationId: conversationMembers.conversationId })
         .from(conversationMembers)
-        .where(eq(conversationMembers.userId, identity.user.id));
+        .where(eq(conversationMembers.userId, identity.userId));
 
       for (const membership of memberships) {
+        if (initialAdmission.invalidFor(membership.conversationId)) continue;
+        // The configured single-process in-memory adapter joins synchronously.
         socket.join(conversationRoom(membership.conversationId));
+        if (initialAdmission.invalidFor(membership.conversationId))
+          socket.leave(conversationRoom(membership.conversationId));
       }
 
+      if (!socket.connected) return;
       socket.emit('realtime:ready', {
-        userId: identity.user.id,
+        userId: identity.userId,
         conversationCount: memberships.length
       });
     } catch {
       socket.disconnect(true);
       return;
+    } finally {
+      initialAdmission.finish();
     }
 
     socket.on(
@@ -365,29 +613,40 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
           return;
         }
 
-        const membership = await options.database.db
-          .select({ conversationId: conversationMembers.conversationId })
-          .from(conversationMembers)
-          .where(
-            and(
-              eq(conversationMembers.conversationId, parsed.data.conversationId),
-              eq(conversationMembers.userId, identity.user.id)
-            )
-          )
-          .limit(1);
-
-        if (!membership[0]) {
-          acknowledge?.({ ok: false, error: 'Conversation not found.' });
+        const admission = beginAdmission(socket, identity.userId);
+        if (!admission) {
+          acknowledge?.({ ok: false, error: 'Realtime is busy. Try again.' });
           return;
         }
+        try {
+          const membership = await resolveConversationMembership(
+            options.database,
+            parsed.data.conversationId,
+            identity.userId
+          );
 
-        await socket.join(conversationRoom(parsed.data.conversationId));
-        acknowledge?.({ ok: true });
+          if (!membership || admission.invalidFor(parsed.data.conversationId)) {
+            if (!socket.connected) return;
+            acknowledge?.({ ok: false, error: 'Conversation not found.' });
+            return;
+          }
+
+          socket.join(conversationRoom(parsed.data.conversationId));
+          if (admission.invalidFor(parsed.data.conversationId)) {
+            socket.leave(conversationRoom(parsed.data.conversationId));
+            if (!socket.connected) return;
+            acknowledge?.({ ok: false, error: 'Conversation not found.' });
+            return;
+          }
+          acknowledge?.({ ok: true });
+        } finally {
+          admission.finish();
+        }
       }
     );
 
     socket.on('call:sync', (_payload: unknown, acknowledge?: (result: CallAck) => void) => {
-      const current = calls.getForUser(identity.user.id);
+      const current = calls.getForUser(identity.userId);
       acknowledge?.({ ok: true, call: current ? toWireCall(current) : null });
     });
 
@@ -400,67 +659,68 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
           return;
         }
 
+        const pending = beginCallStart(socket, parsed.data.conversationId);
+        if (!pending) {
+          acknowledge?.({ ok: false, error: 'Call operation failed.' });
+          return;
+        }
         try {
-          const rows = await options.database.db
-            .select({
-              kind: conversations.kind,
-              userLowId: directConversationPairs.userLowId,
-              userHighId: directConversationPairs.userHighId
-            })
-            .from(conversations)
-            .innerJoin(
-              directConversationPairs,
-              eq(directConversationPairs.conversationId, conversations.id)
-            )
-            .where(eq(conversations.id, parsed.data.conversationId))
-            .limit(1);
-
-          const direct = rows[0];
-          if (!direct || direct.kind !== 'direct') {
+          const direct = await authorizeDirectCallStart(
+            options.database,
+            parsed.data.conversationId,
+            identity.userId
+          );
+          if (pending.invalidated || !socket.connected) {
+            if (socket.connected) acknowledge?.({ ok: false, error: 'Call operation failed.' });
+            return;
+          }
+          if (!direct.allowed && direct.reason === 'not_found') {
             acknowledge?.({ ok: false, error: 'Direct conversation not found.' });
             return;
           }
-
-          if (direct.userLowId !== identity.user.id && direct.userHighId !== identity.user.id) {
-            acknowledge?.({ ok: false, error: 'Direct conversation not found.' });
-            return;
-          }
-
-          const calleeId =
-            direct.userLowId === identity.user.id ? direct.userHighId : direct.userLowId;
-
-          const blockRows = await options.database.db
-            .select({ id: blocks.id })
-            .from(blocks)
-            .where(
-              or(
-                and(eq(blocks.blockerId, identity.user.id), eq(blocks.blockedId, calleeId)),
-                and(eq(blocks.blockerId, calleeId), eq(blocks.blockedId, identity.user.id))
-              )
-            )
-            .limit(1);
-
-          if (blockRows.length > 0) {
+          if (!direct.allowed) {
             acknowledge?.({ ok: false, error: 'Voice is unavailable for this conversation.' });
             return;
           }
 
+          const calleeId = direct.peerUserId;
+
+          const existingCall = calls.getForConversation(parsed.data.conversationId);
+          // Do not let a second socket reuse a call whose creator has not yet
+          // committed its start. The creator may still disconnect or be blocked.
+          if (existingCall && [...(pendingCallStartsByConversation.get(parsed.data.conversationId) ?? [])]
+            .some((start) => start !== pending && start.call?.id === existingCall.id)) {
+            acknowledge?.({ ok: false, error: 'Call operation failed.' });
+            return;
+          }
           const call = calls.start({
             conversationId: parsed.data.conversationId,
-            callerId: identity.user.id,
+            callerId: identity.userId,
             calleeId,
-            callerDisplayName: identity.user.displayName,
-            callerUsername: identity.user.username,
+            callerDisplayName: identity.displayName,
+            callerUsername: identity.username,
             callerSocketId: socket.id
           });
+          if (!existingCall) pending.call = call;
 
           try {
             await persistCallStarted(options.database, call);
           } catch (error) {
-            try {
-              calls.cancel(call.id, identity.user.id);
-            } catch {}
+            if (pending.call) invalidateCallStart(pending);
             throw error;
+          }
+
+          if (pending.invalidated || !socket.connected || calls.get(call.id) !== call) {
+            if (pending.finished) {
+              await persistCallFinished(
+                options.database,
+                pending.finished.call,
+                pending.finished.state,
+                pending.finished.actorId
+              );
+            }
+            if (socket.connected) acknowledge?.({ ok: false, error: 'Call operation failed.' });
+            return;
           }
 
           armRingTimeout(call);
@@ -469,7 +729,9 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
           io.to(userRoom(call.callerId)).emit('call:state', wire);
           io.to(userRoom(call.calleeId)).emit('call:incoming', wire);
         } catch (error) {
-          acknowledge?.({ ok: false, error: callError(error) });
+          if (socket.connected) acknowledge?.({ ok: false, error: callError(error) });
+        } finally {
+          pending.finish();
         }
       }
     );
@@ -484,13 +746,13 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
         }
 
         try {
-          const call = calls.accept(parsed.data.callId, identity.user.id, socket.id);
+          const call = calls.accept(parsed.data.callId, identity.userId, socket.id);
           await persistCallAccepted(options.database, call);
           clearRingTimer(call.id);
           const joinSocketIds = [call.callerSocketId, socket.id];
-          const wire = toWireCall(call, 'accepted', identity.user.id, joinSocketIds);
+          const wire = toWireCall(call, 'accepted', identity.userId, joinSocketIds);
           acknowledge?.({ ok: true, call: wire });
-          emitCallState(call, 'accepted', identity.user.id, joinSocketIds);
+          emitCallState(call, 'accepted', identity.userId, joinSocketIds);
         } catch (error) {
           acknowledge?.({ ok: false, error: callError(error) });
         }
@@ -507,7 +769,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
         }
 
         try {
-          const finished = calls.decline(parsed.data.callId, identity.user.id);
+          const finished = calls.decline(parsed.data.callId, identity.userId);
           await persistCallFinished(
             options.database,
             finished.call,
@@ -515,6 +777,10 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
             finished.actorId
           );
           clearRingTimer(finished.call.id);
+          options.events.emitCallAuthorizationEnded({
+            callId: finished.call.id,
+            conversationId: finished.call.conversationId
+          });
           const wire = toWireCall(finished.call, finished.state, finished.actorId);
           acknowledge?.({ ok: true, call: wire });
           emitCallState(finished.call, finished.state, finished.actorId);
@@ -534,7 +800,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
         }
 
         try {
-          const finished = calls.cancel(parsed.data.callId, identity.user.id);
+          const finished = calls.cancel(parsed.data.callId, identity.userId);
           await persistCallFinished(
             options.database,
             finished.call,
@@ -542,6 +808,10 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
             finished.actorId
           );
           clearRingTimer(finished.call.id);
+          options.events.emitCallAuthorizationEnded({
+            callId: finished.call.id,
+            conversationId: finished.call.conversationId
+          });
           const wire = toWireCall(finished.call, finished.state, finished.actorId);
           acknowledge?.({ ok: true, call: wire });
           emitCallState(finished.call, finished.state, finished.actorId);
@@ -561,7 +831,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
         }
 
         try {
-          const finished = calls.end(parsed.data.callId, identity.user.id);
+          const finished = calls.end(parsed.data.callId, identity.userId);
           await persistCallFinished(
             options.database,
             finished.call,
@@ -569,6 +839,10 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
             finished.actorId
           );
           clearRingTimer(finished.call.id);
+          options.events.emitCallAuthorizationEnded({
+            callId: finished.call.id,
+            conversationId: finished.call.conversationId
+          });
           const wire = toWireCall(finished.call, finished.state, finished.actorId);
           acknowledge?.({ ok: true, call: wire });
           emitCallState(finished.call, finished.state, finished.actorId);
@@ -598,7 +872,24 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
   const unsubscribeOpened = options.events.onConversationOpened((event) => {
     for (const userId of event.userIds) {
       const room = userRoom(userId);
-      io.in(room).socketsJoin(conversationRoom(event.conversationId));
+      // Event payloads may contain all group members, not just the new member.
+      // Resolve current membership before admitting any socket from a delayed event.
+      const admissions = [...io.sockets.sockets.values()]
+        .filter((socket) => socket.rooms.has(room))
+        .map((socket) => ({ socket, admission: beginAdmission(socket, userId) }))
+        .filter((entry): entry is { socket: Socket; admission: Admission } => entry.admission !== null);
+      if (admissions.length > 0) {
+        void resolveConversationMembership(options.database, event.conversationId, userId)
+          .then((membership) => {
+            if (!membership) return;
+            for (const { socket, admission } of admissions) {
+              if (!admission.invalidFor(event.conversationId))
+                socket.join(conversationRoom(event.conversationId));
+            }
+          })
+          .catch(() => {})
+          .finally(() => admissions.forEach(({ admission }) => admission.finish()));
+      }
       io.to(room).emit('conversation:updated', { conversationId: event.conversationId });
     }
   });
@@ -611,6 +902,15 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
 
   const unsubscribeRemoved = options.events.onConversationRemoved((event) => {
     for (const userId of event.removedUserIds) {
+      for (const admission of [...(admissionsByUser.get(userId) ?? [])]) {
+        if (admission.removedConversations.size >= MAX_REMOVALS_PER_ADMISSION &&
+            !admission.removedConversations.has(event.conversationId)) {
+          admission.cancelled = true;
+          admission.finish();
+        } else {
+          admission.removedConversations.add(event.conversationId);
+        }
+      }
       const room = userRoom(userId);
       io.in(room).socketsLeave(conversationRoom(event.conversationId));
       io.to(room).emit('conversation:removed', { conversationId: event.conversationId });
@@ -627,8 +927,46 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     }
   });
 
+  const unsubscribeSessionRevoked = options.events.onSessionRevoked((event) => {
+    registry.disconnectSession(event.sessionId);
+  });
+
+  const unsubscribeDirectBlocked = options.events.onDirectBlocked((event) => {
+    const pendingStarts = [...(pendingCallStartsByConversation.get(event.conversationId) ?? [])];
+    for (const pending of pendingStarts) invalidateCallStart(pending, event.blockerId);
+    // An in-flight insert must commit before its terminal update. Its owner
+    // performs that update after the insert; do not race it here.
+    const pendingCall = pendingStarts.find((pending) => pending.finished);
+    if (pendingCall) return;
+    const finished = calls.terminateForBlock(event.conversationId, event.blockerId);
+    if (!finished) return;
+    clearRingTimer(finished.call.id);
+    void persistCallFinished(
+      options.database,
+      finished.call,
+      finished.state,
+      finished.actorId
+    ).then(() => {
+      if (finished.state === 'ended') {
+        options.events.emitCallAuthorizationEnded({
+          callId: finished.call.id,
+          conversationId: finished.call.conversationId
+        });
+      }
+      emitCallState(finished.call, finished.state, finished.actorId);
+    }).catch(() => {});
+  });
+
   return {
+    registry,
+    get pendingAdmissionCount() {
+      let count = 0;
+      for (const admissions of admissionsBySocket.values()) count += admissions.size;
+      return count;
+    },
     async close() {
+      clearInterval(revalidationTimer);
+      await activeRevalidation?.catch(() => {});
       for (const timer of ringTimers.values()) clearTimeout(timer);
       ringTimers.clear();
       unsubscribeMessage();
@@ -639,6 +977,8 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
       unsubscribeChanged();
       unsubscribeRemoved();
       unsubscribeInvites();
+      unsubscribeSessionRevoked();
+      unsubscribeDirectBlocked();
       io.disconnectSockets(true);
       await new Promise<void>((resolve) => io.close(() => resolve()));
     }

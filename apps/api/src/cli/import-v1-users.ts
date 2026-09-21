@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { eq } from 'drizzle-orm';
 import { createDatabase } from '@cubic/database';
 import { userSettings, users } from '@cubic/database/schema';
-import { normalizeEmail, normalizeUsername } from '../auth/identity.js';
+import { normalizeEmail, normalizeLegacyAvatarUrl, normalizeUsername } from '../auth/identity.js';
 
 interface LegacyUser {
   _id?: unknown;
@@ -120,7 +120,7 @@ try {
             usernameNormalized: normalizeUsername(username),
             displayName: displayName.slice(0, 64),
             passwordHash,
-            avatarUrl: typeof legacy.avatarUrl === 'string' ? legacy.avatarUrl : null
+            avatarUrl: normalizeLegacyAvatarUrl(legacy.avatarUrl)
           })
           .returning({ id: users.id });
 

@@ -11,23 +11,79 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://cubic_ci:cubic_ci_ephemeral@127.0.0.1:5432/cubic_ci
+      CUBIC_GROUP_TEST_DATABASE_URL: postgresql://cubic_ci:cubic_ci_ephemeral@127.0.0.1:5432/cubic_ci
+      CUBIC_ATTACHMENT_TEST_DATABASE_URL: postgresql://cubic_ci:cubic_ci_ephemeral@127.0.0.1:5432/cubic_ci
+    services:
+      postgres:
+        image: postgres:18.4-alpine3.24
+        env:
+          POSTGRES_DB: cubic_ci
+          POSTGRES_USER: cubic_ci
+          POSTGRES_PASSWORD: cubic_ci_ephemeral
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cubic_ci -d cubic_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
 
+      - name: Check committed whitespace
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        shell: bash
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            git diff --check "$PR_BASE_SHA" "$PR_HEAD_SHA"
+          else
+            baseline="$PUSH_BEFORE_SHA"
+            if [[ ! "$baseline" =~ ^[0-9a-f]{40}$ ]] ||
+               [[ "$baseline" =~ ^0+$ ]] ||
+               ! git cat-file -e "$baseline^{commit}" 2>/dev/null; then
+              baseline="$(git hash-object -w -t tree /dev/null)"
+            fi
+            git diff --check "$baseline" "$GITHUB_SHA"
+          fi
+
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Migrate disposable test database
+        run: npm run db:migrate --workspace @cubic/database
 
       - name: Type and framework checks
         run: npm run check
 
+      - name: Tests, including PostgreSQL integration
+        run: npm test
+
       - name: Build
         run: npm run build
 
-      - name: Security unit tests
-        run: npm run test
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
+
+      - name: Install Chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: /tmp/cubic-playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser tests
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: /tmp/cubic-playwright
+        run: npm run test:browser --workspace @cubic/web -- --workers=1

@@ -9,6 +9,7 @@
     "preview": "vite preview --host 0.0.0.0",
     "start": "node build",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "node --test *.test.mjs",
     "test:browser": "playwright test"
   },
   "devDependencies": {

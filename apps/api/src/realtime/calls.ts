@@ -104,6 +104,11 @@ export class DirectCallCoordinator {
     return callId ? this.byId.get(callId) ?? null : null;
   }
 
+  getForConversation(conversationId: string): DirectCallSession | null {
+    const callId = this.byConversation.get(conversationId);
+    return callId ? this.byId.get(callId) ?? null : null;
+  }
+
   accept(callId: string, userId: string, socketId: string): DirectCallSession {
     const call = this.require(callId);
     if (call.calleeId !== userId) {
@@ -156,6 +161,17 @@ export class DirectCallCoordinator {
     const call = this.byId.get(callId);
     if (!call || call.state !== 'ringing') return null;
     return this.finish(call, 'missed', null);
+  }
+
+  terminateForBlock(conversationId: string, blockerId: string): FinishedDirectCall | null {
+    const call = this.getForConversation(conversationId);
+    if (!call || (call.callerId !== blockerId && call.calleeId !== blockerId)) return null;
+    if (call.state === 'accepted') return this.finish(call, 'ended', blockerId);
+    return this.finish(
+      call,
+      call.callerId === blockerId ? 'cancelled' : 'declined',
+      blockerId
+    );
   }
 
   private require(callId: string): DirectCallSession {

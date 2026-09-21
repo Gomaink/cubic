@@ -14,6 +14,7 @@ const firstClient = '40000000-0000-4000-8000-000000000001';
 const secondClient = '40000000-0000-4000-8000-000000000002';
 const thirdClient = '40000000-0000-4000-8000-000000000003';
 const attachmentId = '50000000-0000-4000-8000-000000000001';
+const secondAttachmentId = '50000000-0000-4000-8000-000000000002';
 const createdAt = new Date('2026-09-12T12:00:00.000Z');
 
 type RawMessage = {
@@ -60,7 +61,11 @@ function camelMessage(row: RawMessage) {
   };
 }
 
-function rawAttachment(messageId: string | null = null, contentType = 'image/png') {
+function rawAttachment(
+  messageId: string | null = null,
+  contentType = 'image/png',
+  overrides: Record<string, unknown> = {}
+) {
   return {
     id: attachmentId,
     conversation_id: conversation,
@@ -74,16 +79,24 @@ function rawAttachment(messageId: string | null = null, contentType = 'image/png
     width: 20,
     height: 10,
     created_at: createdAt,
-    attached_at: messageId ? createdAt : null
+    attached_at: messageId ? createdAt : null,
+    ...overrides
   };
 }
 
 class RouteDatabase {
   messages = new Map<string, RawMessage>();
   attachments = [rawAttachment()];
+  deletionKeys: string[] = [];
   reactions: Array<{ message_id: string; user_id: string; reaction: string }> = [];
   selectResults: any[][] = [];
   nextMessage = 10;
+  transactionSnapshot: {
+    messages: Map<string, RawMessage>;
+    attachments: ReturnType<typeof rawAttachment>[];
+    nextMessage: number;
+    deletionKeys: string[];
+  } | null = null;
 
   db = {
     select: () => {
@@ -112,8 +125,50 @@ class RouteDatabase {
 
   async query(sql: string, params: any[]) {
     const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase();
-    if (normalized === 'begin' || normalized === 'commit' || normalized === 'rollback') return this.result();
+    if (normalized === 'begin') {
+      this.transactionSnapshot = {
+        messages: new Map([...this.messages].map(([id, row]) => [id, { ...row }])),
+        attachments: this.attachments.map((item) => ({ ...item })),
+        nextMessage: this.nextMessage,
+        deletionKeys: [...this.deletionKeys]
+      };
+      return this.result();
+    }
+    if (normalized === 'commit') {
+      this.transactionSnapshot = null;
+      return this.result();
+    }
+    if (normalized === 'rollback') {
+      if (this.transactionSnapshot) {
+        this.messages = this.transactionSnapshot.messages;
+        this.attachments = this.transactionSnapshot.attachments;
+        this.nextMessage = this.transactionSnapshot.nextMessage;
+        this.deletionKeys = this.transactionSnapshot.deletionKeys;
+        this.transactionSnapshot = null;
+      }
+      return this.result();
+    }
     if (normalized.includes('from direct_conversation_pairs dp') && normalized.includes('join blocks')) return this.result();
+
+    if (normalized.includes("c.kind in ('direct', 'group')")) {
+      const authorized = this.selectResults.shift() ?? [];
+      return authorized.length
+        ? this.result([{
+            conversation_id: params[0],
+            kind: 'group',
+            role: 'member'
+          }])
+        : this.result();
+    }
+
+    if (normalized.startsWith('select id, conversation_id from messages')) {
+      const row = [...this.messages.values()].find((message) =>
+        message.conversation_id === params[0] &&
+        message.sender_id === params[1] &&
+        message.client_message_id === params[2]
+      );
+      return this.result(row ? [{ id: row.id, conversation_id: row.conversation_id }] : []);
+    }
 
     if (normalized.includes('from messages m') && normalized.includes('join users u')) {
       const row = this.messages.get(params[0]);
@@ -191,7 +246,23 @@ class RouteDatabase {
       return this.result([{ reaction: removed!.reaction }]);
     }
 
+    if (normalized.startsWith('delete from attachments where message_id')) {
+      const removed = this.attachments.filter((item) => item.message_id === params[0]);
+      this.attachments = this.attachments.filter((item) => item.message_id !== params[0]);
+      this.deletionKeys.push(...removed.map((item) => item.storage_key));
+      return this.result(removed.map((item) => ({ id: item.id })));
+    }
+
     if (normalized.startsWith('insert into messages')) {
+      const duplicate = [...this.messages.values()].some((message) =>
+        message.sender_id === params[1] && message.client_message_id === params[2]
+      );
+      if (duplicate) {
+        throw Object.assign(new Error('duplicate client message id'), {
+          code: '23505',
+          constraint: 'messages_sender_client_uq'
+        });
+      }
       const row = rawMessage({
         id: `30000000-0000-4000-8000-${String(this.nextMessage++).padStart(12, '0')}`,
         conversation_id: params[0],
@@ -251,7 +322,12 @@ async function routeHarness(database = new RouteDatabase()) {
     delete(path: string, _options: unknown, handler: Handler) { handlers.set(`DELETE ${path}`, handler); }
   };
   const events = createRealtimeEvents();
-  await conversationRoutes(app as never, { database: database as never, cookieName: 'session', realtimeEvents: events });
+  await conversationRoutes(app as never, {
+    database: database as never,
+    cookieName: 'session',
+    sessionService: {} as never,
+    realtimeEvents: events
+  });
 
   async function invoke(method: string, path: string, input: { params?: any; query?: any; body?: any; userId?: string | null }) {
     const state = { statusCode: 200, payload: undefined as any };
@@ -284,7 +360,7 @@ test('reply creation validates membership and same-conversation targets, then em
   const harness = await routeHarness(database);
   const createdEvents: RealtimeMessage[] = [];
   harness.events.onMessageCreated((event) => createdEvents.push(event.message));
-  database.selectResults.push([{ userId: me }], []);
+  database.selectResults.push([{ userId: me }]);
 
   const response = await harness.invoke('POST', '/:id/messages', {
     params: { id: conversation },
@@ -296,7 +372,7 @@ test('reply creation validates membership and same-conversation targets, then em
   assert.deepEqual(createdEvents, [response.payload.message]);
 
   database.messages.get(firstMessage)!.deleted_at = createdAt;
-  database.selectResults.push([{ userId: me }], []);
+  database.selectResults.push([{ userId: me }]);
   const deletedTarget = await harness.invoke('POST', '/:id/messages', {
     params: { id: conversation },
     body: sendBody({ clientMessageId: thirdClient, replyToMessageId: firstMessage })
@@ -308,7 +384,7 @@ test('reply creation validates membership and same-conversation targets, then em
 
   const missing = new RouteDatabase();
   const missingHarness = await routeHarness(missing);
-  missing.selectResults.push([{ userId: me }], []);
+  missing.selectResults.push([{ userId: me }]);
   const missingResponse = await missingHarness.invoke('POST', '/:id/messages', {
     params: { id: conversation },
     body: sendBody({ replyToMessageId: firstMessage })
@@ -318,7 +394,7 @@ test('reply creation validates membership and same-conversation targets, then em
   const cross = new RouteDatabase();
   cross.messages.set(firstMessage, rawMessage({ conversation_id: otherConversation }));
   const crossHarness = await routeHarness(cross);
-  cross.selectResults.push([{ userId: me }], []);
+  cross.selectResults.push([{ userId: me }]);
   const crossResponse = await crossHarness.invoke('POST', '/:id/messages', {
     params: { id: conversation },
     body: sendBody({ replyToMessageId: firstMessage })
@@ -399,9 +475,15 @@ test('editing enforces ownership, deletion state, body rules, and keeps immutabl
   }
 });
 
-test('soft deletion enforces ownership, rejects repeats, persists in history, and emits realtime state', async () => {
+test('soft deletion removes attachment metadata, preserves replies and tombstone, and emits realtime state', async () => {
   const database = new RouteDatabase();
   database.messages.set(firstMessage, rawMessage());
+  database.messages.set(secondMessage, rawMessage({
+    id: secondMessage,
+    client_message_id: secondClient,
+    reply_to_message_id: firstMessage,
+    sender_id: peer
+  }));
   database.attachments[0]!.message_id = firstMessage;
   database.selectResults.push([{ userId: me }]);
   const harness = await routeHarness(database);
@@ -414,7 +496,10 @@ test('soft deletion enforces ownership, rejects repeats, persists in history, an
   assert.equal(response.statusCode, 200);
   assert.equal(response.payload.message.body, '');
   assert.ok(response.payload.message.deletedAt);
-  assert.equal(response.payload.message.attachments[0].id, attachmentId);
+  assert.deepEqual(response.payload.message.attachments, []);
+  assert.deepEqual(database.attachments, []);
+  assert.deepEqual(database.deletionKeys, ['fixture-key']);
+  assert.equal(database.messages.get(secondMessage)?.reply_to_message_id, firstMessage);
   assert.deepEqual(events, [response.payload.message]);
 
   database.selectResults.push([{ userId: me }]);
@@ -439,6 +524,26 @@ test('soft deletion enforces ownership, rejects repeats, persists in history, an
   assert.equal(denied.statusCode, 403);
 });
 
+test('soft deletion removes every attachment from a multi-attachment message', async () => {
+  const database = new RouteDatabase();
+  database.messages.set(firstMessage, rawMessage());
+  database.attachments[0]!.message_id = firstMessage;
+  database.attachments.push(rawAttachment(firstMessage, 'application/octet-stream', {
+    id: secondAttachmentId,
+    storage_key: 'fixture-key-2'
+  }));
+  database.selectResults.push([{ userId: me }]);
+  const harness = await routeHarness(database);
+
+  const response = await harness.invoke('DELETE', '/:id/messages/:messageId', {
+    params: { id: conversation, messageId: firstMessage }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.payload.message.attachments, []);
+  assert.deepEqual(database.deletionKeys, ['fixture-key', 'fixture-key-2']);
+});
+
 test('normal text, attachment-only, text-plus-attachment, and client idempotency retain their payloads', async () => {
   for (const [body, attachmentIds] of [
     ['Text only', []],
@@ -446,7 +551,7 @@ test('normal text, attachment-only, text-plus-attachment, and client idempotency
     ['Text and file', [attachmentId]]
   ] as const) {
     const database = new RouteDatabase();
-    database.selectResults.push([{ userId: me }], []);
+    database.selectResults.push([{ userId: me }]);
     const harness = await routeHarness(database);
     const response = await harness.invoke('POST', '/:id/messages', {
       params: { id: conversation }, body: sendBody({ body, attachmentIds: [...attachmentIds] })
@@ -459,7 +564,7 @@ test('normal text, attachment-only, text-plus-attachment, and client idempotency
   const database = new RouteDatabase();
   const existing = rawMessage();
   database.messages.set(existing.id, existing);
-  database.selectResults.push([{ userId: me }], [camelMessage(existing)]);
+  database.selectResults.push([{ userId: me }]);
   const harness = await routeHarness(database);
   const response = await harness.invoke('POST', '/:id/messages', {
     params: { id: conversation }, body: sendBody()
@@ -468,6 +573,94 @@ test('normal text, attachment-only, text-plus-attachment, and client idempotency
   assert.equal(response.payload.duplicate, true);
   assert.equal(response.payload.message.id, existing.id);
   assert.equal(database.messages.size, 1);
+
+  const crossConversation = new RouteDatabase();
+  crossConversation.messages.set(firstMessage, rawMessage({
+    conversation_id: otherConversation
+  }));
+  crossConversation.selectResults.push([{ userId: me }]);
+  const crossConversationHarness = await routeHarness(crossConversation);
+  const crossConversationResponse = await crossConversationHarness.invoke(
+    'POST',
+    '/:id/messages',
+    { params: { id: conversation }, body: sendBody() }
+  );
+  assert.equal(crossConversationResponse.statusCode, 409);
+  assert.deepEqual(crossConversationResponse.payload, {
+    error: 'Message id is already in use.'
+  });
+  assert.equal(crossConversation.messages.get(firstMessage)?.conversation_id, otherConversation);
+  assert.equal(crossConversation.messages.size, 1);
+});
+
+test('attachment binding rejects foreign ownership and cross-conversation IDs without partial state', async () => {
+  for (const [targetConversation, userId] of [
+    [conversation, peer],
+    [otherConversation, me]
+  ] as const) {
+    const database = new RouteDatabase();
+    database.selectResults.push([{ userId }]);
+    const harness = await routeHarness(database);
+    const response = await harness.invoke('POST', '/:id/messages', {
+      params: { id: targetConversation },
+      body: sendBody({ attachmentIds: [attachmentId] }),
+      userId
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.deepEqual(response.payload, {
+      error: 'One or more attachments are no longer available.'
+    });
+    assert.equal(database.messages.size, 0);
+    assert.equal(database.attachments[0]!.message_id, null);
+  }
+});
+
+test('mixed valid and invalid attachment IDs roll back the message and every binding', async () => {
+  const database = new RouteDatabase();
+  database.attachments.push(rawAttachment(null, 'image/png', {
+    id: secondAttachmentId,
+    uploader_id: peer,
+    storage_key: 'fixture-key-2'
+  }));
+  database.selectResults.push([{ userId: me }]);
+  const harness = await routeHarness(database);
+
+  const response = await harness.invoke('POST', '/:id/messages', {
+    params: { id: conversation },
+    body: sendBody({ attachmentIds: [attachmentId, secondAttachmentId] })
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(database.messages.size, 0);
+  assert.deepEqual(database.attachments.map((item) => item.message_id), [null, null]);
+});
+
+test('multiple valid pending attachments bind atomically to one message', async () => {
+  const database = new RouteDatabase();
+  database.attachments.push(rawAttachment(null, 'application/octet-stream', {
+    id: secondAttachmentId,
+    storage_key: 'fixture-key-2',
+    original_name: 'notes.txt',
+    kind: 'file'
+  }));
+  database.selectResults.push([{ userId: me }]);
+  const harness = await routeHarness(database);
+
+  const response = await harness.invoke('POST', '/:id/messages', {
+    params: { id: conversation },
+    body: sendBody({ body: '', attachmentIds: [attachmentId, secondAttachmentId] })
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.payload.message.body, '');
+  assert.deepEqual(
+    response.payload.message.attachments.map((item: any) => item.id),
+    [attachmentId, secondAttachmentId]
+  );
+  assert.equal(database.messages.size, 1);
+  assert.equal(new Set(database.attachments.map((item) => item.message_id)).size, 1);
+  assert.ok(database.attachments.every((item) => item.message_id));
 });
 
 test('reactions are unique, aggregate across users, allow multiple values, persist in history, and emit targeted realtime changes', async () => {
@@ -578,4 +771,30 @@ test('reaction routes reject invalid authentication, membership, message, value,
   });
   assert.equal(deletedResponse.statusCode, 409);
   assert.equal(deletedDatabase.reactions.length, 0);
+});
+
+test('outsiders retain not-found semantics across every conversation message operation', async () => {
+  const operations = [
+    { method: 'GET', path: '/:id/messages', query: { limit: 50 } },
+    { method: 'POST', path: '/:id/messages', body: sendBody() },
+    { method: 'PATCH', path: '/:id/messages/:messageId', body: { body: 'Changed' } },
+    { method: 'DELETE', path: '/:id/messages/:messageId' },
+    { method: 'PUT', path: '/:id/messages/:messageId/reactions', body: { reaction: '👍' } },
+    { method: 'DELETE', path: '/:id/messages/:messageId/reactions', body: { reaction: '👍' } }
+  ];
+
+  for (const operation of operations) {
+    const database = new RouteDatabase();
+    database.messages.set(firstMessage, rawMessage());
+    database.selectResults.push([]);
+    const harness = await routeHarness(database);
+    const response = await harness.invoke(operation.method, operation.path, {
+      params: { id: conversation, messageId: firstMessage },
+      query: operation.query,
+      body: operation.body,
+      userId: outsider
+    });
+    assert.equal(response.statusCode, 404, `${operation.method} ${operation.path}`);
+    assert.deepEqual(response.payload, { error: 'Conversation not found.' });
+  }
 });

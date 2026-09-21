@@ -1,4 +1,4 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { eq, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Database } from '@cubic/database';
@@ -6,12 +6,8 @@ import { userSettings, users } from '@cubic/database/schema';
 import { normalizeEmail, normalizeUsername, toPublicUser } from '../auth/identity.js';
 import { createRequireAuth } from '../auth/guard.js';
 import { hashPassword, verifyPassword } from '../security/password.js';
-import {
-  createSession,
-  deleteExpiredSessions,
-  destroySession,
-  resolveSession
-} from '../security/session.js';
+import { SessionPersistenceError, type SessionService } from '../security/session.js';
+import type { RealtimeEvents } from '../realtime/events.js';
 
 const registerBodySchema = z.object({
   email: z.string().trim().email().max(254),
@@ -30,12 +26,18 @@ const loginBodySchema = z.object({
   password: z.string().min(1).max(128)
 });
 
+const sessionParamsSchema = z.object({
+  sessionId: z.string().uuid()
+});
+
 export interface AuthRoutesOptions {
   database: Database;
   cookieName: string;
   cookieSecure: boolean;
   sessionTtlDays: number;
   registrationEnabled: boolean;
+  sessionService: SessionService;
+  realtimeEvents: RealtimeEvents;
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -48,13 +50,15 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, options) => {
-  const requireAuth = createRequireAuth(options.database, options.cookieName);
+  const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
   const cookieBase = {
     httpOnly: true,
     sameSite: 'lax' as const,
     secure: options.cookieSecure,
     path: '/'
   };
+  const sessionUnavailable = (reply: FastifyReply) =>
+    reply.code(503).send({ error: 'Session management is temporarily unavailable.' });
 
   app.post(
     '/register',
@@ -118,9 +122,16 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
         });
 
         const previousToken = request.cookies[options.cookieName];
-        if (previousToken) await destroySession(options.database, previousToken);
+        if (previousToken) {
+          const previousSessionId = await options.sessionService.destroyToken(previousToken);
+          if (previousSessionId) options.realtimeEvents.emitSessionRevoked({ sessionId: previousSessionId });
+        }
 
-        const session = await createSession(options.database, user.id, options.sessionTtlDays);
+        const session = await options.sessionService.create(
+          user.id,
+          options.sessionTtlDays,
+          request.headers['user-agent']
+        );
         reply.setCookie(options.cookieName, session.token, {
           ...cookieBase,
           expires: session.expiresAt,
@@ -174,12 +185,19 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
       }
 
       await options.database.db.update(users).set(updates).where(eq(users.id, user.id));
-      await deleteExpiredSessions(options.database);
+      await options.sessionService.deleteInvalid();
 
       const previousToken = request.cookies[options.cookieName];
-      if (previousToken) await destroySession(options.database, previousToken);
+      if (previousToken) {
+        const previousSessionId = await options.sessionService.destroyToken(previousToken);
+        if (previousSessionId) options.realtimeEvents.emitSessionRevoked({ sessionId: previousSessionId });
+      }
 
-      const session = await createSession(options.database, user.id, options.sessionTtlDays);
+      const session = await options.sessionService.create(
+        user.id,
+        options.sessionTtlDays,
+        request.headers['user-agent']
+      );
       reply.setCookie(options.cookieName, session.token, {
         ...cookieBase,
         expires: session.expiresAt,
@@ -192,7 +210,10 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
 
   app.post('/logout', async (request, reply) => {
     const token = request.cookies[options.cookieName];
-    if (token) await destroySession(options.database, token);
+    if (token) {
+      const sessionId = await options.sessionService.destroyToken(token);
+      if (sessionId) options.realtimeEvents.emitSessionRevoked({ sessionId });
+    }
 
     reply.clearCookie(options.cookieName, cookieBase);
     return reply.code(204).send();
@@ -203,14 +224,101 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
     return reply.send({ user: request.auth.user });
   });
 
+  app.get('/sessions', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+
+    try {
+      const activeSessions = await options.sessionService.listActiveForUser(request.auth.user.id);
+      const currentSessionId = request.auth.sessionId;
+      activeSessions.sort((left, right) => {
+        const currentOrder = Number(right.id === currentSessionId) - Number(left.id === currentSessionId);
+        return currentOrder || right.lastSeenAt.getTime() - left.lastSeenAt.getTime();
+      });
+
+      return reply.send({
+        sessions: activeSessions.map((session) => ({
+          id: session.id,
+          current: session.id === currentSessionId,
+          client: session.client,
+          createdAt: session.createdAt.toISOString(),
+          lastSeenAt: session.lastSeenAt.toISOString(),
+          expiresAt: session.expiresAt.toISOString()
+        }))
+      });
+    } catch (error) {
+      if (error instanceof SessionPersistenceError) return sessionUnavailable(reply);
+      throw error;
+    }
+  });
+
+  app.delete('/sessions/others', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+
+    try {
+      const deletedIds = await options.sessionService.deleteOthersForUser(
+        request.auth.user.id,
+        request.auth.sessionId
+      );
+      for (const sessionId of deletedIds) {
+        options.realtimeEvents.emitSessionRevoked({ sessionId });
+      }
+      return reply.code(204).send();
+    } catch (error) {
+      if (error instanceof SessionPersistenceError) return sessionUnavailable(reply);
+      throw error;
+    }
+  });
+
+  app.delete('/sessions', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+
+    try {
+      const deletedIds = await options.sessionService.deleteAllForUser(request.auth.user.id);
+      for (const sessionId of deletedIds) {
+        options.realtimeEvents.emitSessionRevoked({ sessionId });
+      }
+      reply.clearCookie(options.cookieName, cookieBase);
+      return reply.code(204).send();
+    } catch (error) {
+      if (error instanceof SessionPersistenceError) return sessionUnavailable(reply);
+      throw error;
+    }
+  });
+
+  app.delete('/sessions/:sessionId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = sessionParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid session id.' });
+
+    try {
+      const deletedId = await options.sessionService.deleteForUser(
+        params.data.sessionId,
+        request.auth.user.id
+      );
+      if (deletedId) {
+        options.realtimeEvents.emitSessionRevoked({ sessionId: deletedId });
+        if (deletedId === request.auth.sessionId) {
+          reply.clearCookie(options.cookieName, cookieBase);
+        }
+      }
+      return reply.code(204).send();
+    } catch (error) {
+      if (error instanceof SessionPersistenceError) return sessionUnavailable(reply);
+      throw error;
+    }
+  });
+
   // Small endpoint used by the web app to validate the browser cookie after a
   // proxy/reverse-proxy change without exposing the raw session token.
   app.get('/session', async (request, reply) => {
     const token = request.cookies[options.cookieName];
     if (!token) return reply.send({ authenticated: false });
 
-    const identity = await resolveSession(options.database, token);
-    if (!identity) return reply.send({ authenticated: false });
+    const identity = await options.sessionService.resolveToken(token, { activity: true });
+    if (!identity) {
+      reply.clearCookie(options.cookieName, cookieBase);
+      return reply.send({ authenticated: false });
+    }
 
     return reply.send({ authenticated: true, user: identity.user });
   });

@@ -16,7 +16,7 @@
     "build": "npm run build:packages && npm run build --workspace @cubic/api && npm run build --workspace @cubic/web",
     "build:packages": "npm run build --workspace @cubic/shared && npm run build --workspace @cubic/database",
     "check": "npm run build:packages && npm run check --workspaces --if-present",
-    "test": "npm run build:packages && npm run build --workspace @cubic/api && npm run test --workspace @cubic/api",
+    "test": "npm run build:packages && npm run build --workspace @cubic/api && npm run test --workspace @cubic/api && npm run test --workspace @cubic/web",
     "db:generate": "npm run db:generate --workspace @cubic/database",
     "db:migrate": "npm run db:migrate --workspace @cubic/database",
     "db:push": "npm run db:push --workspace @cubic/database",

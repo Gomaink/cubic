@@ -79,3 +79,38 @@ Then carefully inspect:
 - git diff --stat -- apps/web
 
 If unrelated UI changed, fix it before reporting completion.
+
+# Web Security Invariants
+
+Frontend code must assume that all user content is hostile.
+
+Never introduce a primary Cubic authentication token into:
+- localStorage
+- sessionStorage
+- IndexedDB
+- JavaScript-readable persistent cookies
+
+Browser authentication should continue to rely on server-issued HttpOnly
+session cookies.
+
+Do not use {@html} for user-controlled content unless a separately reviewed
+sanitization design explicitly requires it.
+
+Never expose session credentials through:
+- URLs
+- query strings
+- DOM attributes
+- logs
+- analytics
+- debug output
+
+Frontend authorization checks are for presentation only.
+Backend authorization remains authoritative.
+
+Do not create WebSocket authentication that depends on a persistent bearer
+token readable by JavaScript.
+
+When displaying uploads:
+- do not trust filenames
+- do not derive execution behavior from extensions
+- preserve authenticated access controls

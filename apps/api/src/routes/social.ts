@@ -1,9 +1,19 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { and, eq, or } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Database } from '@cubic/database';
-import { blocks, friendRequests, friendships, users } from '@cubic/database/schema';
+import {
+  blocks,
+  calls,
+  directConversationPairs,
+  friendRequests,
+  friendships,
+  users
+} from '@cubic/database/schema';
 import { createRequireAuth } from '../auth/guard.js';
+import { normalizeLegacyAvatarUrl } from '../auth/identity.js';
+import type { SessionService } from '../security/session.js';
+import type { RealtimeEvents } from '../realtime/events.js';
 
 const userIdSchema = z.object({ userId: z.string().uuid() });
 const requestIdParamsSchema = z.object({ id: z.string().uuid() });
@@ -19,7 +29,7 @@ function publicUser(row: typeof users.$inferSelect) {
     id: row.id,
     username: row.username,
     displayName: row.displayName,
-    avatarUrl: row.avatarUrl,
+    avatarUrl: normalizeLegacyAvatarUrl(row.avatarUrl),
     createdAt: row.createdAt.toISOString()
   };
 }
@@ -27,10 +37,12 @@ function publicUser(row: typeof users.$inferSelect) {
 export interface SocialRoutesOptions {
   database: Database;
   cookieName: string;
+  sessionService: SessionService;
+  realtimeEvents: RealtimeEvents;
 }
 
 export const socialRoutes: FastifyPluginAsync<SocialRoutesOptions> = async (app, options) => {
-  const requireAuth = createRequireAuth(options.database, options.cookieName);
+  const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
 
   app.get('/search', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
@@ -53,7 +65,7 @@ export const socialRoutes: FastifyPluginAsync<SocialRoutesOptions> = async (app,
         id: row.id,
         username: row.username,
         displayName: row.display_name,
-        avatarUrl: row.avatar_url,
+        avatarUrl: normalizeLegacyAvatarUrl(row.avatar_url),
         createdAt: new Date(row.created_at).toISOString()
       }))
     });
@@ -76,7 +88,7 @@ export const socialRoutes: FastifyPluginAsync<SocialRoutesOptions> = async (app,
         id: row.id,
         username: row.username,
         displayName: row.display_name,
-        avatarUrl: row.avatar_url,
+        avatarUrl: normalizeLegacyAvatarUrl(row.avatar_url),
         createdAt: new Date(row.created_at).toISOString()
       }))
     });
@@ -103,8 +115,8 @@ export const socialRoutes: FastifyPluginAsync<SocialRoutesOptions> = async (app,
         direction: row.sender_id === userId ? 'outgoing' : 'incoming',
         createdAt: new Date(row.created_at).toISOString(),
         user: row.sender_id === userId
-          ? { id: row.receiver_id, username: row.receiver_username, displayName: row.receiver_display_name, avatarUrl: row.receiver_avatar_url }
-          : { id: row.sender_id, username: row.sender_username, displayName: row.sender_display_name, avatarUrl: row.sender_avatar_url }
+          ? { id: row.receiver_id, username: row.receiver_username, displayName: row.receiver_display_name, avatarUrl: normalizeLegacyAvatarUrl(row.receiver_avatar_url) }
+          : { id: row.sender_id, username: row.sender_username, displayName: row.sender_display_name, avatarUrl: normalizeLegacyAvatarUrl(row.sender_avatar_url) }
       }))
     });
   });
@@ -222,7 +234,7 @@ export const socialRoutes: FastifyPluginAsync<SocialRoutesOptions> = async (app,
        where b.blocker_id = $1 order by b.created_at desc`,
       [request.auth.user.id]
     );
-    return reply.send({ blocks: result.rows.map((row) => ({ id: row.id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, blockedAt: new Date(row.created_at).toISOString() })) });
+    return reply.send({ blocks: result.rows.map((row) => ({ id: row.id, username: row.username, displayName: row.display_name, avatarUrl: normalizeLegacyAvatarUrl(row.avatar_url), blockedAt: new Date(row.created_at).toISOString() })) });
   });
 
   app.post('/blocks', { preHandler: requireAuth }, async (request, reply) => {
@@ -233,11 +245,39 @@ export const socialRoutes: FastifyPluginAsync<SocialRoutesOptions> = async (app,
     const target = parsed.data.userId;
     const [low, high] = orderedPair(me, target);
 
-    await options.database.db.transaction(async (tx) => {
+    const directConversations = await options.database.db.transaction(async (tx) => {
       await tx.insert(blocks).values({ blockerId: me, blockedId: target }).onConflictDoNothing();
       await tx.delete(friendships).where(and(eq(friendships.userLowId, low), eq(friendships.userHighId, high)));
       await tx.update(friendRequests).set({ status: 'cancelled', respondedAt: new Date() }).where(or(and(eq(friendRequests.senderId, me), eq(friendRequests.receiverId, target), eq(friendRequests.status, 'pending')), and(eq(friendRequests.senderId, target), eq(friendRequests.receiverId, me), eq(friendRequests.status, 'pending'))));
+      return tx
+        .select({
+          conversationId: directConversationPairs.conversationId,
+          callId: calls.id
+        })
+        .from(directConversationPairs)
+        .leftJoin(
+          calls,
+          and(
+            eq(calls.conversationId, directConversationPairs.conversationId),
+            eq(calls.status, 'accepted'),
+            isNull(calls.endedAt)
+          )
+        )
+        .where(
+          and(
+            eq(directConversationPairs.userLowId, low),
+            eq(directConversationPairs.userHighId, high)
+          )
+        );
     });
+    for (const direct of directConversations) {
+      options.realtimeEvents.emitDirectBlocked({
+        conversationId: direct.conversationId,
+        blockerId: me,
+        blockedId: target,
+        callId: direct.callId
+      });
+    }
     return reply.code(201).send({ ok: true });
   });
 
