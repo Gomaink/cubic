@@ -260,6 +260,10 @@ class RealtimeDatabase {
   readonly blockedConversations = new Set<string>();
   autoJoinReadGate: ((rows: any[]) => Promise<void>) | null = null;
   membershipReadGate: ((rows: any[]) => Promise<void>) | null = null;
+  directCallReadGate: ((rows: any[]) => Promise<void>) | null = null;
+  callPersistenceGate: (() => Promise<void>) | null = null;
+  callCommitListener: ((id: string, status: string) => void) | null = null;
+  readonly callStatuses = new Map<string, string>();
 
   db = {
     select: () => {
@@ -283,10 +287,31 @@ class RealtimeDatabase {
   };
 
   pool = {
-    connect: async () => ({
-      query: async () => ({ rows: [], rowCount: 0 }),
-      release() {}
-    }),
+    connect: async () => {
+      const changes = new Map<string, string>();
+      return {
+        query: async (sql: string, params: any[] = []) => {
+          const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase();
+          if (normalized.startsWith('insert into calls')) {
+            await this.callPersistenceGate?.();
+            changes.set(params[0], 'ringing');
+          } else if (normalized.startsWith('update calls set status = $2')) {
+            changes.set(params[0], params[1]);
+          } else if (normalized.startsWith("update calls set status = 'accepted'")) {
+            changes.set(params[0], 'accepted');
+          } else if (normalized === 'commit') {
+            for (const [id, status] of changes) {
+              this.callStatuses.set(id, status);
+              this.callCommitListener?.(id, status);
+            }
+          } else if (normalized === 'rollback') {
+            changes.clear();
+          }
+          return { rows: [], rowCount: 0 };
+        },
+        release() {}
+      };
+    },
     query: async (sql: string, params: any[] = []) => {
       const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase();
       if (normalized.includes("c.kind in ('direct', 'group')")) {
@@ -313,6 +338,7 @@ class RealtimeDatabase {
               blocked: this.blockedConversations.has(params[0])
             }]
           : [];
+        await this.directCallReadGate?.(rows);
         return { rows, rowCount: rows.length };
       }
       return { rows: [], rowCount: 0 };
@@ -1273,4 +1299,226 @@ test('direct-call start rejects missing membership and bilateral blocks', async 
   });
 
   caller.close();
+});
+
+test('block invalidates an authorization-pending direct start without signalling, and a fresh unblocked start works', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const callerId = '10000000-0000-4000-8000-000000000001';
+  const calleeId = '10000000-0000-4000-8000-000000000002';
+  harness.repository.add('pending-caller', callerId);
+  harness.repository.add('pending-callee', calleeId);
+  const caller = await connectClient(harness, 'pending-caller');
+  const callee = await connectClient(harness, 'pending-callee');
+  context.after(() => { caller.close(); callee.close(); });
+  harness.database.conversationMemberships.set(conversationId, new Set([callerId, calleeId]));
+  harness.database.directPairs.set(conversationId, { lowId: callerId, highId: calleeId });
+  const incoming: unknown[] = [];
+  callee.on('call:incoming', (call) => incoming.push(call));
+
+  const barrier = readBarrier();
+  harness.database.directCallReadGate = async () => barrier.gate();
+  const staleAck = new Promise<any>((resolve) => caller.emit('call:start', { conversationId }, resolve));
+  await barrier.entered;
+  harness.database.blockedConversations.add(conversationId);
+  harness.events.emitDirectBlocked({ conversationId, blockerId: calleeId, blockedId: callerId, callId: null });
+  barrier.release();
+  assert.equal((await staleAck).ok, false);
+  assert.equal((await new Promise<any>((resolve) => callee.emit('call:sync', {}, resolve))).call, null);
+  assert.equal(harness.database.callStatuses.size, 0);
+  assert.equal(incoming.length, 0);
+
+  harness.database.directCallReadGate = null;
+  harness.database.blockedConversations.delete(conversationId);
+  const freshIncoming = waitForEvent<any>(callee, 'call:incoming');
+  const freshAck = await new Promise<any>((resolve) => caller.emit('call:start', { conversationId }, resolve));
+  assert.equal(freshAck.ok, true);
+  assert.equal((await freshIncoming).id, freshAck.call.id);
+});
+
+test('block during direct start persistence ends the new row before any incoming signal or success ack', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const callerId = '10000000-0000-4000-8000-000000000001';
+  const calleeId = '10000000-0000-4000-8000-000000000002';
+  harness.repository.add('persist-caller', callerId);
+  harness.repository.add('persist-callee', calleeId);
+  const caller = await connectClient(harness, 'persist-caller');
+  const callee = await connectClient(harness, 'persist-callee');
+  context.after(() => { caller.close(); callee.close(); });
+  harness.database.conversationMemberships.set(conversationId, new Set([callerId, calleeId]));
+  harness.database.directPairs.set(conversationId, { lowId: callerId, highId: calleeId });
+  const incoming: unknown[] = [];
+  callee.on('call:incoming', (call) => incoming.push(call));
+
+  const barrier = readBarrier();
+  harness.database.callPersistenceGate = barrier.gate;
+  const staleAck = new Promise<any>((resolve) => caller.emit('call:start', { conversationId }, resolve));
+  await barrier.entered;
+  harness.database.blockedConversations.add(conversationId);
+  harness.events.emitDirectBlocked({ conversationId, blockerId: calleeId, blockedId: callerId, callId: null });
+  barrier.release();
+  assert.equal((await staleAck).ok, false);
+  assert.deepEqual([...harness.database.callStatuses.values()], ['declined']);
+  assert.equal((await new Promise<any>((resolve) => callee.emit('call:sync', {}, resolve))).call, null);
+  assert.equal(incoming.length, 0);
+});
+
+test('disconnect invalidates direct starts pending in authorization or persistence', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const callerId = '10000000-0000-4000-8000-000000000001';
+  const calleeId = '10000000-0000-4000-8000-000000000002';
+  const callerSession = harness.repository.add('disconnect-caller', callerId);
+  harness.repository.add('disconnect-callee', calleeId);
+  const callee = await connectClient(harness, 'disconnect-callee');
+  context.after(() => callee.close());
+  harness.database.conversationMemberships.set(conversationId, new Set([callerId, calleeId]));
+  harness.database.directPairs.set(conversationId, { lowId: callerId, highId: calleeId });
+  const incoming: unknown[] = [];
+  callee.on('call:incoming', (call) => incoming.push(call));
+
+  const caller = await connectClient(harness, 'disconnect-caller');
+  const authBarrier = readBarrier();
+  harness.database.directCallReadGate = authBarrier.gate;
+  caller.emit('call:start', { conversationId }, () => assert.fail('Disconnected start acknowledged success.'));
+  await authBarrier.entered;
+  const disconnected = waitForEvent(caller, 'disconnect');
+  harness.events.emitSessionRevoked({ sessionId: callerSession.session.id });
+  await disconnected;
+  authBarrier.release();
+  harness.database.directCallReadGate = null;
+  assert.equal((await new Promise<any>((resolve) => callee.emit('call:sync', {}, resolve))).call, null);
+  assert.equal(harness.database.callStatuses.size, 0);
+
+  const secondCaller = await connectClient(harness, 'disconnect-caller');
+  context.after(() => secondCaller.close());
+  const persistBarrier = readBarrier();
+  harness.database.callPersistenceGate = persistBarrier.gate;
+  const terminalCommit = new Promise<string>((resolve) => {
+    harness.database.callCommitListener = (_id, status) => {
+      if (status === 'cancelled') resolve(status);
+    };
+  });
+  secondCaller.emit('call:start', { conversationId }, () => assert.fail('Disconnected start acknowledged success.'));
+  await persistBarrier.entered;
+  const secondDisconnected = waitForEvent(secondCaller, 'disconnect');
+  harness.events.emitSessionRevoked({ sessionId: callerSession.session.id });
+  await secondDisconnected;
+  persistBarrier.release();
+  assert.equal(await terminalCommit, 'cancelled');
+  assert.equal((await new Promise<any>((resolve) => callee.emit('call:sync', {}, resolve))).call, null);
+  assert.deepEqual([...harness.database.callStatuses.values()], ['cancelled']);
+  assert.equal(incoming.length, 0);
+});
+
+test('direct-call database uncertainty denies start while unrelated group state remains untouched', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const callerId = '10000000-0000-4000-8000-000000000001';
+  harness.repository.add('uncertain-caller', callerId);
+  const caller = await connectClient(harness, 'uncertain-caller');
+  context.after(() => caller.close());
+  harness.database.conversationMemberships.set(conversationId, new Set([callerId]));
+  harness.database.directCallReadGate = async () => { throw new Error('database unavailable'); };
+  const failed = await new Promise<any>((resolve) => caller.emit('call:start', { conversationId }, resolve));
+  assert.deepEqual(failed, { ok: false, error: 'Call operation failed.' });
+  assert.equal(harness.database.callStatuses.size, 0);
+  harness.database.directCallReadGate = null;
+  const group = await new Promise<any>((resolve) => caller.emit('call:start', { conversationId }, resolve));
+  assert.deepEqual(group, { ok: false, error: 'Direct conversation not found.' });
+});
+
+test('failed direct start persistence retires its in-memory ringing call', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const callerId = '10000000-0000-4000-8000-000000000001';
+  const calleeId = '10000000-0000-4000-8000-000000000002';
+  harness.repository.add('failed-persist-caller', callerId);
+  harness.repository.add('failed-persist-callee', calleeId);
+  const caller = await connectClient(harness, 'failed-persist-caller');
+  const callee = await connectClient(harness, 'failed-persist-callee');
+  context.after(() => { caller.close(); callee.close(); });
+  harness.database.conversationMemberships.set(conversationId, new Set([callerId, calleeId]));
+  harness.database.directPairs.set(conversationId, { lowId: callerId, highId: calleeId });
+  const incoming: unknown[] = [];
+  callee.on('call:incoming', (call) => incoming.push(call));
+  harness.database.callPersistenceGate = async () => { throw new Error('insert failed'); };
+
+  const failed = await new Promise<any>((resolve) => caller.emit('call:start', { conversationId }, resolve));
+  assert.deepEqual(failed, { ok: false, error: 'Call operation failed.' });
+  assert.equal((await new Promise<any>((resolve) => callee.emit('call:sync', {}, resolve))).call, null);
+  assert.equal(harness.database.callStatuses.size, 0);
+  assert.equal(incoming.length, 0);
+});
+
+test('blocking one pending direct start leaves another conversation call active', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const ids = [1, 2, 3, 4].map((index) => `10000000-0000-4000-8000-${String(index).padStart(12, '0')}`);
+  const otherConversationId = '20000000-0000-4000-8000-000000000002';
+  for (let index = 0; index < ids.length; index++) harness.repository.add(`separate-${index}`, ids[index]!);
+  const [caller, callee, otherCaller, otherCallee] = await Promise.all(
+    ids.map((_id, index) => connectClient(harness, `separate-${index}`))
+  );
+  context.after(() => { caller!.close(); callee!.close(); otherCaller!.close(); otherCallee!.close(); });
+  harness.database.conversationMemberships.set(conversationId, new Set([ids[0]!, ids[1]!]));
+  harness.database.conversationMemberships.set(otherConversationId, new Set([ids[2]!, ids[3]!]));
+  harness.database.directPairs.set(conversationId, { lowId: ids[0]!, highId: ids[1]! });
+  harness.database.directPairs.set(otherConversationId, { lowId: ids[2]!, highId: ids[3]! });
+
+  const otherIncoming = waitForEvent<any>(otherCallee!, 'call:incoming');
+  const otherStarted = await new Promise<any>((resolve) =>
+    otherCaller!.emit('call:start', { conversationId: otherConversationId }, resolve)
+  );
+  assert.equal(otherStarted.ok, true);
+  assert.equal((await otherIncoming).id, otherStarted.call.id);
+
+  const barrier = readBarrier();
+  harness.database.directCallReadGate = barrier.gate;
+  const staleAck = new Promise<any>((resolve) => caller!.emit('call:start', { conversationId }, resolve));
+  await barrier.entered;
+  harness.events.emitDirectBlocked({ conversationId, blockerId: ids[1]!, blockedId: ids[0]!, callId: null });
+  barrier.release();
+  assert.equal((await staleAck).ok, false);
+  const otherSync = await new Promise<any>((resolve) => otherCallee!.emit('call:sync', {}, resolve));
+  assert.equal(otherSync.call.id, otherStarted.call.id);
+  assert.equal(harness.database.callStatuses.get(otherStarted.call.id), 'ringing');
+});
+
+test('a second socket cannot signal a creator-owned call while its start is still pending', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const callerId = '10000000-0000-4000-8000-000000000001';
+  const calleeId = '10000000-0000-4000-8000-000000000002';
+  const creatorSession = harness.repository.add('creator-tab', callerId);
+  harness.repository.add('other-tab', callerId);
+  harness.repository.add('duplicate-callee', calleeId);
+  const creator = await connectClient(harness, 'creator-tab');
+  const other = await connectClient(harness, 'other-tab');
+  const callee = await connectClient(harness, 'duplicate-callee');
+  context.after(() => { creator.close(); other.close(); callee.close(); });
+  harness.database.conversationMemberships.set(conversationId, new Set([callerId, calleeId]));
+  harness.database.directPairs.set(conversationId, { lowId: callerId, highId: calleeId });
+  const incoming: unknown[] = [];
+  callee.on('call:incoming', (call) => incoming.push(call));
+
+  const barrier = readBarrier();
+  harness.database.callPersistenceGate = barrier.gate;
+  creator.emit('call:start', { conversationId });
+  await barrier.entered;
+  const duplicate = await new Promise<any>((resolve) => other.emit('call:start', { conversationId }, resolve));
+  assert.deepEqual(duplicate, { ok: false, error: 'Call operation failed.' });
+  const terminalCommit = new Promise<string>((resolve) => {
+    harness.database.callCommitListener = (_id, status) => {
+      if (status === 'cancelled') resolve(status);
+    };
+  });
+  const disconnected = waitForEvent(creator, 'disconnect');
+  harness.events.emitSessionRevoked({ sessionId: creatorSession.session.id });
+  await disconnected;
+  barrier.release();
+  assert.equal(await terminalCommit, 'cancelled');
+  assert.equal((await new Promise<any>((resolve) => other.emit('call:sync', {}, resolve))).call, null);
+  assert.equal(incoming.length, 0);
 });

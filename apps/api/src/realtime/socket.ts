@@ -26,6 +26,7 @@ const callIdSchema = z.object({ callId: z.string().uuid() });
 
 const RING_TIMEOUT_MS = 45_000;
 const MAX_PENDING_ADMISSIONS_PER_SOCKET = 8;
+const MAX_PENDING_CALL_STARTS_PER_SOCKET = 8;
 const MAX_REMOVALS_PER_ADMISSION = 64;
 
 function conversationRoom(conversationId: string): string {
@@ -340,6 +341,60 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
   };
   const admissionsByUser = new Map<string, Set<Admission>>();
   const admissionsBySocket = new Map<string, Set<Admission>>();
+  type PendingCallStart = {
+    conversationId: string;
+    invalidated: boolean;
+    call: DirectCallSession | null;
+    finished: ReturnType<DirectCallCoordinator['cancel']> | null;
+    finish(): void;
+  };
+  const pendingCallStartsBySocket = new Map<string, Set<PendingCallStart>>();
+  const pendingCallStartsByConversation = new Map<string, Set<PendingCallStart>>();
+  const beginCallStart = (socket: Socket, conversationId: string): PendingCallStart | null => {
+    if (!socket.connected) return null;
+    let bySocket = pendingCallStartsBySocket.get(socket.id);
+    if (bySocket && bySocket.size >= MAX_PENDING_CALL_STARTS_PER_SOCKET) return null;
+    if (!bySocket) pendingCallStartsBySocket.set(socket.id, bySocket = new Set());
+    let byConversation = pendingCallStartsByConversation.get(conversationId);
+    if (!byConversation) pendingCallStartsByConversation.set(conversationId, byConversation = new Set());
+    const socketSet = bySocket;
+    const conversationSet = byConversation;
+    const pending: PendingCallStart = {
+      conversationId,
+      invalidated: false,
+      call: null,
+      finished: null,
+      finish: () => {
+        socketSet.delete(pending);
+        conversationSet.delete(pending);
+        if (socketSet.size === 0 && pendingCallStartsBySocket.get(socket.id) === socketSet)
+          pendingCallStartsBySocket.delete(socket.id);
+        if (conversationSet.size === 0 && pendingCallStartsByConversation.get(conversationId) === conversationSet)
+          pendingCallStartsByConversation.delete(conversationId);
+      }
+    };
+    socketSet.add(pending);
+    conversationSet.add(pending);
+    return pending;
+  };
+  const invalidateCallStart = (pending: PendingCallStart, blockerId?: string) => {
+    pending.invalidated = true;
+    if (!pending.call || pending.finished) return;
+    const call = calls.get(pending.call.id);
+    if (!call) return;
+    pending.finished = blockerId
+      ? calls.terminateForBlock(call.conversationId, blockerId)
+      : call.state === 'ringing'
+        ? calls.cancel(call.id, call.callerId)
+        : calls.end(call.id, call.callerId);
+    if (pending.finished) clearRingTimer(pending.finished.call.id);
+  };
+  const retireSocketCallStarts = (socketId: string) => {
+    for (const pending of [...(pendingCallStartsBySocket.get(socketId) ?? [])]) {
+      invalidateCallStart(pending);
+      pending.finish();
+    }
+  };
   const beginAdmission = (socket: Socket, userId: string): Admission | null => {
     if (!socket.connected) return null;
     let socketAdmissions = admissionsBySocket.get(socket.id);
@@ -476,7 +531,10 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     }
 
     registry.register(identity.sessionId, socket);
-    socket.once('disconnect', () => retireSocketAdmissions(socket.id));
+    socket.once('disconnect', () => {
+      retireSocketAdmissions(socket.id);
+      retireSocketCallStarts(socket.id);
+    });
 
     try {
       const current = await options.sessionService.validateId(identity.sessionId, { activity: false });
@@ -601,12 +659,21 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
           return;
         }
 
+        const pending = beginCallStart(socket, parsed.data.conversationId);
+        if (!pending) {
+          acknowledge?.({ ok: false, error: 'Call operation failed.' });
+          return;
+        }
         try {
           const direct = await authorizeDirectCallStart(
             options.database,
             parsed.data.conversationId,
             identity.userId
           );
+          if (pending.invalidated || !socket.connected) {
+            if (socket.connected) acknowledge?.({ ok: false, error: 'Call operation failed.' });
+            return;
+          }
           if (!direct.allowed && direct.reason === 'not_found') {
             acknowledge?.({ ok: false, error: 'Direct conversation not found.' });
             return;
@@ -618,6 +685,14 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
 
           const calleeId = direct.peerUserId;
 
+          const existingCall = calls.getForConversation(parsed.data.conversationId);
+          // Do not let a second socket reuse a call whose creator has not yet
+          // committed its start. The creator may still disconnect or be blocked.
+          if (existingCall && [...(pendingCallStartsByConversation.get(parsed.data.conversationId) ?? [])]
+            .some((start) => start !== pending && start.call?.id === existingCall.id)) {
+            acknowledge?.({ ok: false, error: 'Call operation failed.' });
+            return;
+          }
           const call = calls.start({
             conversationId: parsed.data.conversationId,
             callerId: identity.userId,
@@ -626,14 +701,26 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
             callerUsername: identity.username,
             callerSocketId: socket.id
           });
+          if (!existingCall) pending.call = call;
 
           try {
             await persistCallStarted(options.database, call);
           } catch (error) {
-            try {
-              calls.cancel(call.id, identity.userId);
-            } catch {}
+            if (pending.call) invalidateCallStart(pending);
             throw error;
+          }
+
+          if (pending.invalidated || !socket.connected || calls.get(call.id) !== call) {
+            if (pending.finished) {
+              await persistCallFinished(
+                options.database,
+                pending.finished.call,
+                pending.finished.state,
+                pending.finished.actorId
+              );
+            }
+            if (socket.connected) acknowledge?.({ ok: false, error: 'Call operation failed.' });
+            return;
           }
 
           armRingTimeout(call);
@@ -642,7 +729,9 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
           io.to(userRoom(call.callerId)).emit('call:state', wire);
           io.to(userRoom(call.calleeId)).emit('call:incoming', wire);
         } catch (error) {
-          acknowledge?.({ ok: false, error: callError(error) });
+          if (socket.connected) acknowledge?.({ ok: false, error: callError(error) });
+        } finally {
+          pending.finish();
         }
       }
     );
@@ -843,6 +932,12 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
   });
 
   const unsubscribeDirectBlocked = options.events.onDirectBlocked((event) => {
+    const pendingStarts = [...(pendingCallStartsByConversation.get(event.conversationId) ?? [])];
+    for (const pending of pendingStarts) invalidateCallStart(pending, event.blockerId);
+    // An in-flight insert must commit before its terminal update. Its owner
+    // performs that update after the insert; do not race it here.
+    const pendingCall = pendingStarts.find((pending) => pending.finished);
+    if (pendingCall) return;
     const finished = calls.terminateForBlock(event.conversationId, event.blockerId);
     if (!finished) return;
     clearRingTimer(finished.call.id);
