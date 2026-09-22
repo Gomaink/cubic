@@ -9,6 +9,7 @@ const peer = { id: 'fixture-peer', username: 'peer', displayName: 'Fixture DM', 
 const dm = '11111111-1111-4111-8111-111111111111';
 const group = '22222222-2222-4222-8222-222222222222';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
+const animatedGif = Buffer.from('47494638396101000100800000000000ffffff21f90400000000002c000000000100010000020244010021f90400000000002c00000000010001000002024c01003b', 'hex');
 let messages;
 let staged;
 let videoBytes;
@@ -27,6 +28,10 @@ function attachment(name, contentType = 'image/png', dimensions = { width: 800, 
 }
 
 function reset() {
+  user.displayName = 'Tester';
+  user.avatarUrl = null;
+  peer.displayName = 'Fixture DM';
+  peer.avatarUrl = null;
   groupMembers = [
     { ...user, role: 'owner' },
     { ...peer, role: 'member' }
@@ -125,6 +130,36 @@ const server = createServer(async (request, response) => {
   const isPeer = request.headers.cookie?.includes('cubic_session=browser-peer');
   if (!isPeer && !request.headers.cookie?.includes('cubic_session=browser-fixture')) return json({ error: 'Authentication required.' }, 401);
   const requestUser = isPeer ? peer : user;
+  if (url.pathname === '/api/v1/users/me/profile' && request.method === 'PATCH') {
+    const payload = JSON.parse((await body()).toString());
+    if (typeof payload.displayName !== 'string' || !payload.displayName.trim()) return json({ error: 'Invalid profile.' }, 400);
+    requestUser.displayName = payload.displayName.trim();
+    groupMembers = groupMembers.map((member) => member.id === requestUser.id ? { ...member, displayName: requestUser.displayName } : member);
+    io.emit('profile:changed', { userId: requestUser.id, displayName: requestUser.displayName, avatarUrl: requestUser.avatarUrl });
+    return json({ displayName: requestUser.displayName });
+  }
+  if (url.pathname === '/api/v1/users/me/avatar' && request.method === 'POST') {
+    const uploaded = await body();
+    if (!uploaded.includes(Buffer.from('GIF89a'))) return json({ error: 'Use a GIF image.' }, 415);
+    requestUser.avatarUrl = `/api/v1/users/${requestUser.id}/avatar/test.gif`;
+    groupMembers = groupMembers.map((member) => member.id === requestUser.id ? { ...member, avatarUrl: requestUser.avatarUrl } : member);
+    const profile = { userId: requestUser.id, displayName: requestUser.displayName, avatarUrl: requestUser.avatarUrl };
+    io.emit('profile:changed', profile);
+    return json({ profile });
+  }
+  if (url.pathname === '/api/v1/users/me/avatar' && request.method === 'DELETE') {
+    requestUser.avatarUrl = null;
+    groupMembers = groupMembers.map((member) => member.id === requestUser.id ? { ...member, avatarUrl: null } : member);
+    const profile = { userId: requestUser.id, displayName: requestUser.displayName, avatarUrl: null };
+    io.emit('profile:changed', profile);
+    return json({ profile });
+  }
+  const avatarOwner = [user, peer].find((candidate) => url.pathname === `/api/v1/users/${candidate.id}/avatar/test.gif` && candidate.avatarUrl);
+  if (avatarOwner) {
+    response.writeHead(200, { 'content-type': 'image/gif', 'x-content-type-options': 'nosniff' });
+    response.end(animatedGif);
+    return;
+  }
   if (url.pathname === '/api/v1/auth/me') return json({ user: requestUser });
   if (url.pathname === '/api/v1/auth/session') return json({ authenticated: true, user: requestUser });
   if (url.pathname === '/api/v1/auth/sessions' && request.method === 'GET') {

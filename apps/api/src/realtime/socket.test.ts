@@ -1658,3 +1658,38 @@ test('a removed member cannot receive an in-flight presence snapshot and databas
   harness.database.failPresenceReads = true;
   assert.deepEqual(await socketAck(socket, 'presence:snapshot', { conversationId }), { ok: false });
 });
+
+test('profile changes reach current conversation peers but not outsiders or removed members', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const firstId = '10000000-0000-4000-8000-000000000001';
+  const secondId = '10000000-0000-4000-8000-000000000002';
+  const outsiderId = '10000000-0000-4000-8000-000000000003';
+  harness.repository.add('profile-first', firstId);
+  harness.repository.add('profile-second', secondId);
+  harness.repository.add('profile-outsider', outsiderId);
+  harness.database.conversationMemberships.set(conversationId, new Set([firstId, secondId]));
+  const first = await connectClient(harness, 'profile-first', [conversationId]);
+  const second = await connectClient(harness, 'profile-second', [conversationId]);
+  const outsider = await connectClient(harness, 'profile-outsider');
+  context.after(() => { first.close(); second.close(); outsider.close(); });
+  const outsiderEvents: unknown[] = [];
+  outsider.on('profile:changed', (event) => outsiderEvents.push(event));
+  const updated = waitForEvent(second, 'profile:changed');
+  const event = { userId: firstId, displayName: 'Updated', avatarUrl: null };
+  harness.events.emitProfileChanged(event);
+  assert.deepEqual(await updated, event);
+  assert.deepEqual(outsiderEvents, []);
+
+  const removed = waitForEvent(second, 'conversation:removed');
+  harness.database.conversationMemberships.get(conversationId)!.delete(secondId);
+  harness.events.emitConversationRemoved({ conversationId, removedUserIds: [secondId], remainingUserIds: [firstId] });
+  await removed;
+  const removedEvents: unknown[] = [];
+  second.on('profile:changed', (event) => removedEvents.push(event));
+  const ownUpdate = waitForEvent(first, 'profile:changed');
+  harness.events.emitProfileChanged({ userId: firstId, displayName: 'Again', avatarUrl: null });
+  assert.equal((await ownUpdate as { displayName: string }).displayName, 'Again');
+  assert.deepEqual(removedEvents, []);
+  assert.deepEqual(outsiderEvents, []);
+});

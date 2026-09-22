@@ -40,3 +40,25 @@ test('group avatar reads re-sniff bytes and reject mismatches, symlinks, and non
   await mkdir(join(store.groupAvatarRoot, directoryKey));
   await assert.rejects(() => store.readGroupAvatar(directoryKey), /Unsafe group avatar/);
 });
+
+test('user avatars preserve GIF bytes and reject tampered or unsafe media', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'cubic-user-avatar-test-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const store = new LocalMediaStore(root);
+  const gif = Buffer.from('47494638396101000100800000000000ffffff21f90400000000002c000000000100010000020244010021f90400000000002c00000000010001000002024c01003b', 'hex');
+  const saved = await store.saveUserAvatar(gif);
+  assert.equal(saved.contentType, 'image/gif');
+  assert.ok(saved.key.endsWith('.gif'));
+  assert.deepEqual((await store.readUserAvatar(saved.key)).buffer, gif);
+  assert.equal(mediaInternals.detectUserImage(Buffer.from('<svg></svg>')), null);
+  await assert.rejects(() => store.saveUserAvatar(Buffer.from('<script>bad</script>')), /Unsupported image/);
+  await assert.rejects(() => store.saveUserAvatar(Buffer.alloc(2 * 1024 * 1024 + 1)), /too large/);
+  const mismatch = '123e4567-e89b-42d3-a456-426614174001.gif';
+  await writeFile(join(store.userAvatarRoot, mismatch), Buffer.from('<html>not image</html>'));
+  await assert.rejects(() => store.readUserAvatar(mismatch), /type mismatch/);
+  const link = '123e4567-e89b-42d3-a456-426614174002.gif';
+  await symlink(join(store.userAvatarRoot, saved.key), join(store.userAvatarRoot, link));
+  await assert.rejects(() => store.readUserAvatar(link));
+  await store.deleteUserAvatar(saved.key);
+  await assert.rejects(() => store.readUserAvatar(saved.key));
+});
