@@ -19,10 +19,12 @@ import {
 } from './calls.js';
 import type { RealtimeEvents } from './events.js';
 import { browserOriginMatches, canonicalBrowserOrigin } from '../security/browser-request.js';
+import { PresenceRegistry, type PresenceStatus } from './presence.js';
 
 const joinSchema = z.object({ conversationId: z.string().uuid() });
 const callStartSchema = z.object({ conversationId: z.string().uuid() });
 const callIdSchema = z.object({ callId: z.string().uuid() });
+const presenceActivitySchema = z.object({ state: z.enum(['active', 'idle']) }).strict();
 
 const RING_TIMEOUT_MS = 45_000;
 const MAX_PENDING_ADMISSIONS_PER_SOCKET = 8;
@@ -331,6 +333,56 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
   const calls = new DirectCallCoordinator();
   const ringTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const registry = new SessionSocketRegistry();
+  type PresenceFanout = {
+    version: number;
+    status: PresenceStatus;
+    activeRead: { removedConversations: Set<string> } | null;
+  };
+  const presenceFanouts = new Map<string, PresenceFanout>();
+  const presence = new PresenceRegistry((userId, status) => {
+    let fanout = presenceFanouts.get(userId);
+    if (fanout) {
+      fanout.version += 1;
+      fanout.status = status;
+      return;
+    }
+    fanout = { version: 1, status, activeRead: null };
+    presenceFanouts.set(userId, fanout);
+    const ownedFanout = fanout;
+    void (async () => {
+      try {
+        while (true) {
+          const version = ownedFanout.version;
+          const currentStatus = ownedFanout.status;
+          const read = { removedConversations: new Set<string>() };
+          ownedFanout.activeRead = read;
+          try {
+            const memberships = await options.database.pool.query<{ conversation_id: string }>(
+              'select conversation_id from conversation_members where user_id = $1',
+              [userId]
+            );
+            if (version === ownedFanout.version && presence.status(userId) === currentStatus) {
+              for (const { conversation_id: conversationId } of memberships.rows) {
+                if (!read.removedConversations.has(conversationId)) {
+                  io.to(conversationRoom(conversationId)).emit('presence:changed', {
+                    userId,
+                    status: currentStatus
+                  });
+                }
+              }
+            }
+          } catch {
+            // Database uncertainty cannot authorize presence disclosure.
+          } finally {
+            ownedFanout.activeRead = null;
+          }
+          if (version === ownedFanout.version) break;
+        }
+      } finally {
+        if (presenceFanouts.get(userId) === ownedFanout) presenceFanouts.delete(userId);
+      }
+    })();
+  });
   // Track only in-flight admissions. A removal permanently invalidates work
   // started before it; a later admission reads current membership from the DB.
   type Admission = {
@@ -534,6 +586,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     socket.once('disconnect', () => {
       retireSocketAdmissions(socket.id);
       retireSocketCallStarts(socket.id);
+      presence.unregister(socket.id);
     });
 
     try {
@@ -569,6 +622,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     });
 
     socket.join(userRoom(identity.userId));
+    presence.register(identity.userId, socket.id);
 
     const initialAdmission = beginAdmission(socket, identity.userId);
     if (!initialAdmission) {
@@ -644,6 +698,40 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
         }
       }
     );
+
+    socket.on('presence:set', (payload: unknown, acknowledge?: (result: { ok: boolean }) => void) => {
+      const parsed = presenceActivitySchema.safeParse(payload);
+      acknowledge?.({ ok: parsed.success && presence.setActivity(socket.id, parsed.data.state) });
+    });
+
+    socket.on('presence:snapshot', async (
+      payload: unknown,
+      acknowledge?: (result: { ok: boolean; statuses?: Record<string, PresenceStatus> }) => void
+    ) => {
+      const parsed = joinSchema.safeParse(payload);
+      if (!parsed.success) return acknowledge?.({ ok: false });
+      const admission = beginAdmission(socket, identity.userId);
+      if (!admission) return acknowledge?.({ ok: false });
+      try {
+        const members = await options.database.pool.query<{ user_id: string }>(
+          'select user_id from conversation_members where conversation_id = $1',
+          [parsed.data.conversationId]
+        );
+        if (!members.rows.some((member) => member.user_id === identity.userId) ||
+            admission.invalidFor(parsed.data.conversationId)) {
+          if (socket.connected) acknowledge?.({ ok: false });
+          return;
+        }
+        const statuses = Object.fromEntries(
+          members.rows.map((member) => [member.user_id, presence.status(member.user_id)])
+        );
+        acknowledge?.({ ok: true, statuses });
+      } catch {
+        if (socket.connected) acknowledge?.({ ok: false });
+      } finally {
+        admission.finish();
+      }
+    });
 
     socket.on('call:sync', (_payload: unknown, acknowledge?: (result: CallAck) => void) => {
       const current = calls.getForUser(identity.userId);
@@ -902,6 +990,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
 
   const unsubscribeRemoved = options.events.onConversationRemoved((event) => {
     for (const userId of event.removedUserIds) {
+      presenceFanouts.get(userId)?.activeRead?.removedConversations.add(event.conversationId);
       for (const admission of [...(admissionsByUser.get(userId) ?? [])]) {
         if (admission.removedConversations.size >= MAX_REMOVALS_PER_ADMISSION &&
             !admission.removedConversations.has(event.conversationId)) {
@@ -980,6 +1069,8 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
       unsubscribeSessionRevoked();
       unsubscribeDirectBlocked();
       io.disconnectSockets(true);
+      presence.clear();
+      presenceFanouts.clear();
       await new Promise<void>((resolve) => io.close(() => resolve()));
     }
   };

@@ -260,6 +260,8 @@ class RealtimeDatabase {
   readonly blockedConversations = new Set<string>();
   autoJoinReadGate: ((rows: any[]) => Promise<void>) | null = null;
   membershipReadGate: ((rows: any[]) => Promise<void>) | null = null;
+  presenceSnapshotReadGate: ((rows: any[]) => Promise<void>) | null = null;
+  failPresenceReads = false;
   directCallReadGate: ((rows: any[]) => Promise<void>) | null = null;
   callPersistenceGate: (() => Promise<void>) | null = null;
   callCommitListener: ((id: string, status: string) => void) | null = null;
@@ -314,6 +316,20 @@ class RealtimeDatabase {
     },
     query: async (sql: string, params: any[] = []) => {
       const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (normalized === 'select conversation_id from conversation_members where user_id = $1') {
+        if (this.failPresenceReads) throw new Error('temporary database failure');
+        const rows = [...this.conversationMemberships]
+          .filter(([, members]) => members.has(params[0]))
+          .map(([id]) => ({ conversation_id: id }));
+        return { rows, rowCount: rows.length };
+      }
+      if (normalized === 'select user_id from conversation_members where conversation_id = $1') {
+        if (this.failPresenceReads) throw new Error('temporary database failure');
+        const rows = [...(this.conversationMemberships.get(params[0]) ?? [])]
+          .map((userId) => ({ user_id: userId }));
+        await this.presenceSnapshotReadGate?.(rows);
+        return { rows, rowCount: rows.length };
+      }
       if (normalized.includes("c.kind in ('direct', 'group')")) {
         const pair = this.directPairs.get(params[0]);
         const member = this.conversationMemberships.get(params[0])?.has(params[1]);
@@ -444,6 +460,10 @@ function serverSocketIsInRoom(
   };
   return [...(registry.socketsBySession.get(sessionId)?.values() ?? [])]
     .some((socket) => socket.rooms.has(`conversation:${roomId}`));
+}
+
+function socketAck<T>(socket: ClientSocket, event: string, payload: unknown): Promise<T> {
+  return new Promise((resolve) => socket.emit(event, payload, resolve));
 }
 
 async function connectClient(
@@ -1521,4 +1541,120 @@ test('a second socket cannot signal a creator-owned call while its start is stil
   assert.equal(await terminalCommit, 'cancelled');
   assert.equal((await new Promise<any>((resolve) => other.emit('call:sync', {}, resolve))).call, null);
   assert.equal(incoming.length, 0);
+});
+
+test('conversation presence is aggregated, scoped, and removed with membership', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const firstId = '10000000-0000-4000-8000-000000000001';
+  const secondId = '10000000-0000-4000-8000-000000000002';
+  const outsiderId = '10000000-0000-4000-8000-000000000003';
+  const firstSession = harness.repository.add('presence-first', firstId);
+  harness.repository.add('presence-second', secondId);
+  harness.repository.add('presence-outsider', outsiderId);
+  harness.database.conversationMemberships.set(conversationId, new Set([firstId, secondId]));
+
+  const first = await connectClient(harness, 'presence-first', [conversationId]);
+  const outsider = await connectClient(harness, 'presence-outsider');
+  context.after(() => { first.close(); outsider.close(); });
+  const outsiderEvents: unknown[] = [];
+  outsider.on('presence:changed', (event) => outsiderEvents.push(event));
+  const online = waitForEvent<{ userId: string; status: string }>(first, 'presence:changed');
+  const second = await connectClient(harness, 'presence-second', [conversationId]);
+  context.after(() => second.close());
+  assert.deepEqual(await online, { userId: secondId, status: 'online' });
+
+  const snapshot = await socketAck<{ ok: boolean; statuses: Record<string, string> }>(first, 'presence:snapshot', { conversationId });
+  assert.equal(snapshot.ok, true);
+  assert.deepEqual(snapshot.statuses, { [firstId]: 'online', [secondId]: 'online' });
+  assert.deepEqual(await socketAck(outsider, 'presence:snapshot', { conversationId }), { ok: false });
+  assert.deepEqual(await socketAck(second, 'presence:set', { state: 'invisible', userId: outsiderId }), { ok: false });
+
+  const idle = waitForEvent<{ userId: string; status: string }>(first, 'presence:changed');
+  assert.deepEqual(await socketAck(second, 'presence:set', { state: 'idle' }), { ok: true });
+  assert.deepEqual(await idle, { userId: secondId, status: 'idle' });
+  assert.equal(outsiderEvents.length, 0);
+
+  const active = waitForEvent<{ userId: string; status: string }>(first, 'presence:changed');
+  assert.deepEqual(await socketAck(second, 'presence:set', { state: 'active' }), { ok: true });
+  assert.deepEqual(await active, { userId: secondId, status: 'online' });
+
+  const removed = waitForEvent(second, 'conversation:removed');
+  harness.database.conversationMemberships.get(conversationId)!.delete(secondId);
+  harness.events.emitConversationRemoved({ conversationId, removedUserIds: [secondId], remainingUserIds: [firstId] });
+  await removed;
+  assert.equal(serverSocketIsInRoom(harness, firstSession.session.id, conversationId), true);
+  assert.deepEqual(await socketAck(second, 'presence:snapshot', { conversationId }), { ok: false });
+  assert.deepEqual(await socketAck(second, 'presence:set', { state: 'idle' }), { ok: true });
+  assert.equal(serverSocketIsInRoom(harness, firstSession.session.id, conversationId), true);
+  assert.equal(outsiderEvents.length, 0);
+
+  harness.database.conversationMemberships.get(conversationId)!.add(secondId);
+  const updated = waitForEvent(second, 'conversation:updated');
+  harness.events.emitConversationOpened({ conversationId, userIds: [secondId] });
+  await updated;
+  assert.equal((await socketAck<any>(second, 'presence:snapshot', { conversationId })).statuses[firstId], 'online');
+  const readdedPresence = waitForEvent<{ userId: string; status: string }>(first, 'presence:changed');
+  assert.deepEqual(await socketAck(second, 'presence:set', { state: 'active' }), { ok: true });
+  assert.deepEqual(await readdedPresence, { userId: secondId, status: 'online' });
+});
+
+test('another active device prevents idle until every device is idle, and revocation removes presence', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const userId = '10000000-0000-4000-8000-000000000001';
+  const observerId = '10000000-0000-4000-8000-000000000002';
+  const desktopSession = harness.repository.add('presence-desktop', userId);
+  const phoneSession = harness.repository.add('presence-phone', userId);
+  harness.repository.add('presence-observer', observerId);
+  harness.database.conversationMemberships.set(conversationId, new Set([userId, observerId]));
+  const observer = await connectClient(harness, 'presence-observer', [conversationId]);
+  const firstOnline = waitForEvent<{ userId: string; status: string }>(observer, 'presence:changed');
+  const desktop = await connectClient(harness, 'presence-desktop', [conversationId]);
+  assert.deepEqual(await firstOnline, { userId, status: 'online' });
+  const changes: string[] = [];
+  observer.on('presence:changed', (event: { userId: string; status: string }) => {
+    if (event.userId === userId) changes.push(event.status);
+  });
+  const phone = await connectClient(harness, 'presence-phone', [conversationId]);
+  context.after(() => { observer.close(); desktop.close(); phone.close(); });
+  await socketAck(observer, 'presence:snapshot', { conversationId });
+  assert.deepEqual(changes, []);
+  assert.deepEqual(await socketAck(desktop, 'presence:set', { state: 'idle' }), { ok: true });
+  assert.equal((await socketAck<any>(observer, 'presence:snapshot', { conversationId })).statuses[userId], 'online');
+  const idle = waitForEvent<{ status: string }>(observer, 'presence:changed');
+  assert.deepEqual(await socketAck(phone, 'presence:set', { state: 'idle' }), { ok: true });
+  assert.equal((await idle).status, 'idle');
+  const online = waitForEvent<{ status: string }>(observer, 'presence:changed');
+  assert.deepEqual(await socketAck(desktop, 'presence:set', { state: 'active' }), { ok: true });
+  assert.equal((await online).status, 'online');
+  const backToIdle = waitForEvent<{ status: string }>(observer, 'presence:changed');
+  harness.events.emitSessionRevoked({ sessionId: desktopSession.session.id });
+  assert.equal((await backToIdle).status, 'idle');
+  const offline = waitForEvent<{ status: string }>(observer, 'presence:changed');
+  harness.events.emitSessionRevoked({ sessionId: phoneSession.session.id });
+  assert.equal((await offline).status, 'offline');
+  assert.deepEqual(changes, ['idle', 'online', 'idle', 'offline']);
+});
+
+test('a removed member cannot receive an in-flight presence snapshot and database uncertainty denies snapshots', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const userId = '10000000-0000-4000-8000-000000000001';
+  const peerId = '10000000-0000-4000-8000-000000000002';
+  harness.repository.add('snapshot-user', userId);
+  harness.database.conversationMemberships.set(conversationId, new Set([userId, peerId]));
+  const socket = await connectClient(harness, 'snapshot-user', [conversationId]);
+  context.after(() => socket.close());
+  const barrier = readBarrier();
+  harness.database.presenceSnapshotReadGate = barrier.gate;
+  const pending = socketAck<{ ok: boolean }>(socket, 'presence:snapshot', { conversationId });
+  await barrier.entered;
+  harness.database.conversationMemberships.get(conversationId)!.delete(userId);
+  harness.events.emitConversationRemoved({ conversationId, removedUserIds: [userId], remainingUserIds: [peerId] });
+  barrier.release();
+  assert.deepEqual(await pending, { ok: false });
+  harness.database.presenceSnapshotReadGate = null;
+  harness.database.failPresenceReads = true;
+  assert.deepEqual(await socketAck(socket, 'presence:snapshot', { conversationId }), { ok: false });
 });
