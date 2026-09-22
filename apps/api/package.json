@@ -24,7 +24,7 @@
     "fastify": "5.12.4",
     "zod": "^4.4.3",
     "socket.io": "^4.8.1",
-    "@fastify/multipart": "^9.2.1",
+    "@fastify/multipart": "^10.1.1",
     "livekit-server-sdk": "^2.19.0"
   },
   "devDependencies": {
