@@ -14,16 +14,21 @@
     title,
     members,
     statuses,
-    onclose
+    onclose,
+    onmemberclick
   }: {
     title: string;
     members: Member[];
     statuses: Record<string, PresenceStatus>;
     onclose: () => void;
+    onmemberclick: (member: Member) => void;
   } = $props();
 
   const statusOrder: Record<PresenceStatus, number> = { online: 0, idle: 1, offline: 2 };
   const roleOrder = { owner: 0, admin: 1, member: 2 };
+  function hideFailedAvatar(event: Event) {
+    if (event.currentTarget instanceof HTMLImageElement) event.currentTarget.hidden = true;
+  }
   const orderedMembers = $derived([...members].sort((left, right) => {
     const statusDifference = statusOrder[statuses[left.id] ?? 'offline'] - statusOrder[statuses[right.id] ?? 'offline'];
     if (statusDifference) return statusDifference;
@@ -45,16 +50,17 @@
     <p class="cubic-member-panel-count">Members — {members.length}</p>
     {#each orderedMembers as member (member.id)}
       {@const status = statuses[member.id] ?? 'offline'}
-      <div class="cubic-member-panel-row" aria-label={`${member.displayName}, ${member.role ? `${member.role}, ` : ''}${status}`}>
+      <button type="button" class="cubic-member-panel-row" aria-label={`${member.displayName}, ${member.role ? `${member.role}, ` : ''}${status}`} onclick={() => onmemberclick(member)}>
         <span class="cubic-member-panel-avatar">
-          {#if member.avatarUrl}<img src={member.avatarUrl} alt="" />{:else}{member.displayName.slice(0, 1).toUpperCase()}{/if}
+          {member.displayName.slice(0, 1).toUpperCase()}
+          {#if member.avatarUrl}{#key member.avatarUrl}<img src={member.avatarUrl} alt="" onerror={hideFailedAvatar} />{/key}{/if}
           <span class:cubic-online={status === 'online'} class:cubic-idle={status === 'idle'} class="cubic-member-panel-dot" aria-hidden="true"></span>
         </span>
         <span class="cubic-member-panel-copy">
           <strong>{member.displayName}</strong>
           <small>@{member.username}{member.role ? ` · ${member.role}` : ''} · {status}</small>
         </span>
-      </div>
+      </button>
     {/each}
   </div>
 </aside>
@@ -68,10 +74,10 @@
   .cubic-member-panel-head button:hover { background: #2b2d31; }
   .cubic-member-panel-list { overflow-y: auto; min-height: 0; padding: 12px 8px; }
   .cubic-member-panel-count { margin: 0 7px 8px; color: #949ba4; font-size: .68rem; font-weight: 700; text-transform: uppercase; }
-  .cubic-member-panel-row { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 5px 7px; border-radius: 5px; }
+  .cubic-member-panel-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 5px 7px; border: 0; border-radius: 5px; background: transparent; text-align: left; cursor: pointer; }
   .cubic-member-panel-row:hover { background: #1e1f22; }
   .cubic-member-panel-avatar { position: relative; display: grid; flex: 0 0 34px; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: #34363d; color: #f2f3f5; font-size: .8rem; font-weight: 700; }
-  .cubic-member-panel-avatar img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+  .cubic-member-panel-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
   .cubic-member-panel-dot { position: absolute; right: -2px; bottom: -2px; width: 12px; height: 12px; border: 3px solid #111214; border-radius: 50%; background: #73767d; }
   .cubic-member-panel-dot.cubic-online { background: #23a55a; }
   .cubic-member-panel-dot.cubic-idle { background: #f0b232; }

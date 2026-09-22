@@ -73,6 +73,7 @@ export interface CreateAppOptions {
 
 export async function createApp(options: CreateAppOptions): Promise<FastifyInstance> {
   const realtimeEvents = options.realtimeEvents ?? createRealtimeEvents();
+  const mediaStore = new LocalMediaStore(options.mediaRoot ?? '/data/media', options.groupAvatarMaxBytes ?? 2 * 1024 * 1024);
   const app = Fastify({
     logger: options.logger ?? true,
     trustProxy: options.trustedProxyCidrs,
@@ -144,7 +145,10 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     prefix: '/api/v1/users',
     database: options.database,
     cookieName: options.cookieName,
-    sessionService: options.sessionService
+    sessionService: options.sessionService,
+    mediaStore,
+    avatarMaxBytes: options.groupAvatarMaxBytes ?? 2 * 1024 * 1024,
+    realtimeEvents
   });
 
   await app.register(socialRoutes, {
@@ -250,7 +254,6 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   app.addHook('onReady', async () => attachmentReconciliationScheduler.start());
   app.addHook('onClose', async () => attachmentReconciliationScheduler.stop());
 
-  const mediaStore = new LocalMediaStore(options.mediaRoot ?? '/data/media');
 
   await app.register(groupRoutes, {
     prefix: '/api/v1/groups',

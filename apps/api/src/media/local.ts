@@ -7,6 +7,7 @@ export type StoredImage = {
   key: string;
   contentType: 'image/png' | 'image/jpeg' | 'image/webp';
 };
+export type StoredUserImage = { key: string; contentType: StoredImage['contentType'] | 'image/gif' };
 
 function detectImage(buffer: Buffer): StoredImage['contentType'] | null {
   if (
@@ -25,6 +26,17 @@ function detectImage(buffer: Buffer): StoredImage['contentType'] | null {
     buffer.subarray(8, 12).toString('ascii') === 'WEBP'
   ) return 'image/webp';
 
+  return null;
+}
+
+function detectUserImage(buffer: Buffer): StoredUserImage['contentType'] | null {
+  const staticType = detectImage(buffer);
+  if (staticType) return staticType;
+  if (buffer.length >= 14 &&
+      (buffer.subarray(0, 6).toString('ascii') === 'GIF87a' || buffer.subarray(0, 6).toString('ascii') === 'GIF89a') &&
+      buffer.readUInt16LE(6) > 0 && buffer.readUInt16LE(8) > 0 && buffer[buffer.length - 1] === 0x3b) {
+    return 'image/gif';
+  }
   return null;
 }
 
@@ -55,10 +67,12 @@ function safeKey(key: string): string {
 export class LocalMediaStore {
   readonly root: string;
   readonly groupAvatarRoot: string;
+  readonly userAvatarRoot: string;
 
-  constructor(root: string) {
+  constructor(root: string, readonly userAvatarMaxBytes = 2 * 1024 * 1024) {
     this.root = root;
     this.groupAvatarRoot = join(root, 'group-avatars');
+    this.userAvatarRoot = join(root, 'user-avatars');
   }
 
   async saveGroupAvatar(buffer: Buffer): Promise<StoredImage> {
@@ -101,6 +115,49 @@ export class LocalMediaStore {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   }
+
+  async saveUserAvatar(buffer: Buffer): Promise<StoredUserImage> {
+    if (buffer.length > this.userAvatarMaxBytes) throw new Error('Avatar is too large.');
+    const contentType = detectUserImage(buffer);
+    if (!contentType) throw new Error('Unsupported image format.');
+    await mkdir(this.userAvatarRoot, { recursive: true });
+    const key = `${randomUUID()}.${contentType === 'image/gif' ? 'gif' : extensionFor(contentType)}`;
+    await writeFile(join(this.userAvatarRoot, key), buffer, { flag: 'wx', mode: 0o640 });
+    return { key, contentType };
+  }
+
+  async readUserAvatar(key: string): Promise<{ buffer: Buffer; contentType: StoredUserImage['contentType'] }> {
+    const normalized = safeUserKey(key);
+    const expected = normalized.endsWith('.gif') ? 'image/gif' : contentTypeForKey(normalized);
+    const handle = await open(join(this.userAvatarRoot, normalized), constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const metadata = await handle.stat();
+      if (!metadata.isFile() || metadata.size > this.userAvatarMaxBytes) throw new Error('Unsafe user avatar entry.');
+      const buffer = await handle.readFile();
+      const detected = detectUserImage(buffer);
+      if (!detected || detected !== expected) throw new Error('User avatar type mismatch.');
+      return { buffer, contentType: detected };
+    } finally {
+      await handle.close().catch(() => {});
+    }
+  }
+
+  async deleteUserAvatar(key: string | null | undefined): Promise<void> {
+    if (!key) return;
+    const normalized = safeUserKey(key);
+    try {
+      await unlink(join(this.userAvatarRoot, normalized));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
 }
 
-export const mediaInternals = { detectImage, safeKey };
+function safeUserKey(key: string): string {
+  if (basename(key) !== key || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(png|jpg|webp|gif)$/iu.test(key)) {
+    throw new Error('Invalid user avatar key.');
+  }
+  return key;
+}
+
+export const mediaInternals = { detectImage, detectUserImage, safeKey, safeUserKey };

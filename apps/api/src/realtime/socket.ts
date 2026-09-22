@@ -17,7 +17,7 @@ import {
   type DirectCallSession,
   type TerminalDirectCallState
 } from './calls.js';
-import type { RealtimeEvents } from './events.js';
+import type { RealtimeEvents, ProfileChangedEvent } from './events.js';
 import { browserOriginMatches, canonicalBrowserOrigin } from '../security/browser-request.js';
 import { PresenceRegistry, type PresenceStatus } from './presence.js';
 
@@ -339,6 +339,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     activeRead: { removedConversations: Set<string> } | null;
   };
   const presenceFanouts = new Map<string, PresenceFanout>();
+  const profileFanouts = new Map<string, { version: number; event: ProfileChangedEvent }>();
   const presence = new PresenceRegistry((userId, status) => {
     let fanout = presenceFanouts.get(userId);
     if (fanout) {
@@ -1010,6 +1011,43 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     }
   });
 
+  const unsubscribeProfileChanged = options.events.onProfileChanged((event) => {
+    const existing = profileFanouts.get(event.userId);
+    if (existing) {
+      existing.version += 1;
+      existing.event = event;
+      return;
+    }
+    const fanout = { version: 1, event };
+    profileFanouts.set(event.userId, fanout);
+    void (async () => {
+      try {
+        while (true) {
+          const version = fanout.version;
+          const latest = fanout.event;
+          let rooms: string[] = [];
+          try {
+            const memberships = await options.database.pool.query<{ conversation_id: string }>(
+              'select conversation_id from conversation_members where user_id = $1', [event.userId]
+            );
+            rooms = memberships.rows.map((row) => row.conversation_id);
+          } catch {
+            // Database uncertainty cannot authorize sharing profile updates.
+          }
+          if (version === fanout.version) {
+            io.to([
+              userRoom(event.userId),
+              ...rooms.map((roomId) => conversationRoom(roomId))
+            ]).emit('profile:changed', latest);
+            break;
+          }
+        }
+      } finally {
+        if (profileFanouts.get(event.userId) === fanout) profileFanouts.delete(event.userId);
+      }
+    })();
+  });
+
   const unsubscribeInvites = options.events.onGroupInvitesChanged((event) => {
     for (const userId of event.userIds) {
       io.to(userRoom(userId)).emit('group:invites:updated');
@@ -1067,10 +1105,12 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
       unsubscribeRemoved();
       unsubscribeInvites();
       unsubscribeSessionRevoked();
+      unsubscribeProfileChanged();
       unsubscribeDirectBlocked();
       io.disconnectSockets(true);
       presence.clear();
       presenceFanouts.clear();
+      profileFanouts.clear();
       await new Promise<void>((resolve) => io.close(() => resolve()));
     }
   };

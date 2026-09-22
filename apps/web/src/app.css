@@ -4322,3 +4322,17 @@ body { background: var(--cubic-onyx-0); }
     padding-right: 240px;
   }
 }
+
+.cubic-profile-opener { width: 100%; border-right: 0; border-bottom: 0; border-left: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.cubic-user-avatar-shell { position: relative; overflow: hidden; }
+.cubic-user-avatar-shell img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+.cubic-profile-header-opener { flex: 0 0 auto; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.cubic-profile-author { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.cubic-profile-author:hover strong { text-decoration: underline; }
+.cubic-profile-person { min-width: 0; flex: 1; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.cubic-profile-person:hover strong { text-decoration: underline; }
+.cubic-profile-mobile { display: none; }
+@media (max-width: 680px) {
+  .messenger-nav .cubic-profile-mobile { position: relative; display: grid; place-items: center; flex: 0 0 32px; width: 32px; height: 32px; padding: 0; overflow: hidden; border: 1px solid #454852; border-radius: 50%; background: #34363d; color: #fff; cursor: pointer; }
+  .cubic-profile-mobile img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+}

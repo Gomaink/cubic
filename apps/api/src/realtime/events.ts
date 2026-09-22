@@ -93,6 +93,12 @@ export interface SessionRevokedEvent {
   sessionId: string;
 }
 
+export interface ProfileChangedEvent {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
 export interface DirectBlockedEvent {
   conversationId: string;
   blockerId: string;
@@ -114,6 +120,7 @@ type ConversationChangedListener = (event: ConversationChangedEvent) => void;
 type ConversationRemovedListener = (event: ConversationRemovedEvent) => void;
 type GroupInvitesChangedListener = (event: GroupInvitesChangedEvent) => void;
 type SessionRevokedListener = (event: SessionRevokedEvent) => void;
+type ProfileChangedListener = (event: ProfileChangedEvent) => void;
 type DirectBlockedListener = (event: DirectBlockedEvent) => void;
 type CallAuthorizationEndedListener = (event: CallAuthorizationEndedEvent) => void;
 
@@ -127,6 +134,7 @@ export interface RealtimeEvents {
   emitConversationRemoved(event: ConversationRemovedEvent): void;
   emitGroupInvitesChanged(event: GroupInvitesChangedEvent): void;
   emitSessionRevoked(event: SessionRevokedEvent): void;
+  emitProfileChanged(event: ProfileChangedEvent): void;
   emitDirectBlocked(event: DirectBlockedEvent): void;
   emitCallAuthorizationEnded(event: CallAuthorizationEndedEvent): void;
   onMessageCreated(listener: MessageCreatedListener): () => void;
@@ -138,6 +146,7 @@ export interface RealtimeEvents {
   onConversationRemoved(listener: ConversationRemovedListener): () => void;
   onGroupInvitesChanged(listener: GroupInvitesChangedListener): () => void;
   onSessionRevoked(listener: SessionRevokedListener): () => void;
+  onProfileChanged(listener: ProfileChangedListener): () => void;
   onDirectBlocked(listener: DirectBlockedListener): () => void;
   onCallAuthorizationEnded(listener: CallAuthorizationEndedListener): () => void;
 }
@@ -152,6 +161,7 @@ export function createRealtimeEvents(): RealtimeEvents {
   const conversationRemovedListeners = new Set<ConversationRemovedListener>();
   const groupInvitesChangedListeners = new Set<GroupInvitesChangedListener>();
   const sessionRevokedListeners = new Set<SessionRevokedListener>();
+  const profileChangedListeners = new Set<ProfileChangedListener>();
   const directBlockedListeners = new Set<DirectBlockedListener>();
   const callAuthorizationEndedListeners = new Set<CallAuthorizationEndedListener>();
 
@@ -182,6 +192,9 @@ export function createRealtimeEvents(): RealtimeEvents {
     },
     emitSessionRevoked(event) {
       for (const listener of sessionRevokedListeners) listener(event);
+    },
+    emitProfileChanged(event) {
+      for (const listener of profileChangedListeners) listener(event);
     },
     emitDirectBlocked(event) {
       for (const listener of directBlockedListeners) listener(event);
@@ -224,6 +237,10 @@ export function createRealtimeEvents(): RealtimeEvents {
     onSessionRevoked(listener) {
       sessionRevokedListeners.add(listener);
       return () => sessionRevokedListeners.delete(listener);
+    },
+    onProfileChanged(listener) {
+      profileChangedListeners.add(listener);
+      return () => profileChangedListeners.delete(listener);
     },
     onDirectBlocked(listener) {
       directBlockedListeners.add(listener);

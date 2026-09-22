@@ -10,8 +10,13 @@
   import MessageActions from '$lib/ui/MessageActions.svelte';
   import SessionSettings from '$lib/ui/SessionSettings.svelte';
   import MemberPanel from '$lib/ui/MemberPanel.svelte';
+  import ProfileCard from '$lib/ui/ProfileCard.svelte';
 
   let { data } = $props();
+  let updatedCurrentUser = $state<typeof data.user | null>(null);
+  let currentUser = $derived(updatedCurrentUser ?? data.user);
+  type ProfileIdentity = { id: string; username: string; displayName: string; avatarUrl: string | null };
+  let selectedProfile = $state<ProfileIdentity | null>(null);
   let loggingOut = $state(false);
   let sessionSettingsOpen = $state(false);
   let tab = $state<'chats' | 'people'>('chats');
@@ -271,6 +276,50 @@
     return activeConversation?.peer ? [activeConversation.peer] : [];
   }
 
+  function openProfile(user: ProfileIdentity) {
+    selectedProfile = user.id === currentUser.id
+      ? { id: currentUser.id, username: currentUser.username, displayName: currentUser.displayName, avatarUrl: currentUser.avatarUrl }
+      : { id: user.id, username: user.username, displayName: user.displayName, avatarUrl: user.avatarUrl };
+  }
+
+  function hideFailedUserAvatar(event: Event) {
+    if (event.currentTarget instanceof HTMLImageElement) event.currentTarget.hidden = true;
+  }
+
+  function applyProfileChanged(profile: { userId: string; displayName: string; avatarUrl: string | null }) {
+    const update = (user: any) => user?.id === profile.userId
+      ? { ...user, displayName: profile.displayName, avatarUrl: profile.avatarUrl }
+      : user;
+    updatedCurrentUser = update(currentUser);
+    selectedProfile = update(selectedProfile);
+    friends = friends.map(update);
+    searchResults = searchResults.map(update);
+    requests = requests.map((request) => ({ ...request, user: update(request.user) }));
+    conversations = conversations.map((conversation) => ({ ...conversation, peer: update(conversation.peer) }));
+    if (activeConversation) activeConversation = { ...activeConversation, peer: update(activeConversation.peer) };
+    if (groupDetails?.members) groupDetails = { ...groupDetails, members: groupDetails.members.map(update) };
+    chatMessages = chatMessages.map((message) => message.senderId === profile.userId
+      ? { ...message, senderDisplayName: profile.displayName, senderAvatarUrl: profile.avatarUrl }
+      : message);
+  }
+
+  async function saveOwnProfile(displayName: string) {
+    const result = await api('/api/v1/users/me/profile', { method: 'PATCH', body: JSON.stringify({ displayName }) });
+    applyProfileChanged({ userId: currentUser.id, displayName: result.displayName, avatarUrl: currentUser.avatarUrl });
+  }
+
+  async function uploadOwnAvatar(file: File) {
+    const body = new FormData();
+    body.append('avatar', file, file.name);
+    const result = await api('/api/v1/users/me/avatar', { method: 'POST', body });
+    applyProfileChanged(result.profile);
+  }
+
+  async function removeOwnAvatar() {
+    const result = await api('/api/v1/users/me/avatar', { method: 'DELETE' });
+    applyProfileChanged(result.profile);
+  }
+
   function requestPresenceSnapshot(socket: Socket) {
     const conversationId = activeConversation?.id;
     if (!conversationId || !socket.connected) return;
@@ -302,7 +351,7 @@
 
 
   function messageSenderName(message: any): string {
-    if (message.senderId === data.user.id) return data.user.displayName;
+    if (message.senderId === currentUser.id) return currentUser.displayName;
     return message.senderDisplayName ?? message.senderUsername ?? 'Member';
   }
 
@@ -2943,6 +2992,12 @@
         memberPresence = { ...memberPresence, [event.userId]: event.status };
       }
     });
+    socket.on('profile:changed', (event: { userId?: string; displayName?: string; avatarUrl?: string | null }) => {
+      if (event?.userId && typeof event.displayName === 'string' &&
+          (typeof event.avatarUrl === 'string' || event.avatarUrl === null)) {
+        applyProfileChanged({ userId: event.userId, displayName: event.displayName, avatarUrl: event.avatarUrl });
+      }
+    });
     socket.on('conversation:removed', (event: any) => {
       if (voiceConversationId === event?.conversationId) void leaveVoice();
       if (activeConversation?.id === event?.conversationId) closeConversation();
@@ -3024,7 +3079,7 @@
   });
 </script>
 
-<svelte:head><title>Cubic — {data.user.displayName}</title></svelte:head>
+<svelte:head><title>Cubic — {currentUser.displayName}</title></svelte:head>
 
 <main class="messenger-shell">
   <aside class="messenger-nav">
@@ -3036,8 +3091,15 @@
       <Icon name="users" size={20} />
       <span>People{(requests.filter((r) => r.direction === 'incoming').length + groupInvites.length) ? ` · ${requests.filter((r) => r.direction === 'incoming').length + groupInvites.length}` : ''}</span>
     </button>
+    <button class="cubic-profile-mobile" type="button" aria-label="Open your profile" title="Your profile" onclick={() => openProfile(currentUser)}>
+      {currentUser.displayName.slice(0, 1).toUpperCase()}
+      {#if currentUser.avatarUrl}{#key currentUser.avatarUrl}<img src={currentUser.avatarUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}
+    </button>
     <div class="messenger-nav-spacer"></div>
-    <div class="mini-profile"><span>{data.user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{data.user.displayName}</strong><small>@{data.user.username}</small></div></div>
+    <button class="mini-profile cubic-profile-opener" type="button" aria-label="Open your profile" onclick={() => openProfile(currentUser)}>
+      <span class="cubic-user-avatar-shell">{currentUser.displayName.slice(0, 1).toUpperCase()}{#if currentUser.avatarUrl}{#key currentUser.avatarUrl}<img src={currentUser.avatarUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span>
+      <div><strong>{currentUser.displayName}</strong><small>@{currentUser.username}</small></div>
+    </button>
     <button class="cubic-session-settings-trigger" title="Active sessions" aria-label="Active sessions" onclick={() => sessionSettingsOpen = true}>
       <Icon name="settings" size={20} /><span>Sessions</span>
     </button>
@@ -3061,6 +3123,8 @@
         <button class="conversation-row" class:active={activeConversation?.id === conversation.id} onclick={() => selectConversation(conversation)}>
           {#if conversation.kind === 'group' && conversation.avatarUrl}
             <img class="avatar group-avatar avatar-image" src={conversation.avatarUrl} alt="" />
+          {:else if conversation.kind === 'direct' && conversation.peer?.avatarUrl}
+            <span class="avatar cubic-user-avatar-shell">{conversationLetter(conversation)}{#key conversation.peer.avatarUrl}<img src={conversation.peer.avatarUrl} alt="" onerror={hideFailedUserAvatar} />{/key}</span>
           {:else}
             <span class="avatar" class:group-avatar={conversation.kind === 'group'}>{conversationLetter(conversation)}</span>
           {/if}
@@ -3085,15 +3149,15 @@
       {/each}
       {#if requests.length}<h2 class="section-label">Friend requests</h2>{/if}
       {#each requests as request}
-        <div class="person-row"><span class="avatar">{request.user.displayName.slice(0,1).toUpperCase()}</span><div><strong>{request.user.displayName}</strong><small>@{request.user.username} · {request.direction}</small></div><div class="row-actions">{#if request.direction === 'incoming'}<button onclick={() => acceptRequest(request.id)}>Accept</button>{/if}<button class="quiet" onclick={() => dismissRequest(request.id)}>{request.direction === 'incoming' ? 'Decline' : 'Cancel'}</button></div></div>
+        <div class="person-row"><span class="avatar cubic-user-avatar-shell">{request.user.displayName.slice(0,1).toUpperCase()}{#if request.user.avatarUrl}{#key request.user.avatarUrl}<img src={request.user.avatarUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span><button class="cubic-profile-person" type="button" onclick={() => openProfile(request.user)}><strong>{request.user.displayName}</strong><small>@{request.user.username} · {request.direction}</small></button><div class="row-actions">{#if request.direction === 'incoming'}<button onclick={() => acceptRequest(request.id)}>Accept</button>{/if}<button class="quiet" onclick={() => dismissRequest(request.id)}>{request.direction === 'incoming' ? 'Decline' : 'Cancel'}</button></div></div>
       {/each}
       {#if friends.length}<h2 class="section-label">Friends</h2>{/if}
       {#each friends as friend}
-        <div class="person-row"><span class="avatar">{friend.displayName.slice(0,1).toUpperCase()}</span><div><strong>{friend.displayName}</strong><small>@{friend.username}</small></div><div class="row-actions"><button onclick={() => openDirect(friend.id)} disabled={busy}>Message</button></div></div>
+        <div class="person-row"><span class="avatar cubic-user-avatar-shell">{friend.displayName.slice(0,1).toUpperCase()}{#if friend.avatarUrl}{#key friend.avatarUrl}<img src={friend.avatarUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span><button class="cubic-profile-person" type="button" onclick={() => openProfile(friend)}><strong>{friend.displayName}</strong><small>@{friend.username}</small></button><div class="row-actions"><button onclick={() => openDirect(friend.id)} disabled={busy}>Message</button></div></div>
       {/each}
       {#if searchResults.length}<h2 class="section-label">Search</h2>{/if}
       {#each searchResults as person}
-        <div class="person-row"><span class="avatar">{person.displayName.slice(0,1).toUpperCase()}</span><div><strong>{person.displayName}</strong><small>@{person.username}</small></div><div class="row-actions"><button onclick={() => addFriend(person.id)}>Add</button></div></div>
+        <div class="person-row"><span class="avatar cubic-user-avatar-shell">{person.displayName.slice(0,1).toUpperCase()}{#if person.avatarUrl}{#key person.avatarUrl}<img src={person.avatarUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span><button class="cubic-profile-person" type="button" onclick={() => openProfile(person)}><strong>{person.displayName}</strong><small>@{person.username}</small></button><div class="row-actions"><button onclick={() => addFriend(person.id)}>Add</button></div></div>
       {/each}
     {/if}
   </section>
@@ -3102,10 +3166,14 @@
     {#if activeConversation}
       <header class="chat-header">
         <button class="chat-back" type="button" aria-label="Back to conversations" title="Back" onclick={closeConversation}><Icon name="back" size={24} /></button>
-        {#if activeConversation.kind === 'group' && (activeConversation.avatarUrl ?? groupDetails?.avatarUrl)}
+        {#if activeConversation.kind === 'direct' && activeConversation.peer}
+          <button class="cubic-profile-header-opener" type="button" aria-label={`Open ${activeConversation.peer.displayName}'s profile`} onclick={() => openProfile(activeConversation.peer)}>
+            <span class="avatar cubic-user-avatar-shell">{conversationLetter(activeConversation)}{#if activeConversation.peer.avatarUrl}{#key activeConversation.peer.avatarUrl}<img src={activeConversation.peer.avatarUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span>
+          </button>
+        {:else if activeConversation.avatarUrl ?? groupDetails?.avatarUrl}
           <img class="avatar group-avatar avatar-image" src={activeConversation.avatarUrl ?? groupDetails?.avatarUrl} alt="" />
         {:else}
-          <span class="avatar" class:group-avatar={activeConversation.kind === 'group'}>{conversationLetter(activeConversation)}</span>
+          <span class="avatar group-avatar">{conversationLetter(activeConversation)}</span>
         {/if}
         <div class="chat-heading">
           <strong>{conversationName(activeConversation)}</strong>
@@ -3302,18 +3370,10 @@
           >
             <div class="discord-message-gutter">
               {#if !isMessageContinuation(index)}
-                {#if message.senderAvatarUrl}
-                  <img
-                    class="discord-message-avatar"
-                    src={message.senderAvatarUrl}
-                    alt=""
-                    loading="lazy"
-                  />
-                {:else}
-                  <span class="discord-message-avatar fallback">
-                    {messageSenderInitial(message)}
-                  </span>
-                {/if}
+                <span class="discord-message-avatar fallback cubic-user-avatar-shell">
+                  {messageSenderInitial(message)}
+                  {#if message.senderAvatarUrl}{#key message.senderAvatarUrl}<img src={message.senderAvatarUrl} alt="" loading="lazy" onerror={hideFailedUserAvatar} />{/key}{/if}
+                </span>
               {:else}
                 <time class="discord-message-hover-time" datetime={message.createdAt}>
                   {formatMessageTime(message.createdAt)}
@@ -3324,7 +3384,7 @@
             <div class="discord-message-content">
               {#if !isMessageContinuation(index)}
                 <header class="discord-message-header">
-                  <strong>{messageSenderName(message)}</strong>
+                  <button class="cubic-profile-author" type="button" aria-label={`Open ${messageSenderName(message)}'s profile`} onclick={() => openProfile({ id: message.senderId, username: message.senderUsername ?? '', displayName: messageSenderName(message), avatarUrl: message.senderAvatarUrl ?? null })}><strong>{messageSenderName(message)}</strong></button>
                   {#if message.senderId === data.user.id}
                     <span class="discord-you">you</span>
                   {/if}
@@ -3722,6 +3782,7 @@
           members={memberPanelMembers()}
           statuses={memberPresence}
           onclose={() => memberPanelOpen = false}
+          onmemberclick={openProfile}
         />
       {/if}
     {:else}
@@ -4279,3 +4340,13 @@
     </div>
   {/if}
 </main>
+{#if selectedProfile}
+  <ProfileCard
+    profile={selectedProfile}
+    own={selectedProfile.id === currentUser.id}
+    onclose={() => selectedProfile = null}
+    onsave={saveOwnProfile}
+    onupload={uploadOwnAvatar}
+    onremove={removeOwnAvatar}
+  />
+{/if}
