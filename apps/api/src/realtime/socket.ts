@@ -116,6 +116,7 @@ export interface AttachRealtimeOptions {
 export interface RealtimeServer {
   registry: SessionSocketRegistry;
   readonly pendingAdmissionCount: number;
+  revalidateSessions(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -492,24 +493,25 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
 
   const revalidateActiveSessions = (): Promise<void> => {
     if (activeRevalidation) return activeRevalidation;
-    activeRevalidation = (async () => {
-      try {
-        for (const sessionId of registry.sessionIds()) {
-          try {
-            const identity = await options.sessionService.validateId(sessionId, { activity: false });
-            if (!identity) {
-              options.events.emitSessionRevoked({ sessionId });
-              registry.disconnectSession(sessionId);
-            }
-          } catch {
-            // Database uncertainty is not proof of revocation. Retry on the next sweep.
+    const run = (async () => {
+      for (const sessionId of registry.sessionIds()) {
+        try {
+          const identity = await options.sessionService.validateId(sessionId, { activity: false });
+          if (!identity) {
+            options.events.emitSessionRevoked({ sessionId });
+            registry.disconnectSession(sessionId);
           }
+        } catch {
+          // Database uncertainty is not proof of revocation. Retry on the next sweep.
         }
-      } finally {
-        activeRevalidation = null;
       }
     })();
-    return activeRevalidation;
+    activeRevalidation = run;
+    const clear = () => {
+      if (activeRevalidation === run) activeRevalidation = null;
+    };
+    void run.then(clear, clear);
+    return run;
   };
 
   const revalidationTimer = setInterval(
@@ -1086,6 +1088,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
 
   return {
     registry,
+    revalidateSessions: revalidateActiveSessions,
     get pendingAdmissionCount() {
       let count = 0;
       for (const admissions of admissionsBySocket.values()) count += admissions.size;

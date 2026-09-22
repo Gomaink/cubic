@@ -129,6 +129,7 @@ class RealtimeSessionRepository implements SessionRepository {
   failValidation = false;
   failMutation = false;
   findByIdDelayMs = 0;
+  findByIdAttempts = 0;
   activeFindById = 0;
   maximumConcurrentFindById = 0;
 
@@ -160,6 +161,7 @@ class RealtimeSessionRepository implements SessionRepository {
   }
 
   async findById(sessionId: string): Promise<SessionRecord | null> {
+    this.findByIdAttempts += 1;
     if (this.failValidation) throw new Error('temporary database failure');
     this.activeFindById += 1;
     this.maximumConcurrentFindById = Math.max(
@@ -797,6 +799,55 @@ test('direct database revocation and later account disabling are found by shared
   assert.ok(revokedSessionIds.includes(second.session.id));
   assert.equal(harness.realtime.registry.socketCount, 0);
   unsubscribe();
+});
+
+test('a sweep with no sockets does not prevent later passive sessions from being revoked', async (context) => {
+  const harness = await startRealtimeHarness({ revalidateIntervalMs: 60_000 });
+  context.after(() => closeRealtimeHarness(harness));
+  const revokedUserId = '10000000-0000-4000-8000-000000000001';
+  const validUserId = '10000000-0000-4000-8000-000000000002';
+
+  assert.equal(harness.realtime.registry.socketCount, 0);
+  await harness.realtime.revalidateSessions();
+
+  const revokedSession = harness.repository.add('after-empty-sweep', revokedUserId);
+  harness.repository.add('valid-after-empty-sweep', validUserId);
+  const revoked = await connectClient(harness, 'after-empty-sweep', [conversationId]);
+  const valid = await connectClient(harness, 'valid-after-empty-sweep', [conversationId]);
+  const revokedEvents: string[] = [];
+  const unsubscribe = harness.events.onSessionRevoked((event) => revokedEvents.push(event.sessionId));
+  let revokedReceivedMessage = false;
+  revoked.on('message:created', () => { revokedReceivedMessage = true; });
+
+  const attemptsBeforeFailure = harness.repository.findByIdAttempts;
+  harness.repository.failValidation = true;
+  await harness.realtime.revalidateSessions();
+  assert.ok(harness.repository.findByIdAttempts > attemptsBeforeFailure);
+  assert.equal(revoked.connected, true);
+  assert.equal(valid.connected, true);
+  harness.repository.failValidation = false;
+
+  const disconnected = waitForEvent(revoked, 'disconnect');
+  harness.repository.records.delete(revokedSession.session.id);
+  await harness.realtime.revalidateSessions();
+  await disconnected;
+
+  assert.deepEqual(revokedEvents, [revokedSession.session.id]);
+  assert.equal(harness.realtime.registry.socketCount, 1);
+  assert.equal(valid.connected, true);
+
+  const message = {
+    id: randomUUID(), conversationId, senderId: validUserId,
+    clientMessageId: randomUUID(), body: 'still private',
+    createdAt: new Date().toISOString(), editedAt: null, deletedAt: null,
+    attachments: [], replyTo: null, reactions: []
+  };
+  const validDelivery = waitForEvent<any>(valid, 'message:created');
+  harness.events.emitMessageCreated({ conversationId, message });
+  assert.equal((await validDelivery).id, message.id);
+  assert.equal(revokedReceivedMessage, false);
+  unsubscribe();
+  valid.close();
 });
 
 test('an invalidated session cannot run another client-originated application event', async (context) => {
