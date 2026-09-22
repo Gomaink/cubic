@@ -3,6 +3,7 @@
   import { io, type Socket } from 'socket.io-client';
   import { recoverAfterServerDisconnect } from '$lib/realtime/server-disconnect.js';
   import { Room, RoomEvent, Track } from 'livekit-client';
+  import { mediaDeviceErrorMessage, microphoneCaptureOptions, screenShareFailure } from '$lib/media-ux';
   import Icon from '$lib/ui/Icon.svelte';
   import VideoTile from '$lib/ui/VideoTile.svelte';
   import ScreenShareTile from '$lib/ui/ScreenShareTile.svelte';
@@ -70,6 +71,7 @@
   let voiceParticipants = $state<VoiceParticipantView[]>([]);
   let voiceMuted = $state(false);
   let voiceError = $state('');
+  let voiceRetryConversation = $state<any | null>(null);
   let voiceAudioHost: HTMLDivElement | null = null;
 
   const MESSAGE_PAGE_SIZE = 50;
@@ -145,6 +147,7 @@
   let selectedAudioInput = $state('');
   let selectedVideoInput = $state('');
   let selectedAudioOutput = $state('');
+  let browserVoiceProcessing = $state(true);
   let audioOutputSupported = $state(false);
   let cameraQuality = $state<CameraQualityPreset>('balanced');
   let screenShareQuality = $state<ScreenShareQualityPreset>('text');
@@ -1727,6 +1730,7 @@
     selectedAudioInput = localStorage.getItem('cubic.audioInput') ?? '';
     selectedVideoInput = localStorage.getItem('cubic.videoInput') ?? '';
     selectedAudioOutput = localStorage.getItem('cubic.audioOutput') ?? '';
+    browserVoiceProcessing = localStorage.getItem('cubic.browserVoiceProcessing') !== 'false';
 
     const savedShareAudio = localStorage.getItem('cubic.screenShareRequestAudio');
     if (savedShareAudio === 'false') screenShareRequestAudio = false;
@@ -1740,6 +1744,12 @@
     if (typeof localStorage === 'undefined') return;
     if (value) localStorage.setItem(key, value);
     else localStorage.removeItem(key);
+  }
+
+  function setBrowserVoiceProcessing(enabled: boolean) {
+    browserVoiceProcessing = enabled;
+    saveMediaPreference('cubic.browserVoiceProcessing', String(enabled));
+    mediaSettingsNotice = 'This choice applies the next time your microphone starts or you rejoin.';
   }
 
   function deviceLabel(device: MediaDeviceInfo, index: number, fallback: string): string {
@@ -2019,10 +2029,13 @@
       mediaPreflightKind = null;
       syncVoiceParticipants();
     } catch (error) {
-      voiceError =
-        kind === 'camera'
-          ? mediaDeviceErrorMessage(error, 'camera')
-          : screenShareErrorMessage(error);
+      if (kind === 'camera') {
+        voiceError = mediaDeviceErrorMessage(error, 'camera');
+      } else {
+        const failure = screenShareFailure(error);
+        if (failure.cancelled) voiceMediaNotice = failure.message;
+        else voiceError = failure.message;
+      }
       syncVoiceParticipants();
     } finally {
       mediaPreflightBusy = false;
@@ -2196,10 +2209,12 @@
       if (selectedAudioInput && !audioInputDevices.some((device) => device.deviceId === selectedAudioInput)) {
         selectedAudioInput = '';
         saveMediaPreference('cubic.audioInput', '');
+        voiceMediaNotice = 'The selected microphone disconnected. Choose another in Voice & Video settings; the browser default will be tried next time the microphone starts.';
       }
       if (selectedVideoInput && !videoInputDevices.some((device) => device.deviceId === selectedVideoInput)) {
         selectedVideoInput = '';
         saveMediaPreference('cubic.videoInput', '');
+        voiceMediaNotice = 'The selected camera disconnected. Choose another in Voice & Video settings.';
       }
       if (
         selectedAudioOutput &&
@@ -2208,10 +2223,10 @@
       ) {
         selectedAudioOutput = '';
         saveMediaPreference('cubic.audioOutput', '');
+        voiceMediaNotice = 'The selected output device disconnected. Audio will use the browser default.';
       }
     } catch (error) {
-      mediaSettingsNotice =
-        error instanceof Error ? error.message : 'Could not list media devices.';
+      mediaSettingsNotice = 'Could not list media devices. Check browser permissions and try again.';
     }
   }
 
@@ -2259,8 +2274,9 @@
 
       await refreshMediaDevices();
     } catch (error) {
-      mediaSettingsNotice =
-        error instanceof Error ? error.message : 'Could not switch media device.';
+      mediaSettingsNotice = kind === 'audiooutput'
+        ? 'Could not switch audio output. The browser default remains available.'
+        : mediaDeviceErrorMessage(error, kind === 'videoinput' ? 'camera' : 'microphone');
     } finally {
       mediaSettingsBusy = false;
     }
@@ -2339,96 +2355,9 @@
 
 
 
-  function mediaDeviceErrorMessage(
-    error: unknown,
-    kind: 'microphone' | 'camera'
-  ): string {
-    const label = kind === 'camera' ? 'Camera' : 'Microphone';
-    const lowerLabel = kind === 'camera' ? 'camera' : 'microphone';
-
-    const errorName =
-      error && typeof error === 'object' && 'name' in error
-        ? String((error as { name?: unknown }).name ?? '')
-        : '';
-
-    const rawMessage =
-      error instanceof Error
-        ? error.message
-        : typeof error === 'string'
-          ? error
-          : '';
-
-    const normalizedMessage = rawMessage.toLowerCase();
-
-    if (
-      errorName === 'NotFoundError' ||
-      errorName === 'DevicesNotFoundError' ||
-      normalizedMessage.includes('object can not be found') ||
-      normalizedMessage.includes('requested device not found')
-    ) {
-      return `No ${lowerLabel} was found on this device.`;
-    }
-
-    if (
-      errorName === 'NotAllowedError' ||
-      errorName === 'PermissionDeniedError' ||
-      errorName === 'SecurityError' ||
-      normalizedMessage.includes('not allowed by the user agent') ||
-      normalizedMessage.includes('permission denied')
-    ) {
-      return `${label} access is blocked. Allow ${lowerLabel} access for cubic.goma.ink in your browser/site permissions and check the operating-system privacy settings.`;
-    }
-
-    if (
-      errorName === 'NotReadableError' ||
-      errorName === 'TrackStartError'
-    ) {
-      return `${label} is unavailable or already being used by another application.`;
-    }
-
-    if (errorName === 'OverconstrainedError') {
-      return `${label} is present, but the browser could not satisfy the requested capture settings.`;
-    }
-
-    if (errorName === 'AbortError') {
-      return `${label} capture was interrupted. Try again.`;
-    }
-
-    return rawMessage || `Could not access the ${lowerLabel}.`;
-  }
-
   function screenShareSupported(): boolean {
     return typeof navigator !== 'undefined' &&
       Boolean(navigator.mediaDevices && 'getDisplayMedia' in navigator.mediaDevices);
-  }
-
-  function screenShareErrorMessage(error: unknown): string {
-    const errorName =
-      error && typeof error === 'object' && 'name' in error
-        ? String((error as { name?: unknown }).name ?? '')
-        : '';
-    const rawMessage = error instanceof Error ? error.message : '';
-
-    if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
-      return 'Screen sharing was cancelled or blocked by the browser.';
-    }
-    if (errorName === 'InvalidStateError') {
-      return 'Click Share again from the active browser tab to start screen sharing.';
-    }
-    if (errorName === 'NotFoundError') {
-      return 'No shareable screen, window, or tab was found.';
-    }
-    if (errorName === 'NotReadableError') {
-      return 'The selected screen or window could not be captured by the operating system.';
-    }
-    if (errorName === 'TypeError') {
-      return 'Screen sharing is not available with this browser configuration.';
-    }
-    if (errorName === 'AbortError') {
-      return 'Screen sharing was cancelled.';
-    }
-
-    return rawMessage || 'Could not start screen sharing.';
   }
 
   function activeScreenShares(): VoiceParticipantView[] {
@@ -2528,6 +2457,17 @@
       });
   }
 
+  async function enableVoiceAudio() {
+    const room = voiceRoom;
+    if (!room) return;
+    try {
+      await room.startAudio();
+      if (voiceRoom === room) voiceMediaNotice = '';
+    } catch {
+      if (voiceRoom === room) voiceMediaNotice = 'Browser audio playback is still paused. Check browser sound permissions.';
+    }
+  }
+
   function attachVoiceAudio(track: any, publication: any, participant: any) {
     if (track.kind !== Track.Kind.Audio || !voiceAudioHost) return;
 
@@ -2578,6 +2518,7 @@
     voiceConversationId = null;
     voiceConversationTitle = '';
     voiceStatus = 'idle';
+    voiceRetryConversation = null;
     voiceParticipants = [];
     voiceMuted = false;
     voiceDeafened = false;
@@ -2627,6 +2568,7 @@
     }
 
     voiceStatus = 'connecting';
+    voiceRetryConversation = null;
     voiceConversationId = conversation.id;
     voiceConversationTitle = conversationName(conversation);
 
@@ -2679,9 +2621,22 @@
           syncVoiceParticipants();
         }
       });
+      room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
+        if (voiceRoom !== room) return;
+        if (!room.canPlaybackAudio) voiceMediaNotice = 'Browser audio playback is paused. Enable audio to hear this call.';
+        else if (voiceMediaNotice.startsWith('Browser audio playback is paused')) voiceMediaNotice = '';
+      });
+      room.on(RoomEvent.MediaDevicesError, () => {
+        if (voiceRoom === room) {
+          voiceError = 'A media device became unavailable. Check its connection and choose another in Voice & Video settings.';
+          syncVoiceParticipants();
+        }
+      });
       room.on(RoomEvent.Disconnected, () => {
         if (voiceRoom === room) {
           const disconnectedConversationId = voiceConversationId;
+          voiceRetryConversation = conversation;
+          voiceError = 'Voice connection ended. Check your network and try again.';
           voiceRoom = null;
           voiceConversationId = null;
           voiceConversationTitle = '';
@@ -2711,26 +2666,31 @@
         return;
       }
 
-      await room.startAudio().catch(() => {});
+      await room.startAudio().catch(() => {
+        if (voiceRoom === room) voiceMediaNotice = 'Browser audio playback is paused. Enable audio to hear this call.';
+      });
 
       let microphoneWarning = '';
       try {
         await room.localParticipant.setMicrophoneEnabled(
           true,
-          selectedAudioInput
-            ? { deviceId: { exact: selectedAudioInput } }
-            : undefined
+          microphoneCaptureOptions(browserVoiceProcessing, selectedAudioInput)
         );
       } catch (microphoneError) {
         microphoneWarning =
           `Joined muted — ${mediaDeviceErrorMessage(microphoneError, 'microphone')}`;
       }
 
+      if (voiceRoom !== room) return;
+
       voiceStatus = 'connected';
+      voiceRetryConversation = null;
       syncVoiceParticipants();
 
       if (selectedAudioOutput && audioOutputSupported) {
-        room.switchActiveDevice('audiooutput', selectedAudioOutput).catch(() => {});
+        room.switchActiveDevice('audiooutput', selectedAudioOutput).catch(() => {
+          if (voiceRoom === room) voiceMediaNotice = 'Could not use the saved audio output. Check Voice & Video settings.';
+        });
       }
 
       if (microphoneWarning) {
@@ -2745,13 +2705,14 @@
       voiceConversationId = null;
       voiceConversationTitle = '';
       voiceStatus = 'idle';
+      voiceRetryConversation = conversation;
       voiceParticipants = [];
       clearVoiceAudio();
       if (failedRoom) await failedRoom.disconnect().catch(() => {});
       if (directCall?.state === 'accepted' && directCall.conversationId === conversation.id) {
         callUiState = 'rejoin';
       }
-      voiceError = e instanceof Error ? e.message : 'Could not join voice.';
+      voiceError = 'Could not connect to voice. Check your network and try again.';
     }
   }
 
@@ -2760,7 +2721,10 @@
     if (!room || voiceStatus !== 'connected' || voiceDeafened) return;
 
     try {
-      await room.localParticipant.setMicrophoneEnabled(!room.localParticipant.isMicrophoneEnabled);
+      await room.localParticipant.setMicrophoneEnabled(
+        !room.localParticipant.isMicrophoneEnabled,
+        microphoneCaptureOptions(browserVoiceProcessing, selectedAudioInput)
+      );
       syncVoiceParticipants();
     } catch (e) {
       voiceError = mediaDeviceErrorMessage(e, 'microphone');
@@ -2779,14 +2743,17 @@
         voiceDeafened = true;
         setRemoteAudioDeafened(true);
       } else {
+        await room.localParticipant.setMicrophoneEnabled(
+          !voiceMutedBeforeDeafen,
+          microphoneCaptureOptions(browserVoiceProcessing, selectedAudioInput)
+        );
         voiceDeafened = false;
         setRemoteAudioDeafened(false);
-        await room.localParticipant.setMicrophoneEnabled(!voiceMutedBeforeDeafen);
         voiceMutedBeforeDeafen = false;
       }
       syncVoiceParticipants();
     } catch (e) {
-      voiceError = e instanceof Error ? e.message : 'Could not change deafen state.';
+      voiceError = mediaDeviceErrorMessage(e, 'microphone');
     }
   }
 
@@ -2835,7 +2802,9 @@
       await room.localParticipant.setScreenShareEnabled(false);
       syncVoiceParticipants();
     } catch (error) {
-      voiceError = screenShareErrorMessage(error);
+      const failure = screenShareFailure(error);
+      if (failure.cancelled) voiceMediaNotice = failure.message;
+      else voiceError = failure.message;
       syncVoiceParticipants();
     }
   }
@@ -3043,7 +3012,7 @@
     };
 
     const onMediaDeviceChange = () => {
-      if (mediaSettingsOpen) refreshMediaDevices().catch(() => {});
+      if (mediaSettingsOpen || voiceRoom) void refreshMediaDevices();
     };
 
     window.addEventListener('pageshow', resumeRealtime);
@@ -3842,8 +3811,8 @@
       <div class="voice-dock-head">
         <span class="voice-dock-icon" aria-hidden="true"><Icon name="headphones" size={20} /></span>
         <div>
-          <strong>{voiceConversationTitle || 'Voice'}</strong>
-          <small>
+          <strong>{voiceConversationTitle || (voiceRetryConversation ? conversationName(voiceRetryConversation) : 'Voice')}</strong>
+          <small role="status" aria-live="polite">
             {voiceStatus === 'connected'
               ? `${voiceParticipants.length} connected`
               : voiceStatus === 'reconnecting'
@@ -3930,6 +3899,13 @@
                   <option value={device.deviceId}>{deviceLabel(device, index, 'Speaker')}</option>
                 {/each}
               </select>
+            </label>
+          </div>
+
+          <div class="media-settings-section">
+            <label class="cubic-voice-processing-option">
+              <input type="checkbox" checked={browserVoiceProcessing} onchange={(event) => setBrowserVoiceProcessing(event.currentTarget.checked)} />
+              <span><strong>Browser voice processing</strong><small>Echo cancellation, noise suppression and automatic gain when supported.</small></span>
             </label>
           </div>
 
@@ -4052,6 +4028,8 @@
           <button
             type="button"
             class:active={voiceMuted}
+            aria-pressed={voiceMuted}
+            aria-label={voiceMuted ? 'Unmute microphone' : 'Mute microphone'}
             title={voiceDeafened ? 'Undeafen before changing microphone state' : (voiceMuted ? 'Unmute' : 'Mute')}
             onclick={toggleVoiceMute}
             disabled={voiceStatus !== 'connected' || voiceDeafened}
@@ -4062,6 +4040,8 @@
           <button
             type="button"
             class:active={voiceDeafened}
+            aria-pressed={voiceDeafened}
+            aria-label={voiceDeafened ? 'Undeafen audio' : 'Deafen audio'}
             title={voiceDeafened ? 'Undeafen' : 'Deafen'}
             onclick={toggleVoiceDeafen}
             disabled={voiceStatus !== 'connected'}
@@ -4104,6 +4084,9 @@
       {#if voiceMediaNotice}
         <div class="voice-media-notice" role="status">
           {voiceMediaNotice}
+          {#if voiceMediaNotice.startsWith('Browser audio playback is paused')}
+            <button type="button" onclick={enableVoiceAudio}>Enable audio</button>
+          {/if}
           <button
             type="button"
             aria-label="Dismiss media notice"
@@ -4116,9 +4099,12 @@
       {/if}
 
       {#if voiceError}
-        <div class="inline-error voice-error">{voiceError}</div>
+        <div class="inline-error voice-error" role="alert">{voiceError}</div>
         {#if voiceStatus === 'idle'}
           <div class="voice-dock-actions">
+            {#if voiceRetryConversation}
+              <button type="button" onclick={() => joinVoice(voiceRetryConversation)}>Retry voice</button>
+            {/if}
             <button type="button" onclick={() => voiceError = ''}>Dismiss</button>
           </div>
         {/if}

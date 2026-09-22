@@ -3384,6 +3384,15 @@ body { background: var(--cubic-onyx-0); }
   font-weight: 600;
 }
 
+.media-settings-section > .cubic-voice-processing-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  cursor: pointer;
+}
+.cubic-voice-processing-option input { margin: 2px 0 0; accent-color: var(--cubic-blurple); }
+.cubic-voice-processing-option small { display: block; margin-top: 3px; color: #949ba4; font-size: .65rem; font-weight: 400; line-height: 1.35; }
+
 .media-settings-section select {
   width: 100%;
   min-width: 0;
