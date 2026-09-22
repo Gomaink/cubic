@@ -40,8 +40,8 @@
   class:focused
   class:camera-off={!cameraEnabled || !track}
   type="button"
-  aria-label={`${focused ? 'Unfocus' : 'Focus'} ${name}`}
-  title={`${focused ? 'Unfocus' : 'Focus'} ${name}`}
+  aria-label={`${focused ? 'Unfocus' : 'Focus'} ${name}${speaking ? ', speaking' : ''}`}
+  title={`${focused ? 'Unfocus' : 'Focus'} ${name}${speaking ? ' · speaking' : ''}`}
   onclick={onclick}
 >
   {#if cameraEnabled && track}
