@@ -4311,3 +4311,14 @@ body { background: var(--cubic-onyx-0); }
     padding-right: 50px;
   }
 }
+
+/* F1 member list uses the existing chat viewport without changing media controls. */
+.chat-panel.cubic-members-open {
+  position: relative;
+}
+
+@media (min-width: 1000px) {
+  .chat-panel.cubic-members-open {
+    padding-right: 240px;
+  }
+}

@@ -9,6 +9,7 @@
   import MessageAttachments from '$lib/ui/MessageAttachments.svelte';
   import MessageActions from '$lib/ui/MessageActions.svelte';
   import SessionSettings from '$lib/ui/SessionSettings.svelte';
+  import MemberPanel from '$lib/ui/MemberPanel.svelte';
 
   let { data } = $props();
   let loggingOut = $state(false);
@@ -34,6 +35,10 @@
   let newGroupTitle = $state('');
   let newGroupMemberIds = $state<string[]>([]);
   let groupPanelOpen = $state(false);
+  let memberPanelOpen = $state(false);
+  type PresenceStatus = 'online' | 'idle' | 'offline';
+  let memberPresence = $state<Record<string, PresenceStatus>>({});
+  let pendingPresenceSnapshot: { conversationId: string; changedUserIds: Set<string> } | null = null;
   let groupDetails = $state<any | null>(null);
   let groupRename = $state('');
   let avatarUploading = $state(false);
@@ -259,6 +264,31 @@
     const payload = await api(`/api/v1/groups/${activeConversation.id}`);
     groupDetails = payload.group;
     groupRename = payload.group.title;
+  }
+
+  function memberPanelMembers() {
+    if (activeConversation?.kind === 'group') return groupDetails?.members ?? [];
+    return activeConversation?.peer ? [activeConversation.peer] : [];
+  }
+
+  function requestPresenceSnapshot(socket: Socket) {
+    const conversationId = activeConversation?.id;
+    if (!conversationId || !socket.connected) return;
+    const pending = { conversationId, changedUserIds: new Set<string>() };
+    pendingPresenceSnapshot = pending;
+    socket.timeout(4000).emit('presence:snapshot', { conversationId }, (
+      failure: Error | null,
+      result?: { ok: boolean; statuses?: Record<string, PresenceStatus> }
+    ) => {
+      if (pendingPresenceSnapshot !== pending) return;
+      pendingPresenceSnapshot = null;
+      if (!failure && result?.ok && activeConversation?.id === conversationId && realtimeSocket === socket) {
+        const currentStatuses = Object.fromEntries(
+          Object.entries(result.statuses ?? {}).filter(([userId]) => !pending.changedUserIds.has(userId))
+        );
+        memberPresence = { ...memberPresence, ...currentStatuses };
+      }
+    });
   }
 
   function queueConversationRefresh() {
@@ -558,7 +588,9 @@
   async function selectConversation(conversation: any) {
     deleteDialog?.close();
     activeConversation = conversation;
+    pendingPresenceSnapshot = null;
     groupPanelOpen = false;
+    memberPanelOpen = false;
     groupDetails = null;
     chatMessages = [];
     historyCursor = null;
@@ -577,13 +609,16 @@
     if (conversation.kind === 'group') await refreshGroupDetails();
 
     realtimeSocket?.timeout(4000).emit('conversation:join', { conversationId: conversation.id }, () => {});
+    if (realtimeSocket) requestPresenceSnapshot(realtimeSocket);
   }
 
   function closeConversation() {
     activeConversation = null;
+    pendingPresenceSnapshot = null;
     chatMessages = [];
     groupDetails = null;
     groupPanelOpen = false;
+    memberPanelOpen = false;
     historyCursor = null;
     historyHasMore = false;
     historyLoading = false;
@@ -2801,18 +2836,58 @@
     loadMediaPreferences();
     Promise.all([refreshSocial(), refreshGroupInvites(), refreshConversations()]).catch((e) => error = e.message);
 
+    const PRESENCE_IDLE_MS = 5 * 60 * 1000;
+    let lastActivityAt = Date.now();
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    let reportedActivity: 'active' | 'idle' | null = null;
+
     const socket = io({
       path: '/socket.io', withCredentials: true, transports: ['websocket', 'polling'], timeout: 5000, reconnection: true
     });
     realtimeSocket = socket;
 
+    const reportActivity = (state: 'active' | 'idle') => {
+      if (reportedActivity === state) return;
+      reportedActivity = state;
+      if (socket.connected) socket.emit('presence:set', { state });
+    };
+    const scheduleIdle = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      if (document.visibilityState === 'hidden') {
+        reportActivity('idle');
+        return;
+      }
+      const remaining = PRESENCE_IDLE_MS - (Date.now() - lastActivityAt);
+      if (remaining <= 0) {
+        reportActivity('idle');
+      } else {
+        idleTimer = setTimeout(scheduleIdle, remaining);
+      }
+    };
+    const markActivity = () => {
+      if (document.visibilityState === 'hidden') return;
+      const now = Date.now();
+      if (reportedActivity === 'active' && now - lastActivityAt < 1000) return;
+      lastActivityAt = now;
+      reportActivity('active');
+      scheduleIdle();
+    };
+
     socket.on('connect', () => {
       realtimeConnected = true;
+      reportedActivity = null;
       Promise.all([refreshSocial(), refreshGroupInvites(), refreshConversations(), syncActiveConversation(), refreshGroupDetails()]).catch(() => {});
       syncDirectCall(socket).catch(() => {});
     });
+    socket.on('realtime:ready', () => {
+      reportActivity(document.visibilityState === 'hidden' || Date.now() - lastActivityAt >= PRESENCE_IDLE_MS ? 'idle' : 'active');
+      scheduleIdle();
+      requestPresenceSnapshot(socket);
+    });
     socket.on('disconnect', (reason) => {
       realtimeConnected = false;
+      pendingPresenceSnapshot = null;
+      reportedActivity = null;
       if (reason === 'io server disconnect') {
         void recoverAfterServerDisconnect(socket, () => realtimeSocket === socket);
       }
@@ -2859,7 +2934,13 @@
     socket.on('conversation:updated', (event: any) => {
       queueConversationRefresh();
       if (activeConversation?.id === event?.conversationId && activeConversation.kind === 'group') {
-        refreshGroupDetails().catch(() => {});
+        refreshGroupDetails().then(() => requestPresenceSnapshot(socket)).catch(() => {});
+      }
+    });
+    socket.on('presence:changed', (event: { userId?: string; status?: PresenceStatus }) => {
+      if (event?.userId && (event.status === 'online' || event.status === 'idle' || event.status === 'offline')) {
+        pendingPresenceSnapshot?.changedUserIds.add(event.userId);
+        memberPresence = { ...memberPresence, [event.userId]: event.status };
       }
     });
     socket.on('conversation:removed', (event: any) => {
@@ -2882,6 +2963,8 @@
     const resumeRealtime = () => {
       if (document.visibilityState === 'hidden') return;
 
+      markActivity();
+
       if (resumeTimer) clearTimeout(resumeTimer);
 
       resumeTimer = setTimeout(() => {
@@ -2901,6 +2984,7 @@
 
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') resumeRealtime();
+      else scheduleIdle();
     };
 
     const onMediaDeviceChange = () => {
@@ -2911,15 +2995,25 @@
     window.addEventListener('focus', resumeRealtime);
     window.addEventListener('online', resumeRealtime);
     document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('keydown', markActivity);
+    window.addEventListener('pointerdown', markActivity);
+    window.addEventListener('pointermove', markActivity);
+    window.addEventListener('touchstart', markActivity);
     navigator.mediaDevices?.addEventListener?.('devicechange', onMediaDeviceChange);
 
     return () => {
       if (resumeTimer) clearTimeout(resumeTimer);
+      if (idleTimer) clearTimeout(idleTimer);
+      pendingPresenceSnapshot = null;
 
       window.removeEventListener('pageshow', resumeRealtime);
       window.removeEventListener('focus', resumeRealtime);
       window.removeEventListener('online', resumeRealtime);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('keydown', markActivity);
+      window.removeEventListener('pointerdown', markActivity);
+      window.removeEventListener('pointermove', markActivity);
+      window.removeEventListener('touchstart', markActivity);
       navigator.mediaDevices?.removeEventListener?.('devicechange', onMediaDeviceChange);
 
       realtimeSocket = null;
@@ -3004,7 +3098,7 @@
     {/if}
   </section>
 
-  <section class="chat-panel" class:open={activeConversation !== null}>
+  <section class="chat-panel" class:open={activeConversation !== null} class:cubic-members-open={memberPanelOpen}>
     {#if activeConversation}
       <header class="chat-header">
         <button class="chat-back" type="button" aria-label="Back to conversations" title="Back" onclick={closeConversation}><Icon name="back" size={24} /></button>
@@ -3018,10 +3112,13 @@
           <small>{activeConversation.kind === 'group' ? `${activeConversation.memberCount ?? groupDetails?.members?.length ?? 0} members` : `@${activeConversation.peer?.username ?? ''}`}</small>
         </div>
         {#if activeConversation.kind === 'group'}
-          <button class="chat-meta-button" type="button" aria-label="Group settings" title="Group settings" onclick={() => { groupPanelOpen = !groupPanelOpen; if (groupPanelOpen) refreshGroupDetails().catch(() => {}); }}>
+          <button class="chat-meta-button" type="button" aria-label="Group settings" title="Group settings" onclick={() => { memberPanelOpen = false; groupPanelOpen = !groupPanelOpen; if (groupPanelOpen) refreshGroupDetails().catch(() => {}); }}>
             <Icon name="settings" size={19} />
           </button>
         {/if}
+        <button class="chat-meta-button" type="button" aria-label="Members" title="Members" aria-expanded={memberPanelOpen} onclick={() => { groupPanelOpen = false; memberPanelOpen = !memberPanelOpen; if (memberPanelOpen && realtimeSocket) requestPresenceSnapshot(realtimeSocket); }}>
+          <Icon name="users" size={19} />
+        </button>
         {#if activeConversation.kind === 'direct'}
           <button
             class="chat-voice-button"
@@ -3618,6 +3715,14 @@
             {/if}
           </div>
         </aside>
+      {/if}
+      {#if memberPanelOpen}
+        <MemberPanel
+          title={activeConversation.kind === 'group' ? 'Group members' : 'Conversation member'}
+          members={memberPanelMembers()}
+          statuses={memberPresence}
+          onclose={() => memberPanelOpen = false}
+        />
       {/if}
     {:else}
       <div class="chat-placeholder"><img src="/images/cubic-w-nobg.png" alt="" /><h2>Your Cubic conversations</h2><p>Select a chat, or create a group with your friends.</p></div>

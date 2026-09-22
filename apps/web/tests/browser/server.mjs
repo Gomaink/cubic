@@ -14,6 +14,11 @@ let staged;
 let videoBytes;
 let sessionMode;
 let activeSessions;
+let groupMembers;
+let fixturePresence;
+let holdPresenceSnapshots = false;
+let heldPresenceSnapshots = [];
+const fixtureSockets = new Map();
 
 function attachment(name, contentType = 'image/png', dimensions = { width: 800, height: 600 }) {
   const id = randomUUID();
@@ -22,6 +27,13 @@ function attachment(name, contentType = 'image/png', dimensions = { width: 800, 
 }
 
 function reset() {
+  groupMembers = [
+    { ...user, role: 'owner' },
+    { ...peer, role: 'member' }
+  ];
+  fixturePresence = new Map();
+  holdPresenceSnapshots = false;
+  heldPresenceSnapshots = [];
   staged = new Map();
   videoBytes = null;
   sessionMode = 'ok';
@@ -68,6 +80,31 @@ const server = createServer(async (request, response) => {
     return json({ ok: true });
   }
   if (url.pathname === '/__test/video') { videoBytes = await body(); return json({ ok: true }); }
+  if (url.pathname === '/__test/presence') {
+    const target = url.searchParams.get('userId');
+    const status = url.searchParams.get('status');
+    if (![user.id, peer.id].includes(target) || !['online', 'idle', 'offline'].includes(status)) return json({ error: 'Invalid presence.' }, 400);
+    fixturePresence.set(target, status);
+    io.emit('presence:changed', { userId: target, status });
+    return json({ ok: true });
+  }
+  if (url.pathname === '/__test/presence-snapshot') {
+    const mode = url.searchParams.get('mode');
+    if (mode === 'hold') holdPresenceSnapshots = true;
+    if (mode === 'release') {
+      holdPresenceSnapshots = false;
+      for (const send of heldPresenceSnapshots.splice(0)) send();
+      fixturePresence.set(user.id, 'idle');
+      io.emit('presence:changed', { userId: user.id, status: 'idle' });
+    }
+    return json({ pending: heldPresenceSnapshots.length });
+  }
+  if (url.pathname === '/__test/group-member') {
+    const included = url.searchParams.get('included') === 'true';
+    groupMembers = included ? [{ ...user, role: 'owner' }, { ...peer, role: 'member' }] : [{ ...user, role: 'owner' }];
+    io.emit('conversation:updated', { conversationId: group });
+    return json({ ok: true });
+  }
   if (url.pathname === '/__test/realtime') {
     const message = { ...messages.at(-1), id: randomUUID(), createdAt: new Date().toISOString(), body: 'Realtime attachment', attachments: [attachment('realtime.png')], reactions: [] };
     messages.push(message);
@@ -85,9 +122,11 @@ const server = createServer(async (request, response) => {
     io.emit('message:reactions', event);
     return json(event);
   }
-  if (!request.headers.cookie?.includes('cubic_session=browser-fixture')) return json({ error: 'Authentication required.' }, 401);
-  if (url.pathname === '/api/v1/auth/me') return json({ user });
-  if (url.pathname === '/api/v1/auth/session') return json({ authenticated: true, user });
+  const isPeer = request.headers.cookie?.includes('cubic_session=browser-peer');
+  if (!isPeer && !request.headers.cookie?.includes('cubic_session=browser-fixture')) return json({ error: 'Authentication required.' }, 401);
+  const requestUser = isPeer ? peer : user;
+  if (url.pathname === '/api/v1/auth/me') return json({ user: requestUser });
+  if (url.pathname === '/api/v1/auth/session') return json({ authenticated: true, user: requestUser });
   if (url.pathname === '/api/v1/auth/sessions' && request.method === 'GET') {
     if (sessionMode === 'error') return json({ error: 'Session management is temporarily unavailable.' }, 503);
     return json({ sessions: sessionMode === 'empty' ? [] : activeSessions });
@@ -111,10 +150,10 @@ const server = createServer(async (request, response) => {
   if (url.pathname === '/api/v1/social/friends') return json({ friends: [] });
   if (url.pathname === '/api/v1/social/requests') return json({ requests: [] });
   if (url.pathname === '/api/v1/groups/invites') return json({ invites: [] });
-  if (url.pathname === `/api/v1/groups/${group}`) return json({ group: { id: group, title: 'Fixture group', members: [], invites: [], currentRole: 'member' } });
+  if (url.pathname === `/api/v1/groups/${group}`) return json({ group: { id: group, title: 'Fixture group', members: groupMembers, invites: [], currentRole: isPeer ? 'member' : 'owner' } });
   if (url.pathname === '/api/v1/conversations') return json({ conversations: [
-    { id: dm, kind: 'direct', peer },
-    { id: group, kind: 'group', title: 'Fixture group', memberCount: 2 }
+    { id: dm, kind: 'direct', peer: isPeer ? user : peer },
+    { id: group, kind: 'group', title: 'Fixture group', memberCount: groupMembers.length }
   ] });
   if (url.pathname.endsWith('/messages')) {
     const conversationId = url.pathname.split('/')[4];
@@ -201,8 +240,32 @@ const server = createServer(async (request, response) => {
 
 const io = new Server(server, { path: '/socket.io' });
 io.on('connection', (socket) => {
+  const socketUserId = socket.handshake.headers.cookie?.includes('cubic_session=browser-peer') ? peer.id : user.id;
+  fixtureSockets.set(socket.id, socketUserId);
+  fixturePresence.set(socketUserId, 'online');
+  io.emit('presence:changed', { userId: socketUserId, status: 'online' });
+  socket.emit('realtime:ready', { userId: socketUserId, conversationCount: 2 });
   socket.on('conversation:join', (_event, ack) => ack?.({ ok: true }));
+  socket.on('presence:snapshot', (_event, ack) => {
+    const result = { ok: true, statuses: Object.fromEntries(groupMembers.map((member) => [member.id, fixturePresence.get(member.id) ?? 'offline'])) };
+    if (holdPresenceSnapshots) heldPresenceSnapshots.push(() => ack?.(result));
+    else ack?.(result);
+  });
+  socket.on('presence:set', (event, ack) => {
+    if (!event || !['active', 'idle'].includes(event.state)) return ack?.({ ok: false });
+    const status = event.state === 'active' ? 'online' : 'idle';
+    fixturePresence.set(socketUserId, status);
+    io.emit('presence:changed', { userId: socketUserId, status });
+    ack?.({ ok: true });
+  });
   socket.on('call:sync', (_event, ack) => ack?.({ ok: true, call: null }));
+  socket.on('disconnect', () => {
+    fixtureSockets.delete(socket.id);
+    if (![...fixtureSockets.values()].includes(socketUserId)) {
+      fixturePresence.set(socketUserId, 'offline');
+      io.emit('presence:changed', { userId: socketUserId, status: 'offline' });
+    }
+  });
 });
 server.listen(3198, '127.0.0.1');
 const web = spawn(process.execPath, ['server.mjs'], {
