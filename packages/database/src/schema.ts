@@ -43,6 +43,27 @@ export const users = pgTable(
   ]
 );
 
+export const servers = pgTable('servers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: varchar('name', { length: 96 }).notNull(),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
+});
+
+export const serverMembers = pgTable(
+  'server_members',
+  {
+    serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    joinedAt: timestamp('joined_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex('server_members_pair_uq').on(table.serverId, table.userId),
+    index('server_members_user_idx').on(table.userId)
+  ]
+);
+
 export const userSettings = pgTable('user_settings', {
   userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
   theme: varchar('theme', { length: 16 }).notNull().default('dark'),

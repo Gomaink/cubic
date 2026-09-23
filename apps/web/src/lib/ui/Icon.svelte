@@ -2,6 +2,7 @@
   type IconName =
     | 'message'
     | 'users'
+    | 'server'
     | 'plus'
     | 'logout'
     | 'back'
@@ -60,6 +61,10 @@
     <path d="M16 20v-1.5a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4V20" />
     <circle cx="9" cy="7" r="3" />
     <path d="M17 11a3 3 0 1 0 0-6M22 20v-1.5a4 4 0 0 0-3-3.7" />
+  {:else if name === 'server'}
+    <rect x="3" y="3" width="18" height="7" rx="2" />
+    <rect x="3" y="14" width="18" height="7" rx="2" />
+    <path d="M7 6.5h.01M7 17.5h.01" />
   {:else if name === 'plus'}
     <path d="M12 5v14M5 12h14" />
   {:else if name === 'logout'}

@@ -11,6 +11,7 @@ import { userRoutes } from './routes/users.js';
 import { socialRoutes } from './routes/social.js';
 import { conversationRoutes } from './routes/conversations.js';
 import { groupRoutes } from './routes/groups.js';
+import { serverRoutes } from './routes/servers.js';
 import { voiceRoutes } from './routes/voice.js';
 import { callHistoryRoutes } from './routes/call-history.js';
 import { attachmentRoutes } from './routes/attachments.js';
@@ -165,6 +166,13 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     cookieName: options.cookieName,
     sessionService: options.sessionService,
     realtimeEvents
+  });
+
+  await app.register(serverRoutes, {
+    prefix: '/api/v1/servers',
+    database: options.database,
+    cookieName: options.cookieName,
+    sessionService: options.sessionService
   });
 
   const attachmentStore = new AttachmentStore(options.mediaRoot ?? '/data/media');
