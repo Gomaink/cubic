@@ -49,6 +49,11 @@
   let serverInviteTarget = $state('');
   let serverMembershipBusy = $state(false);
   let serverMembershipError = $state('');
+  let serverMembersOpen = $state(false);
+  let serverMembersReturnFocus: HTMLElement | null = null;
+  let serverMenuOpen = $state(false);
+  let serverDialog = $state<'server' | 'channel' | 'invite' | null>(null);
+  let serverDialogReturnFocus: HTMLElement | null = null;
   let serverDetailSequence = 0;
   let serverInviteSequence = 0;
   let serverListRevision = 0;
@@ -339,6 +344,9 @@
   }
 
   function selectServer(server: ServerSummary) {
+    closeServerDialog();
+    serverMembersOpen = false;
+    serverMenuOpen = false;
     closeConversation();
     activeServer = server;
     tab = 'servers';
@@ -347,6 +355,19 @@
     pendingServerInvites = [];
     serverInviteTarget = '';
     void refreshServerMembership(server);
+  }
+
+  function toggleServerMembers(event: MouseEvent) {
+    if (serverMembersOpen) { closeServerMembers(); return; }
+    serverMembersReturnFocus = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+    serverMembersOpen = true;
+  }
+
+  function closeServerMembers() {
+    serverMembersOpen = false;
+    const previous = serverMembersReturnFocus;
+    serverMembersReturnFocus = null;
+    void tick().then(() => previous?.isConnected && previous.focus());
   }
 
   async function inviteServerFriend(event: SubmitEvent) {
@@ -362,21 +383,26 @@
       pendingServerInvites = [...pendingServerInvites.filter((invite) => invite.id !== payload.invite.id), payload.invite];
       serverInviteTarget = '';
     } catch (cause) {
-      serverMembershipError = cause instanceof Error ? cause.message : 'Could not send invitation.';
+      if (activeServer?.id === server.id) serverMembershipError = cause instanceof Error ? cause.message : 'Could not send invitation.';
     } finally { serverMembershipBusy = false; }
   }
 
   async function cancelServerInvite(inviteId: string) {
+    const serverId = activeServer?.id;
     if (serverMembershipBusy) return;
     serverMembershipBusy = true;
     serverMembershipError = '';
     try {
       await api(`/api/v1/servers/invites/${inviteId}`, { method: 'DELETE' });
+      if (activeServer?.id !== serverId) return;
       serverDetailSequence += 1;
       pendingServerInvites = pendingServerInvites.filter((invite) => invite.id !== inviteId);
     } catch (cause) {
-      serverMembershipError = cause instanceof Error ? cause.message : 'Invitation changed. Refresh the list.';
-      if (activeServer) void refreshServerMembership(activeServer);
+      const current = activeServer;
+      if (current && current.id === serverId) {
+        serverMembershipError = cause instanceof Error ? cause.message : 'Invitation changed. Refresh the list.';
+        void refreshServerMembership(current);
+      }
     } finally { serverMembershipBusy = false; }
   }
 
@@ -405,11 +431,15 @@
     serverMembershipError = '';
     try {
       await api(`/api/v1/servers/${server.id}/leave`, { method: 'POST' });
+      serverListRevision += 1;
+      servers = servers.filter((item) => item.id !== server.id);
+      if (activeServer?.id !== server.id) return;
       closeConversation();
       serverDetailSequence += 1;
       channelLoadSequence += 1;
-      serverListRevision += 1;
-      servers = servers.filter((item) => item.id !== server.id);
+      closeServerDialog();
+      serverMembersOpen = false;
+      serverMenuOpen = false;
       serverChannels = [];
       serverMembers = [];
       pendingServerInvites = [];
@@ -417,7 +447,7 @@
       activeChannel = null;
       tab = 'chats';
     } catch (cause) {
-      serverMembershipError = cause instanceof Error ? cause.message : 'Could not leave server.';
+      if (activeServer?.id === server.id) serverMembershipError = cause instanceof Error ? cause.message : 'Could not leave server.';
     } finally { serverMembershipBusy = false; }
   }
 
@@ -461,6 +491,7 @@
       serverChannels = [...serverChannels.filter((item) => item.id !== channel.id), channel]
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
       channelName = '';
+      closeServerDialog();
       await selectChannel(channel);
     } catch (cause) {
       if (activeServer?.id === server.id) channelsError = cause instanceof Error ? cause.message : 'Could not create channel.';
@@ -471,6 +502,8 @@
 
   async function selectChannel(channel: ServerTextChannel) {
     if (activeServer?.id !== channel.serverId) return;
+    serverMembersOpen = false;
+    serverMenuOpen = false;
     activeChannel = channel;
     await selectConversation({ id: channel.conversationId, kind: 'server_text', title: channel.name }, true);
   }
@@ -491,12 +524,33 @@
       serverListRevision += 1;
       servers = [server, ...servers.filter((item) => item.id !== server.id)];
       serverName = '';
+      closeServerDialog();
       selectServer(server);
     } catch (cause) {
       serversError = cause instanceof Error ? cause.message : 'Could not create server.';
     } finally {
       serverCreateBusy = false;
     }
+  }
+
+  function openServerDialog(kind: 'server' | 'channel' | 'invite', trigger: Event) {
+    serverDialogReturnFocus = trigger.currentTarget instanceof HTMLElement ? trigger.currentTarget : null;
+    serverMenuOpen = false;
+    serverDialog = kind;
+  }
+
+  function closeServerDialog() {
+    if (!serverDialog) return;
+    serverDialog = null;
+    const previous = serverDialogReturnFocus;
+    serverDialogReturnFocus = null;
+    void tick().then(() => previous?.isConnected && previous.focus());
+  }
+
+  function showServerDialog(node: HTMLDialogElement) {
+    node.showModal();
+    node.querySelector<HTMLInputElement | HTMLSelectElement>('input, select')?.focus();
+    return { destroy: () => { if (node.open) node.close(); } };
   }
 
   async function refreshGroupDetails() {
@@ -882,6 +936,9 @@
       activeChannel = null;
       channelLoadSequence += 1;
       tab = 'chats';
+      serverMembersOpen = false;
+      serverMenuOpen = false;
+      closeServerDialog();
     }
     activeConversation = conversation;
     pendingPresenceSnapshot = null;
@@ -909,6 +966,7 @@
   }
 
   function closeConversation() {
+    serverMembersOpen = false;
     activeConversation = null;
     activeChannel = null;
     pendingPresenceSnapshot = null;
@@ -3307,17 +3365,26 @@
 </script>
 
 <svelte:head><title>Cubic — {currentUser.displayName}</title></svelte:head>
+<svelte:window onkeydown={(event) => { if (event.key === 'Escape') { serverMenuOpen = false; if (serverMembersOpen) closeServerMembers(); } }} />
 
 <main class="messenger-shell">
   <aside class="messenger-nav">
     <div class="messenger-brand"><img src="/images/cubic-w-nobg.png" alt="" /><strong>Cubic</strong><span title={realtimeConnected ? 'Realtime connected' : 'Realtime reconnecting'}>{realtimeConnected ? 'LIVE' : 'SYNC'}</span></div>
-    <button class="nav-action" class:active={tab === 'chats'} title="Chats" onclick={() => { if (activeConversation?.kind === 'server_text') closeConversation(); tab = 'chats'; activeServer = null; }}>
+    <button class="nav-action" class:active={tab === 'chats'} title="Chats" onclick={() => { if (activeConversation?.kind === 'server_text') closeConversation(); closeServerDialog(); serverMembersOpen = false; serverMenuOpen = false; channelLoadSequence += 1; serverDetailSequence += 1; tab = 'chats'; activeServer = null; }}>
       <Icon name="message" size={20} /><span>Chats</span>
     </button>
-    <button class="nav-action cubic-server-nav" class:active={tab === 'servers'} title="Servers" onclick={() => { tab = 'servers'; closeConversation(); activeServer = null; }}>
+    <button class="nav-action cubic-server-nav" class:active={tab === 'servers'} title="Servers" onclick={() => { tab = 'servers'; closeConversation(); closeServerDialog(); serverMembersOpen = false; serverMenuOpen = false; activeServer = null; channelLoadSequence += 1; serverDetailSequence += 1; }}>
       <Icon name="server" size={20} /><span>Servers</span>
     </button>
-    <button class="nav-action" class:active={tab === 'people'} title="People" onclick={() => { tab = 'people'; closeConversation(); activeServer = null; serverDetailSequence += 1; void refreshServerInvites(); }}>
+    <div class="cubic-server-rail" aria-label="Your servers">
+      {#if serversLoading}<span class="cubic-server-rail-status">Loading…</span>{/if}
+      {#if !serversLoading && servers.length === 0}<span class="cubic-server-rail-status">No servers</span>{/if}
+      {#each servers as server (server.id)}
+        <button class="cubic-server-rail-item" class:active={activeServer?.id === server.id} type="button" aria-label={`Open server ${server.name}`} aria-current={activeServer?.id === server.id ? 'page' : undefined} title={server.name} onclick={() => selectServer(server)}>{server.name.slice(0, 1).toUpperCase()}</button>
+      {/each}
+      <button class="cubic-server-rail-create" type="button" aria-label="Create server" title="Create server" onclick={(event) => openServerDialog('server', event)}><Icon name="plus" size={20} /></button>
+    </div>
+    <button class="nav-action" class:active={tab === 'people'} title="People" onclick={() => { tab = 'people'; closeConversation(); closeServerDialog(); serverMembersOpen = false; serverMenuOpen = false; activeServer = null; channelLoadSequence += 1; serverDetailSequence += 1; void refreshServerInvites(); }}>
       <Icon name="users" size={20} />
       <span>People{(requests.filter((r) => r.direction === 'incoming').length + groupInvites.length + serverInvites.length) ? ` · ${requests.filter((r) => r.direction === 'incoming').length + groupInvites.length + serverInvites.length}` : ''}</span>
     </button>
@@ -3342,7 +3409,44 @@
     <SessionSettings onclose={() => sessionSettingsOpen = false} />
   {/if}
 
-  <section class="conversation-list">
+  {#if serverDialog}
+    <dialog class="cubic-server-dialog" use:showServerDialog aria-label={serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : 'Invite people'} onclose={closeServerDialog}>
+      <header><h2>{serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : 'Invite people'}</h2><button type="button" aria-label="Close server dialog" onclick={closeServerDialog}><Icon name="x" size={18} /></button></header>
+      {#if serverDialog === 'server'}
+        <form class="cubic-server-create" onsubmit={createServer}>
+          <label for="cubic-server-name">Server name</label>
+          <input id="cubic-server-name" bind:value={serverName} maxlength="96" required placeholder="Name your server" />
+          <button type="submit" disabled={serverCreateBusy}>{serverCreateBusy ? 'Creating…' : 'Create server'}</button>
+        </form>
+        {#if serversError}<p class="inline-error" role="alert">{serversError}</p>{/if}
+      {:else if serverDialog === 'channel' && activeServer}
+        <form class="cubic-server-create" onsubmit={createChannel}>
+          <label for="cubic-channel-name">Channel name</label>
+          <input id="cubic-channel-name" bind:value={channelName} maxlength="96" required placeholder="New text channel" />
+          <button type="submit" disabled={channelCreateBusy || channelsLoading}>{channelCreateBusy ? 'Creating…' : 'Create text channel'}</button>
+        </form>
+        {#if channelsError}<p class="inline-error" role="alert">{channelsError}</p>{/if}
+      {:else if serverDialog === 'invite' && activeServer && activeServer.ownerUserId === currentUser.id}
+        <form class="cubic-server-create" onsubmit={inviteServerFriend}>
+          <label for="cubic-server-invite-friend">Invite a friend</label>
+          <select id="cubic-server-invite-friend" bind:value={serverInviteTarget} required>
+            <option value="">Choose a friend</option>
+            {#each friends.filter((friend) => friend.id !== currentUser.id && !serverMembers.some((member) => member.id === friend.id) && !pendingServerInvites.some((invite) => invite.invitee.id === friend.id)) as friend (friend.id)}
+              <option value={friend.id}>{friend.displayName} (@{friend.username})</option>
+            {/each}
+          </select>
+          <button type="submit" disabled={serverMembershipBusy || !serverInviteTarget}>Invite friend</button>
+        </form>
+        {#if pendingServerInvites.length}<h3>Pending invitations</h3>{/if}
+        {#each pendingServerInvites as invite (invite.id)}
+          <div class="cubic-server-member-row"><span>{invite.invitee.displayName} · Pending</span><button type="button" aria-label={`Cancel invitation for ${invite.invitee.displayName}`} onclick={() => cancelServerInvite(invite.id)} disabled={serverMembershipBusy}>Cancel</button></div>
+        {/each}
+        {#if serverMembershipError}<p class="inline-error" role="alert">{serverMembershipError} <button type="button" onclick={() => refreshServerMembership(activeServer!)}>Retry</button></p>{/if}
+      {/if}
+    </dialog>
+  {/if}
+
+  <section class="conversation-list" class:cubic-server-sidebar={tab === 'servers' && activeServer !== null}>
     {#if tab === 'chats'}
       <header class="conversation-list-header">
         <div><small>MESSAGES</small><h1>Conversations</h1></div>
@@ -3366,34 +3470,50 @@
         </button>
       {/each}
     {:else if tab === 'servers'}
-      <header class="conversation-list-header"><div><small>SPACES</small><h1>Servers</h1></div></header>
-      <div class="cubic-server-list" aria-label="Your servers">
-        {#if serversLoading}<p class="cubic-server-list-status">Loading servers…</p>{/if}
-        {#if !serversLoading && servers.length === 0}<p class="cubic-server-list-status">No servers yet. Create one to get started.</p>{/if}
-        {#each servers as server (server.id)}
-          <button class="conversation-row cubic-server-row" class:active={activeServer?.id === server.id} aria-current={activeServer?.id === server.id ? 'page' : undefined} onclick={() => selectServer(server)}>
-            <span class="avatar group-avatar">{server.name.slice(0, 1).toUpperCase()}</span>
-            <span class="conversation-copy"><strong>{server.name}</strong><small>Server</small></span>
-          </button>
-          {#if activeServer?.id === server.id}
-            <div class="cubic-channel-list" aria-label={`Text channels in ${server.name}`}>
-              {#if channelsLoading}<p class="cubic-server-list-status">Loading channels…</p>{/if}
-              {#each serverChannels as channel (channel.id)}
-                <button class="cubic-channel-row" type="button" aria-label={`Text channel ${channel.name}`} aria-current={activeChannel?.id === channel.id ? 'page' : undefined} onclick={() => selectChannel(channel)}>
-                  <span aria-hidden="true">#</span><span>{channel.name}</span>
-                </button>
-              {/each}
-              {#if channelsError}<div class="inline-error cubic-server-error" role="alert">{channelsError} <button type="button" onclick={() => refreshServerChannels(server)}>Retry list</button></div>{/if}
-            </div>
-          {/if}
-        {/each}
-      </div>
-      <form class="cubic-server-create" onsubmit={createServer}>
-        <label for="cubic-server-name">Server name</label>
-        <input id="cubic-server-name" bind:value={serverName} maxlength="96" required placeholder="Name your server" />
-        <button type="submit" disabled={serverCreateBusy}>{serverCreateBusy ? 'Creating…' : 'Create server'}</button>
-      </form>
-      {#if serversError}<div class="inline-error cubic-server-error" role="alert">{serversError} <button type="button" onclick={refreshServers}>Retry list</button></div>{/if}
+      {#if activeServer}
+        <header class="conversation-list-header cubic-server-sidebar-head">
+          <div><small>SERVER</small><h1>{activeServer.name}</h1></div>
+          <button class="icon-action" type="button" aria-label={`Options for ${activeServer.name}`} aria-expanded={serverMenuOpen} onclick={() => serverMenuOpen = !serverMenuOpen}><Icon name="more" size={19} /></button>
+        </header>
+        {#if serverMenuOpen}
+          <div class="cubic-server-options" aria-label="Server options">
+            {#if activeServer.ownerUserId === currentUser.id}
+              <button type="button" onclick={(event) => openServerDialog('invite', event)}>Invite people</button>
+            {:else}
+              <button type="button" onclick={leaveSelectedServer} disabled={serverMembershipBusy}>Leave server</button>
+            {/if}
+            <button type="button" onclick={(event) => { serverMenuOpen = false; toggleServerMembers(event); }}>Members</button>
+          </div>
+        {/if}
+        <div class="cubic-channel-sidebar-head">
+          <strong>TEXT CHANNELS</strong>
+          {#if activeServer.ownerUserId === currentUser.id}<button type="button" aria-label="Create text channel" title="Create text channel" onclick={(event) => openServerDialog('channel', event)}><Icon name="plus" size={18} /></button>{/if}
+        </div>
+        <div class="cubic-channel-list" aria-label={`Text channels in ${activeServer.name}`}>
+          {#if channelsLoading}<p class="cubic-server-list-status">Loading channels…</p>{/if}
+          {#if !channelsLoading && serverChannels.length === 0}<p class="cubic-server-list-status">This server does not have channels yet.</p>{/if}
+          {#each serverChannels as channel (channel.id)}
+            <button class="cubic-channel-row" type="button" aria-label={`Text channel ${channel.name}`} aria-current={activeChannel?.id === channel.id ? 'page' : undefined} onclick={() => selectChannel(channel)}>
+              <span aria-hidden="true">#</span><span>{channel.name}</span>
+            </button>
+          {/each}
+          {#if channelsError}<div class="inline-error cubic-server-error" role="alert">{channelsError} <button type="button" onclick={() => refreshServerChannels(activeServer!)}>Retry list</button></div>{/if}
+        </div>
+        <button class="cubic-server-sidebar-members" type="button" aria-expanded={serverMembersOpen} onclick={toggleServerMembers}><Icon name="users" size={17} /> Members · {serverMembers.length}</button>
+      {:else}
+        <header class="conversation-list-header"><div><small>SPACES</small><h1>Servers</h1></div><button class="icon-action" type="button" aria-label="Create server" onclick={(event) => openServerDialog('server', event)}><Icon name="plus" size={19} /></button></header>
+        <div class="cubic-server-list" aria-label="Your servers">
+          {#if serversLoading}<p class="cubic-server-list-status">Loading servers…</p>{/if}
+          {#if !serversLoading && servers.length === 0}<p class="cubic-server-list-status">No servers yet. Create one to get started.</p>{/if}
+          {#each servers as server (server.id)}
+            <button class="conversation-row cubic-server-row" aria-label={`Open server ${server.name}`} onclick={() => selectServer(server)}>
+              <span class="avatar group-avatar">{server.name.slice(0, 1).toUpperCase()}</span>
+              <span class="conversation-copy"><strong>{server.name}</strong><small>Server</small></span>
+            </button>
+          {/each}
+        </div>
+        {#if serversError}<div class="inline-error cubic-server-error" role="alert">{serversError} <button type="button" onclick={refreshServers}>Retry list</button></div>{/if}
+      {/if}
     {:else}
       <header><div><small>SOCIAL</small><h1>People</h1></div></header>
       <div class="people-search"><input bind:value={query} oninput={search} placeholder="Search username or name" /></div>
@@ -3429,7 +3549,7 @@
     {/if}
   </section>
 
-  <section class="chat-panel" class:open={activeConversation !== null || activeServer !== null} class:cubic-members-open={memberPanelOpen}>
+  <section class="chat-panel" class:open={activeConversation !== null || activeServer !== null} class:cubic-members-open={memberPanelOpen} class:cubic-server-members-open={serverMembersOpen && activeServer !== null} class:cubic-server-empty={activeServer !== null && activeConversation === null}>
     {#if activeConversation}
       <header class="chat-header">
         <button class="chat-back" type="button" aria-label={activeConversation.kind === 'server_text' ? 'Back to server' : 'Back to conversations'} title="Back" onclick={closeConversation}><Icon name="back" size={24} /></button>
@@ -3455,6 +3575,9 @@
           <button class="chat-meta-button" type="button" aria-label="Members" title="Members" aria-expanded={memberPanelOpen} onclick={() => { groupPanelOpen = false; memberPanelOpen = !memberPanelOpen; if (memberPanelOpen && realtimeSocket) requestPresenceSnapshot(realtimeSocket); }}>
             <Icon name="users" size={19} />
           </button>
+        {/if}
+        {#if activeConversation.kind === 'server_text' && activeServer}
+          <button class="chat-meta-button" type="button" aria-label="Server members" title="Server members" aria-expanded={serverMembersOpen} onclick={toggleServerMembers}><Icon name="users" size={19} /></button>
         {/if}
         {#if activeConversation.kind === 'direct'}
           <button
@@ -4059,59 +4182,31 @@
         <header class="chat-header">
           <button class="chat-back" type="button" aria-label="Back to servers" onclick={() => activeServer = null}><Icon name="back" size={24} /></button>
           <div class="chat-heading"><strong>{activeServer.name}</strong><small>Server</small></div>
+          <button class="chat-meta-button" type="button" aria-label="Server members" aria-expanded={serverMembersOpen} onclick={toggleServerMembers}><Icon name="users" size={19} /></button>
         </header>
         <div class="cubic-server-foundation-copy">
-          <span class="avatar group-avatar" aria-hidden="true">{activeServer.name.slice(0, 1).toUpperCase()}</span>
-          <h2>{activeServer.name}</h2>
-          <p>{serverChannels.length ? 'Select a text channel to start messaging.' : 'This server does not have channels yet. Your existing chats and groups remain available.'}</p>
-          {#if serverChannels.length}
-            <div class="cubic-channel-main-list" aria-label={`Text channels in ${activeServer.name}`}>
-              {#each serverChannels as channel (channel.id)}
-                <button type="button" aria-label={`Open text channel ${channel.name}`} onclick={() => selectChannel(channel)}># {channel.name}</button>
-              {/each}
-            </div>
-          {/if}
-          {#if activeServer.ownerUserId === currentUser.id}
-            <form class="cubic-server-create cubic-channel-create" onsubmit={createChannel}>
-              <label for="cubic-channel-name">Channel name</label>
-              <input id="cubic-channel-name" bind:value={channelName} maxlength="96" required placeholder="New text channel" />
-              <button type="submit" disabled={channelCreateBusy || channelsLoading}>{channelCreateBusy ? 'Creating…' : 'Create text channel'}</button>
-            </form>
-          {/if}
-          <div class="cubic-server-membership" aria-label={`Members of ${activeServer.name}`}>
-            <div class="cubic-server-member-row"><h3>Members</h3><button type="button" aria-label="Refresh server members and invitations" onclick={() => refreshServerMembership(activeServer!)}>Refresh</button></div>
-            {#each serverMembers as member (member.id)}
-              <div class="cubic-server-member-row">
-                <button type="button" aria-label={`Open ${member.displayName}'s profile`} onclick={() => openProfile(member)}>{member.displayName}</button>
-                <small>{member.id === activeServer.ownerUserId ? 'Owner' : 'Member'}</small>
-              </div>
-            {/each}
-          </div>
-          {#if activeServer.ownerUserId === currentUser.id}
-            <form class="cubic-server-create cubic-server-invite-form" onsubmit={inviteServerFriend}>
-              <label for="cubic-server-invite-friend">Invite a friend</label>
-              <select id="cubic-server-invite-friend" bind:value={serverInviteTarget} required>
-                <option value="">Choose a friend</option>
-                {#each friends.filter((friend) => friend.id !== currentUser.id && !serverMembers.some((member) => member.id === friend.id) && !pendingServerInvites.some((invite) => invite.invitee.id === friend.id)) as friend (friend.id)}
-                  <option value={friend.id}>{friend.displayName} (@{friend.username})</option>
-                {/each}
-              </select>
-              <button type="submit" disabled={serverMembershipBusy || !serverInviteTarget}>Invite friend</button>
-            </form>
-            {#if pendingServerInvites.length}<h3>Pending invitations</h3>{/if}
-            {#each pendingServerInvites as invite (invite.id)}
-              <div class="cubic-server-member-row"><span>{invite.invitee.displayName} · Pending</span><button type="button" aria-label={`Cancel invitation for ${invite.invitee.displayName}`} onclick={() => cancelServerInvite(invite.id)} disabled={serverMembershipBusy}>Cancel</button></div>
-            {/each}
-          {:else}
-            <button class="quiet" type="button" onclick={leaveSelectedServer} disabled={serverMembershipBusy}>Leave server</button>
-          {/if}
-          {#if serverMembershipError}<div class="inline-error cubic-server-error" role="alert">{serverMembershipError} <button type="button" onclick={() => refreshServerMembership(activeServer!)}>Retry</button></div>{/if}
-          {#if channelsError}<div class="inline-error cubic-server-error" role="alert">{channelsError}</div>{/if}
-          <button type="button" onclick={() => { activeServer = null; tab = 'chats'; }}>Back to chats</button>
+          <Icon name="message" size={30} />
+          <h2>{serverChannels.length ? `Welcome to ${activeServer.name}` : activeServer.name}</h2>
+          <p>{serverChannels.length ? 'Choose a text channel from the sidebar.' : 'This server does not have channels yet. Your existing chats and groups remain available.'}</p>
         </div>
       </section>
     {:else}
       <div class="chat-placeholder"><img src="/images/cubic-w-nobg.png" alt="" /><h2>Your Cubic conversations</h2><p>Select a chat, or create a group with your friends.</p></div>
+    {/if}
+    {#if activeServer && serverMembersOpen}
+      <aside class="cubic-server-member-pane" aria-label={`Members of ${activeServer.name}`}>
+        <header><div><small>SERVER</small><h2>Members · {serverMembers.length}</h2></div><button type="button" aria-label="Close server members" onclick={closeServerMembers}><Icon name="x" size={18} /></button></header>
+        <div class="cubic-server-member-scroll">
+          <button type="button" class="cubic-server-member-refresh" onclick={() => refreshServerMembership(activeServer!)}>Refresh members</button>
+          {#each serverMembers as member (member.id)}
+            <button class="cubic-server-member-entry" type="button" aria-label={`Open ${member.displayName}'s profile, ${member.id === activeServer.ownerUserId ? 'owner' : 'member'}`} onclick={() => openProfile(member)}>
+              <span class="avatar cubic-user-avatar-shell">{member.displayName.slice(0,1).toUpperCase()}{#if member.avatarUrl}{#key member.avatarUrl}<img src={member.avatarUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span>
+              <span><strong>{member.displayName}</strong><small>{member.id === activeServer.ownerUserId ? 'Owner' : 'Member'}</small></span>
+            </button>
+          {/each}
+          {#if serverMembershipError}<p class="inline-error" role="alert">{serverMembershipError}</p>{/if}
+        </div>
+      </aside>
     {/if}
   </section>
 
