@@ -115,3 +115,7 @@ attachments
 calls
 call_participants
 ```
+
+Alpha 9 Slice 1 adds independent `servers` and `server_members` records for
+server identity and membership. Existing direct and group conversations remain
+unchanged; a server is not a conversation and has no channels or realtime room yet.

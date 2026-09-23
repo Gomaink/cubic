@@ -16,6 +16,7 @@ let videoBytes;
 let sessionMode;
 let activeSessions;
 let groupMembers;
+let fixtureServers;
 let fixturePresence;
 let holdPresenceSnapshots = false;
 let heldPresenceSnapshots = [];
@@ -28,6 +29,7 @@ function attachment(name, contentType = 'image/png', dimensions = { width: 800, 
 }
 
 function reset() {
+  fixtureServers = [];
   user.displayName = 'Tester';
   user.avatarUrl = null;
   peer.displayName = 'Fixture DM';
@@ -183,6 +185,23 @@ const server = createServer(async (request, response) => {
     return response.end();
   }
   if (url.pathname === '/api/v1/social/friends') return json({ friends: [] });
+  if (url.pathname === '/api/v1/servers' && request.method === 'GET') {
+    return json({ servers: fixtureServers.filter((item) => item.ownerUserId === requestUser.id) });
+  }
+  if (url.pathname === '/api/v1/servers' && request.method === 'POST') {
+    const payload = JSON.parse((await body()).toString());
+    const name = typeof payload.name === 'string' ? payload.name.trim() : '';
+    if (!name || name.length > 96) return json({ error: 'Invalid server name.' }, 400);
+    const now = new Date().toISOString();
+    const server = { id: randomUUID(), name, ownerUserId: requestUser.id, createdAt: now, updatedAt: now };
+    fixtureServers.push(server);
+    return json({ server }, 201);
+  }
+  const serverDetail = /^\/api\/v1\/servers\/([0-9a-f-]+)$/.exec(url.pathname);
+  if (serverDetail && request.method === 'GET') {
+    const selected = fixtureServers.find((item) => item.id === serverDetail[1] && item.ownerUserId === requestUser.id);
+    return selected ? json({ server: selected }) : json({ error: 'Server not found.' }, 404);
+  }
   if (url.pathname === '/api/v1/social/requests') return json({ requests: [] });
   if (url.pathname === '/api/v1/groups/invites') return json({ invites: [] });
   if (url.pathname === `/api/v1/groups/${group}`) return json({ group: { id: group, title: 'Fixture group', members: groupMembers, invites: [], currentRole: isPeer ? 'member' : 'owner' } });
