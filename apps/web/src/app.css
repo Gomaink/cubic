@@ -4411,6 +4411,15 @@ body { background: var(--cubic-onyx-0); }
 .cubic-channel-sidebar-head button:hover { background: var(--cubic-bg-hover); color: var(--cubic-text); }
 .cubic-server-sidebar .cubic-channel-list { flex: 1 1 auto; min-height: 0; padding: 4px 8px 12px; overflow-y: auto; overscroll-behavior: contain; }
 .cubic-server-sidebar .cubic-channel-row { min-height: 40px; }
+.cubic-layout-category { margin-top: 12px; }
+.cubic-layout-category-head, .cubic-layout-channel-line { display: flex; align-items: center; min-width: 0; }
+.cubic-layout-category-head { min-height: 36px; gap: 2px; padding: 0 3px 0 9px; color: var(--cubic-muted); }
+.cubic-layout-category-head strong { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .72rem; letter-spacing: .045em; text-transform: uppercase; }
+.cubic-layout-channel-line .cubic-channel-row { flex: 1 1 auto; width: auto; }
+.cubic-layout-category-head button, .cubic-layout-channel-line > button:not(.cubic-channel-row) { flex: 0 0 auto; min-width: 28px; min-height: 36px; padding: 0 4px; border: 0; border-radius: 6px; background: transparent; color: var(--cubic-muted); cursor: pointer; }
+.cubic-layout-category-head button:hover, .cubic-layout-channel-line > button:not(.cubic-channel-row):hover { background: var(--cubic-bg-hover); color: var(--cubic-text); }
+.cubic-layout-category-head button:disabled, .cubic-layout-channel-line > button:disabled { opacity: .35; cursor: default; }
+@media (pointer: coarse) { .cubic-layout-category-head button, .cubic-layout-channel-line > button:not(.cubic-channel-row) { min-width: 36px; min-height: 44px; } }
 .cubic-server-sidebar-members { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; width: 100%; min-height: 48px; padding: 8px 14px; border: 0; border-top: 1px solid var(--cubic-border); background: transparent; color: var(--cubic-text); text-align: left; cursor: pointer; }
 .cubic-server-dialog { width: min(420px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); margin: auto; padding: 0 14px 16px; overflow-y: auto; border: 1px solid #3a3c47; border-radius: 10px; background: #181a21; color: var(--cubic-text); box-shadow: 0 24px 70px #0009; }
 .cubic-server-dialog::backdrop { background: #000b; }

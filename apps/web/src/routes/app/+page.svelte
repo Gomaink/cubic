@@ -30,10 +30,19 @@
   let conversations = $state<any[]>([]);
   let activeConversation = $state<any | null>(null);
   type ServerSummary = { id: string; name: string; ownerUserId: string; createdAt: string; updatedAt: string };
-  type ServerTextChannel = { id: string; serverId: string; conversationId: string; name: string; createdAt: string; updatedAt: string };
+  type ServerTextChannel = { id: string; serverId: string; conversationId: string; categoryId: string | null; position: number; name: string; createdAt: string; updatedAt: string };
+  type ServerCategory = { id: string; serverId: string; name: string; position: number; createdAt: string; updatedAt: string };
   let servers = $state<ServerSummary[]>([]);
   let activeServer = $state<ServerSummary | null>(null);
   let serverChannels = $state<ServerTextChannel[]>([]);
+  let serverCategories = $state<ServerCategory[]>([]);
+  let categoryName = $state('');
+  let channelCategoryId = $state('');
+  let layoutBusy = $state(false);
+  let layoutError = $state('');
+  let editingCategoryId = $state<string | null>(null);
+  let movingChannelId = $state<string | null>(null);
+  let moveDestinationId = $state('');
   let activeChannel = $state<ServerTextChannel | null>(null);
   let channelsLoading = $state(false);
   let channelsError = $state('');
@@ -52,7 +61,7 @@
   let serverMembersOpen = $state(false);
   let serverMembersReturnFocus: HTMLElement | null = null;
   let serverMenuOpen = $state(false);
-  let serverDialog = $state<'server' | 'channel' | 'invite' | null>(null);
+  let serverDialog = $state<'server' | 'channel' | 'invite' | 'category' | 'rename-category' | 'move-channel' | null>(null);
   let serverDialogReturnFocus: HTMLElement | null = null;
   let serverDetailSequence = 0;
   let serverInviteSequence = 0;
@@ -350,6 +359,8 @@
     closeConversation();
     activeServer = server;
     tab = 'servers';
+    serverCategories = [];
+    layoutError = '';
     void refreshServerChannels(server);
     serverMembers = [];
     pendingServerInvites = [];
@@ -441,6 +452,7 @@
       serverMembersOpen = false;
       serverMenuOpen = false;
       serverChannels = [];
+      serverCategories = [];
       serverMembers = [];
       pendingServerInvites = [];
       activeServer = null;
@@ -456,10 +468,15 @@
     channelsLoading = true;
     channelsError = '';
     serverChannels = [];
+    serverCategories = [];
     try {
-      const payload = await api(`/api/v1/servers/${server.id}/channels`);
+      const [payload, categoryPayload] = await Promise.all([
+        api(`/api/v1/servers/${server.id}/channels`),
+        api(`/api/v1/servers/${server.id}/categories`)
+      ]);
       if (sequence !== channelLoadSequence || activeServer?.id !== server.id) return;
       serverChannels = payload.channels;
+      serverCategories = categoryPayload.categories;
     } catch (cause) {
       if (sequence === channelLoadSequence && activeServer?.id === server.id) {
         channelsError = cause instanceof Error ? cause.message : 'Could not load channels.';
@@ -482,21 +499,83 @@
     channelsError = '';
     try {
       const payload = await api(`/api/v1/servers/${server.id}/channels`, {
-        method: 'POST', body: JSON.stringify({ name })
+        method: 'POST', body: JSON.stringify({ name, categoryId: channelCategoryId || null })
       });
       if (activeServer?.id !== server.id) return;
       const channel = payload.channel as ServerTextChannel;
       channelLoadSequence += 1;
       channelsLoading = false;
       serverChannels = [...serverChannels.filter((item) => item.id !== channel.id), channel]
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+        .sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
       channelName = '';
+      channelCategoryId = '';
       closeServerDialog();
       await selectChannel(channel);
     } catch (cause) {
       if (activeServer?.id === server.id) channelsError = cause instanceof Error ? cause.message : 'Could not create channel.';
     } finally {
       channelCreateBusy = false;
+    }
+  }
+
+  function channelsInScope(categoryId: string | null) {
+    return serverChannels.filter((channel) => channel.categoryId === categoryId)
+      .sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  }
+
+  async function mutateLayout(path: string, method: string, body?: object) {
+    const server = activeServer;
+    if (!server || layoutBusy || channelsLoading) return false;
+    layoutBusy = true;
+    layoutError = '';
+    try {
+      await api(`/api/v1/servers/${server.id}${path}`, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+      if (activeServer?.id !== server.id) return false;
+      await refreshServerChannels(server);
+      return true;
+    } catch (cause) {
+      if (activeServer?.id === server.id) layoutError = cause instanceof Error ? cause.message : 'Could not update channel layout.';
+      return false;
+    } finally { layoutBusy = false; }
+  }
+
+  async function saveCategory(event: SubmitEvent) {
+    event.preventDefault();
+    const name = categoryName.trim();
+    if (!name || name.length > 96) { layoutError = 'Enter a category name of 1–96 characters.'; return; }
+    const categoryId = editingCategoryId;
+    const saved = await mutateLayout(categoryId ? `/categories/${categoryId}` : '/categories', categoryId ? 'PATCH' : 'POST', { name });
+    if (saved) { categoryName = ''; editingCategoryId = null; closeServerDialog(); }
+  }
+
+  async function deleteSelectedCategory(categoryId: string) {
+    const category = serverCategories.find((item) => item.id === categoryId);
+    if (!category || !confirm(`Delete ${category.name}? Its channels will move to Uncategorized and their messages will remain.`)) return;
+    await mutateLayout(`/categories/${categoryId}`, 'DELETE');
+  }
+
+  async function shiftCategory(categoryId: string, offset: number) {
+    const index = serverCategories.findIndex((item) => item.id === categoryId);
+    if (index < 0) return;
+    await mutateLayout(`/categories/${categoryId}/move`, 'POST', { targetIndex: index + offset });
+  }
+
+  async function shiftChannel(channel: ServerTextChannel, offset: number) {
+    const scope = channelsInScope(channel.categoryId);
+    const index = scope.findIndex((item) => item.id === channel.id);
+    if (index < 0) return;
+    await mutateLayout(`/channels/${channel.id}/move`, 'POST', { targetCategoryId: channel.categoryId, targetIndex: index + offset });
+  }
+
+  async function moveSelectedChannel(event: SubmitEvent) {
+    event.preventDefault();
+    const channel = serverChannels.find((item) => item.id === movingChannelId);
+    if (!channel) return;
+    const targetCategoryId = moveDestinationId || null;
+    const targetIndex = channelsInScope(targetCategoryId).filter((item) => item.id !== channel.id).length;
+    if (await mutateLayout(`/channels/${channel.id}/move`, 'POST', { targetCategoryId, targetIndex })) {
+      movingChannelId = null;
+      closeServerDialog();
     }
   }
 
@@ -533,7 +612,7 @@
     }
   }
 
-  function openServerDialog(kind: 'server' | 'channel' | 'invite', trigger: Event) {
+  function openServerDialog(kind: NonNullable<typeof serverDialog>, trigger: Event) {
     serverDialogReturnFocus = trigger.currentTarget instanceof HTMLElement ? trigger.currentTarget : null;
     serverMenuOpen = false;
     serverDialog = kind;
@@ -3410,8 +3489,8 @@
   {/if}
 
   {#if serverDialog}
-    <dialog class="cubic-server-dialog" use:showServerDialog aria-label={serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : 'Invite people'} onclose={closeServerDialog}>
-      <header><h2>{serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : 'Invite people'}</h2><button type="button" aria-label="Close server dialog" onclick={closeServerDialog}><Icon name="x" size={18} /></button></header>
+    <dialog class="cubic-server-dialog" use:showServerDialog aria-label={serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : serverDialog === 'invite' ? 'Invite people' : serverDialog === 'move-channel' ? 'Move channel' : serverDialog === 'rename-category' ? 'Rename category' : 'Create category'} onclose={closeServerDialog}>
+      <header><h2>{serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : serverDialog === 'invite' ? 'Invite people' : serverDialog === 'move-channel' ? 'Move channel' : serverDialog === 'rename-category' ? 'Rename category' : 'Create category'}</h2><button type="button" aria-label="Close server dialog" onclick={closeServerDialog}><Icon name="x" size={18} /></button></header>
       {#if serverDialog === 'server'}
         <form class="cubic-server-create" onsubmit={createServer}>
           <label for="cubic-server-name">Server name</label>
@@ -3423,9 +3502,31 @@
         <form class="cubic-server-create" onsubmit={createChannel}>
           <label for="cubic-channel-name">Channel name</label>
           <input id="cubic-channel-name" bind:value={channelName} maxlength="96" required placeholder="New text channel" />
+          <label for="cubic-channel-category">Category</label>
+          <select id="cubic-channel-category" bind:value={channelCategoryId}>
+            <option value="">Uncategorized</option>
+            {#each serverCategories as category (category.id)}<option value={category.id}>{category.name}</option>{/each}
+          </select>
           <button type="submit" disabled={channelCreateBusy || channelsLoading}>{channelCreateBusy ? 'Creating…' : 'Create text channel'}</button>
         </form>
         {#if channelsError}<p class="inline-error" role="alert">{channelsError}</p>{/if}
+      {:else if (serverDialog === 'category' || serverDialog === 'rename-category') && activeServer?.ownerUserId === currentUser.id}
+        <form class="cubic-server-create" onsubmit={saveCategory}>
+          <label for="cubic-category-name">Category name</label>
+          <input id="cubic-category-name" bind:value={categoryName} maxlength="96" required />
+          <button type="submit" disabled={layoutBusy || channelsLoading}>{layoutBusy ? 'Saving…' : serverDialog === 'category' ? 'Create category' : 'Save category'}</button>
+        </form>
+        {#if layoutError}<p class="inline-error" role="alert">{layoutError}</p>{/if}
+      {:else if serverDialog === 'move-channel' && activeServer?.ownerUserId === currentUser.id}
+        <form class="cubic-server-create" onsubmit={moveSelectedChannel}>
+          <label for="cubic-channel-destination">Move channel to</label>
+          <select id="cubic-channel-destination" bind:value={moveDestinationId}>
+            <option value="">Uncategorized</option>
+            {#each serverCategories as category (category.id)}<option value={category.id}>{category.name}</option>{/each}
+          </select>
+          <button type="submit" disabled={layoutBusy || channelsLoading}>{layoutBusy ? 'Moving…' : 'Move to end'}</button>
+        </form>
+        {#if layoutError}<p class="inline-error" role="alert">{layoutError}</p>{/if}
       {:else if serverDialog === 'invite' && activeServer && activeServer.ownerUserId === currentUser.id}
         <form class="cubic-server-create" onsubmit={inviteServerFriend}>
           <label for="cubic-server-invite-friend">Invite a friend</label>
@@ -3487,16 +3588,47 @@
         {/if}
         <div class="cubic-channel-sidebar-head">
           <strong>TEXT CHANNELS</strong>
-          {#if activeServer.ownerUserId === currentUser.id}<button type="button" aria-label="Create text channel" title="Create text channel" onclick={(event) => openServerDialog('channel', event)}><Icon name="plus" size={18} /></button>{/if}
+          {#if activeServer.ownerUserId === currentUser.id}
+            <button type="button" aria-label="Create category" title="Create category" onclick={(event) => { categoryName = ''; editingCategoryId = null; openServerDialog('category', event); }}><Icon name="plus" size={18} /></button>
+            <button type="button" aria-label="Create text channel" title="Create text channel" onclick={(event) => { channelCategoryId = ''; openServerDialog('channel', event); }}><Icon name="plus" size={18} /></button>
+          {/if}
         </div>
         <div class="cubic-channel-list" aria-label={`Text channels in ${activeServer.name}`}>
           {#if channelsLoading}<p class="cubic-server-list-status">Loading channels…</p>{/if}
           {#if !channelsLoading && serverChannels.length === 0}<p class="cubic-server-list-status">This server does not have channels yet.</p>{/if}
-          {#each serverChannels as channel (channel.id)}
-            <button class="cubic-channel-row" type="button" aria-label={`Text channel ${channel.name}`} aria-current={activeChannel?.id === channel.id ? 'page' : undefined} onclick={() => selectChannel(channel)}>
-              <span aria-hidden="true">#</span><span>{channel.name}</span>
-            </button>
+          {#each channelsInScope(null) as channel, index (channel.id)}
+            <div class="cubic-layout-channel-line">
+              <button class="cubic-channel-row" type="button" aria-label={`Text channel ${channel.name}`} aria-current={activeChannel?.id === channel.id ? 'page' : undefined} onclick={() => selectChannel(channel)}><span aria-hidden="true">#</span><span>{channel.name}</span></button>
+              {#if activeServer.ownerUserId === currentUser.id}
+                <button type="button" aria-label={`Move ${channel.name} up`} title="Move up" disabled={layoutBusy || index === 0} onclick={() => shiftChannel(channel, -1)}>↑</button>
+                <button type="button" aria-label={`Move ${channel.name} down`} title="Move down" disabled={layoutBusy || index === channelsInScope(null).length - 1} onclick={() => shiftChannel(channel, 1)}>↓</button>
+                <button type="button" aria-label={`Move ${channel.name} to category`} title="Move to category" disabled={layoutBusy} onclick={(event) => { movingChannelId = channel.id; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}>⋯</button>
+              {/if}
+            </div>
           {/each}
+          {#each serverCategories as category, categoryIndex (category.id)}
+            <section class="cubic-layout-category" aria-label={`Category ${category.name}`}>
+              <div class="cubic-layout-category-head"><strong>{category.name}</strong>
+                {#if activeServer.ownerUserId === currentUser.id}
+                  <button type="button" aria-label={`Move category ${category.name} up`} disabled={layoutBusy || categoryIndex === 0} onclick={() => shiftCategory(category.id, -1)}>↑</button>
+                  <button type="button" aria-label={`Move category ${category.name} down`} disabled={layoutBusy || categoryIndex === serverCategories.length - 1} onclick={() => shiftCategory(category.id, 1)}>↓</button>
+                  <button type="button" aria-label={`Rename category ${category.name}`} onclick={(event) => { editingCategoryId = category.id; categoryName = category.name; openServerDialog('rename-category', event); }}>Edit</button>
+                  <button type="button" aria-label={`Delete category ${category.name}`} disabled={layoutBusy} onclick={() => deleteSelectedCategory(category.id)}>×</button>
+                {/if}
+              </div>
+              {#each channelsInScope(category.id) as channel, index (channel.id)}
+                <div class="cubic-layout-channel-line">
+                  <button class="cubic-channel-row" type="button" aria-label={`Text channel ${channel.name}`} aria-current={activeChannel?.id === channel.id ? 'page' : undefined} onclick={() => selectChannel(channel)}><span aria-hidden="true">#</span><span>{channel.name}</span></button>
+                  {#if activeServer.ownerUserId === currentUser.id}
+                    <button type="button" aria-label={`Move ${channel.name} up`} disabled={layoutBusy || index === 0} onclick={() => shiftChannel(channel, -1)}>↑</button>
+                    <button type="button" aria-label={`Move ${channel.name} down`} disabled={layoutBusy || index === channelsInScope(category.id).length - 1} onclick={() => shiftChannel(channel, 1)}>↓</button>
+                    <button type="button" aria-label={`Move ${channel.name} to category`} disabled={layoutBusy} onclick={(event) => { movingChannelId = channel.id; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}>⋯</button>
+                  {/if}
+                </div>
+              {/each}
+            </section>
+          {/each}
+          {#if layoutError}<p class="inline-error" role="alert">{layoutError}</p>{/if}
           {#if channelsError}<div class="inline-error cubic-server-error" role="alert">{channelsError} <button type="button" onclick={() => refreshServerChannels(activeServer!)}>Retry list</button></div>{/if}
         </div>
         <button class="cubic-server-sidebar-members" type="button" aria-expanded={serverMembersOpen} onclick={toggleServerMembers}><Icon name="users" size={17} /> Members · {serverMembers.length}</button>
