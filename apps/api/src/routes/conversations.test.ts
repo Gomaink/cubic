@@ -161,6 +161,8 @@ class RouteDatabase {
         : this.result();
     }
 
+    if (normalized.includes("c.kind = 'server_text'")) return this.result();
+
     if (normalized.startsWith('select id, conversation_id from messages')) {
       const row = [...this.messages.values()].find((message) =>
         message.conversation_id === params[0] &&

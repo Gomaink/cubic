@@ -13,6 +13,8 @@ const peerId = '10000000-0000-4000-8000-000000000002';
 
 class AuthorizationDatabase {
   membership: { kind: 'direct' | 'group'; role: string } | null = null;
+  channelMember = false;
+  channelLinked = true;
   directPair: { lowId: string; highId: string } | null = null;
   blocked = false;
   failure: Error | null = null;
@@ -29,6 +31,14 @@ class AuthorizationDatabase {
               kind: this.membership.kind,
               role: this.membership.role
             }]
+          : [];
+        return { rows, rowCount: rows.length };
+      }
+
+      if (normalized.includes("c.kind = 'server_text'")) {
+        const rows = params[0] === conversationId && params[1] === actorId &&
+          this.channelMember && this.channelLinked
+          ? [{ conversation_id: conversationId, server_id: '30000000-0000-4000-8000-000000000001' }]
           : [];
         return { rows, rowCount: rows.length };
       }
@@ -99,6 +109,33 @@ test('content creation preserves group access and bilateral direct block behavio
   );
 
   database.membership = null;
+  assert.deepEqual(
+    await authorizeConversationContentCreation(database as never, conversationId, actorId),
+    { allowed: false, reason: 'not_member' }
+  );
+});
+
+test('server text access requires a linked channel and current server membership', async () => {
+  const database = new AuthorizationDatabase();
+  database.channelMember = true;
+  assert.deepEqual(
+    await authorizeConversationContentCreation(database as never, conversationId, actorId),
+    {
+      allowed: true,
+      membership: {
+        conversationId,
+        kind: 'server_text',
+        serverId: '30000000-0000-4000-8000-000000000001'
+      }
+    }
+  );
+  database.channelMember = false;
+  assert.deepEqual(
+    await authorizeConversationContentCreation(database as never, conversationId, actorId),
+    { allowed: false, reason: 'not_member' }
+  );
+  database.channelMember = true;
+  database.channelLinked = false;
   assert.deepEqual(
     await authorizeConversationContentCreation(database as never, conversationId, actorId),
     { allowed: false, reason: 'not_member' }

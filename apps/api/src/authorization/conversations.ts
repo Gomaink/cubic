@@ -9,8 +9,14 @@ export interface ConversationMembership {
   role: ConversationRole;
 }
 
+export type ConversationAccess = ConversationMembership | {
+  conversationId: string;
+  kind: 'server_text';
+  serverId: string;
+};
+
 export type ConversationContentCreationAuthorization =
-  | { allowed: true; membership: ConversationMembership }
+  | { allowed: true; membership: ConversationAccess }
   | { allowed: false; reason: 'not_member' | 'blocked' };
 
 export type DirectCallStartAuthorization =
@@ -51,18 +57,40 @@ export async function resolveConversationMembership(
   };
 }
 
+export async function resolveConversationAccess(
+  database: Database,
+  conversationId: string,
+  authenticatedUserId: string
+): Promise<ConversationAccess | null> {
+  const legacy = await resolveConversationMembership(database, conversationId, authenticatedUserId);
+  if (legacy) return legacy;
+
+  const result = await database.pool.query<{ conversation_id: string; server_id: string }>(
+    `select c.id as conversation_id, channel.server_id
+       from conversations c
+       join server_text_channels channel on channel.conversation_id = c.id
+       join server_members member
+         on member.server_id = channel.server_id and member.user_id = $2
+      where c.id = $1 and c.kind = 'server_text'
+      limit 1`,
+    [conversationId, authenticatedUserId]
+  );
+  const row = result.rows[0];
+  return row ? { conversationId: row.conversation_id, kind: 'server_text', serverId: row.server_id } : null;
+}
+
 export async function authorizeConversationContentCreation(
   database: Database,
   conversationId: string,
   authenticatedUserId: string
 ): Promise<ConversationContentCreationAuthorization> {
-  const membership = await resolveConversationMembership(
+  const membership = await resolveConversationAccess(
     database,
     conversationId,
     authenticatedUserId
   );
   if (!membership) return { allowed: false, reason: 'not_member' };
-  if (membership.kind === 'group') return { allowed: true, membership };
+  if (membership.kind !== 'direct') return { allowed: true, membership };
 
   const blocked = await database.pool.query(
     `select 1

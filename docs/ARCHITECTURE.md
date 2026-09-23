@@ -2,7 +2,7 @@
 
 ## Principles
 
-1. **Conversation-centric data.** A DM and a group are both conversations with members.
+1. **Reusable message containers.** DMs and legacy groups are conversations with members; server text channels use conversations for messages but derive access from server membership.
 2. **Server-authoritative identity.** Clients never choose who they are by sending a `senderId`.
 3. **Separate text realtime from media realtime.** Messaging/presence and WebRTC media solve different problems.
 4. **Modular monolith first.** Keep deployment simple for self-hosters; split services only when scale justifies it.
@@ -118,4 +118,9 @@ call_participants
 
 Alpha 9 Slice 1 adds independent `servers` and `server_members` records for
 server identity and membership. Existing direct and group conversations remain
-unchanged; a server is not a conversation and has no channels or realtime room yet.
+unchanged; a server is not a conversation. Slice 2 adds `server_text_channels`:
+each channel belongs to a server and uniquely references a `server_text`
+conversation as its message, reaction and attachment container. Current
+`server_members` membership grants channel access; members are not copied into
+`conversation_members`. Existing DM/group authority remains separate. Text
+channels reuse conversation realtime rooms and have no call/LiveKit capability.

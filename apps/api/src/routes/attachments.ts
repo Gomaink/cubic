@@ -240,11 +240,24 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
               )
               or (
                 a.message_id is not null
-                and exists (
-                  select 1
-                    from conversation_members cm
-                   where cm.conversation_id = a.conversation_id
-                     and cm.user_id = $2
+                and (
+                  exists (
+                    select 1
+                      from conversation_members cm
+                      join conversations c
+                        on c.id = cm.conversation_id and c.kind in ('direct', 'group')
+                     where cm.conversation_id = a.conversation_id
+                       and cm.user_id = $2
+                  )
+                  or exists (
+                    select 1
+                      from server_text_channels channel
+                      join conversations c
+                        on c.id = channel.conversation_id and c.kind = 'server_text'
+                      join server_members member
+                        on member.server_id = channel.server_id and member.user_id = $2
+                     where channel.conversation_id = a.conversation_id
+                  )
                 )
               )
             )

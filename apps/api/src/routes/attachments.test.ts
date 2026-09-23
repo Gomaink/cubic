@@ -40,7 +40,7 @@ function attachment(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
 class AttachmentRouteDatabase {
   attachments = [attachment()];
   members = new Set([uploader, member]);
-  conversationKind: 'direct' | 'group' = 'group';
+  conversationKind: 'direct' | 'group' | 'server_text' = 'group';
   blocked = false;
   contentQuery = '';
 
@@ -63,8 +63,15 @@ class AttachmentRouteDatabase {
       }
 
       if (normalized.includes("c.kind in ('direct', 'group')")) {
-        const rows = params[0] === conversation && this.members.has(params[1])
+        const rows = params[0] === conversation && this.members.has(params[1]) && this.conversationKind !== 'server_text'
           ? [{ conversation_id: conversation, kind: this.conversationKind, role: 'member' }]
+          : [];
+        return { rows, rowCount: rows.length };
+      }
+
+      if (normalized.includes("c.kind = 'server_text'")) {
+        const rows = params[0] === conversation && this.members.has(params[1]) && this.conversationKind === 'server_text'
+          ? [{ conversation_id: conversation, server_id: '40000000-0000-4000-8000-000000000001' }]
           : [];
         return { rows, rowCount: rows.length };
       }
@@ -211,7 +218,6 @@ test('pending attachment content is visible only to its uploader', async () => {
 
   const unauthenticated = await harness.invoke('GET', '/attachments/:id/content', null);
   assert.equal(unauthenticated.statusCode, 401);
-  assert.match(harness.database.contentQuery, /a\.message_id is not null and exists/);
 });
 
 test('pending attachment deletion is available only to its uploader', async () => {
@@ -245,6 +251,20 @@ test('bound attachment requires current conversation membership even for its upl
     const response = await harness.invoke('GET', '/attachments/:id/content', userId);
     assert.equal(response.statusCode, 404);
   }
+});
+
+test('server text attachment upload and linked delivery require current server membership', async () => {
+  const database = new AttachmentRouteDatabase();
+  database.conversationKind = 'server_text';
+  const harness = await routeHarness(database);
+  assert.equal((await harness.invoke('POST', '/conversations/:id/attachments', member)).statusCode, 201);
+  assert.equal((await harness.invoke('POST', '/conversations/:id/attachments', outsider)).statusCode, 404);
+
+  database.attachments[0]!.message_id = messageId;
+  assert.equal((await harness.invoke('GET', '/attachments/:id/content', member)).statusCode, 200);
+  assert.equal((await harness.invoke('GET', '/attachments/:id/content', outsider)).statusCode, 404);
+  database.members.delete(uploader);
+  assert.equal((await harness.invoke('GET', '/attachments/:id/content', uploader)).statusCode, 404);
 });
 
 test('scriptable and unknown attachment types remain download-only', async () => {

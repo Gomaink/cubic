@@ -29,8 +29,16 @@
   let conversations = $state<any[]>([]);
   let activeConversation = $state<any | null>(null);
   type ServerSummary = { id: string; name: string; ownerUserId: string; createdAt: string; updatedAt: string };
+  type ServerTextChannel = { id: string; serverId: string; conversationId: string; name: string; createdAt: string; updatedAt: string };
   let servers = $state<ServerSummary[]>([]);
   let activeServer = $state<ServerSummary | null>(null);
+  let serverChannels = $state<ServerTextChannel[]>([]);
+  let activeChannel = $state<ServerTextChannel | null>(null);
+  let channelsLoading = $state(false);
+  let channelsError = $state('');
+  let channelName = $state('');
+  let channelCreateBusy = $state(false);
+  let channelLoadSequence = 0;
   let serversLoading = $state(true);
   let serversError = $state('');
   let serverName = $state('');
@@ -235,7 +243,9 @@
   }
 
   function conversationName(conversation: any) {
-    return conversation.kind === 'group'
+    return conversation.kind === 'server_text'
+      ? conversation.title ?? 'Text channel'
+      : conversation.kind === 'group'
       ? conversation.title ?? 'Untitled group'
       : conversation.peer?.displayName ?? 'Conversation';
   }
@@ -296,6 +306,61 @@
     closeConversation();
     activeServer = server;
     tab = 'servers';
+    void refreshServerChannels(server);
+  }
+
+  async function refreshServerChannels(server: ServerSummary) {
+    const sequence = ++channelLoadSequence;
+    channelsLoading = true;
+    channelsError = '';
+    serverChannels = [];
+    try {
+      const payload = await api(`/api/v1/servers/${server.id}/channels`);
+      if (sequence !== channelLoadSequence || activeServer?.id !== server.id) return;
+      serverChannels = payload.channels;
+    } catch (cause) {
+      if (sequence === channelLoadSequence && activeServer?.id === server.id) {
+        channelsError = cause instanceof Error ? cause.message : 'Could not load channels.';
+      }
+    } finally {
+      if (sequence === channelLoadSequence) channelsLoading = false;
+    }
+  }
+
+  async function createChannel(event: SubmitEvent) {
+    event.preventDefault();
+    const server = activeServer;
+    if (!server || channelCreateBusy || channelsLoading) return;
+    const name = channelName.trim();
+    if (!name || name.length > 96) {
+      channelsError = 'Enter a channel name of 1–96 characters.';
+      return;
+    }
+    channelCreateBusy = true;
+    channelsError = '';
+    try {
+      const payload = await api(`/api/v1/servers/${server.id}/channels`, {
+        method: 'POST', body: JSON.stringify({ name })
+      });
+      if (activeServer?.id !== server.id) return;
+      const channel = payload.channel as ServerTextChannel;
+      channelLoadSequence += 1;
+      channelsLoading = false;
+      serverChannels = [...serverChannels.filter((item) => item.id !== channel.id), channel]
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+      channelName = '';
+      await selectChannel(channel);
+    } catch (cause) {
+      if (activeServer?.id === server.id) channelsError = cause instanceof Error ? cause.message : 'Could not create channel.';
+    } finally {
+      channelCreateBusy = false;
+    }
+  }
+
+  async function selectChannel(channel: ServerTextChannel) {
+    if (activeServer?.id !== channel.serverId) return;
+    activeChannel = channel;
+    await selectConversation({ id: channel.conversationId, kind: 'server_text', title: channel.name }, true);
   }
 
   async function createServer(event: SubmitEvent) {
@@ -695,10 +760,14 @@
     } finally { busy = false; }
   }
 
-  async function selectConversation(conversation: any) {
+  async function selectConversation(conversation: any, preserveServer = false) {
     deleteDialog?.close();
-    activeServer = null;
-    tab = 'chats';
+    if (!preserveServer) {
+      activeServer = null;
+      activeChannel = null;
+      channelLoadSequence += 1;
+      tab = 'chats';
+    }
     activeConversation = conversation;
     pendingPresenceSnapshot = null;
     groupPanelOpen = false;
@@ -721,11 +790,12 @@
     if (conversation.kind === 'group') await refreshGroupDetails();
 
     realtimeSocket?.timeout(4000).emit('conversation:join', { conversationId: conversation.id }, () => {});
-    if (realtimeSocket) requestPresenceSnapshot(realtimeSocket);
+    if (realtimeSocket && conversation.kind !== 'server_text') requestPresenceSnapshot(realtimeSocket);
   }
 
   function closeConversation() {
     activeConversation = null;
+    activeChannel = null;
     pendingPresenceSnapshot = null;
     chatMessages = [];
     groupDetails = null;
@@ -2908,6 +2978,9 @@
     serverRefreshSequence += 1;
     servers = [];
     activeServer = null;
+    activeChannel = null;
+    serverChannels = [];
+    channelLoadSequence += 1;
     await leaveVoice();
     realtimeSocket?.disconnect();
     try { await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' }); }
@@ -2965,7 +3038,7 @@
     socket.on('realtime:ready', () => {
       reportActivity(document.visibilityState === 'hidden' || Date.now() - lastActivityAt >= PRESENCE_IDLE_MS ? 'idle' : 'active');
       scheduleIdle();
-      requestPresenceSnapshot(socket);
+      if (activeConversation?.kind !== 'server_text') requestPresenceSnapshot(socket);
     });
     socket.on('disconnect', (reason) => {
       realtimeConnected = false;
@@ -3118,7 +3191,7 @@
 <main class="messenger-shell">
   <aside class="messenger-nav">
     <div class="messenger-brand"><img src="/images/cubic-w-nobg.png" alt="" /><strong>Cubic</strong><span title={realtimeConnected ? 'Realtime connected' : 'Realtime reconnecting'}>{realtimeConnected ? 'LIVE' : 'SYNC'}</span></div>
-    <button class="nav-action" class:active={tab === 'chats'} title="Chats" onclick={() => { tab = 'chats'; activeServer = null; }}>
+    <button class="nav-action" class:active={tab === 'chats'} title="Chats" onclick={() => { if (activeConversation?.kind === 'server_text') closeConversation(); tab = 'chats'; activeServer = null; }}>
       <Icon name="message" size={20} /><span>Chats</span>
     </button>
     <button class="nav-action cubic-server-nav" class:active={tab === 'servers'} title="Servers" onclick={() => { tab = 'servers'; closeConversation(); activeServer = null; }}>
@@ -3182,6 +3255,17 @@
             <span class="avatar group-avatar">{server.name.slice(0, 1).toUpperCase()}</span>
             <span class="conversation-copy"><strong>{server.name}</strong><small>Server</small></span>
           </button>
+          {#if activeServer?.id === server.id}
+            <div class="cubic-channel-list" aria-label={`Text channels in ${server.name}`}>
+              {#if channelsLoading}<p class="cubic-server-list-status">Loading channels…</p>{/if}
+              {#each serverChannels as channel (channel.id)}
+                <button class="cubic-channel-row" type="button" aria-label={`Text channel ${channel.name}`} aria-current={activeChannel?.id === channel.id ? 'page' : undefined} onclick={() => selectChannel(channel)}>
+                  <span aria-hidden="true">#</span><span>{channel.name}</span>
+                </button>
+              {/each}
+              {#if channelsError}<div class="inline-error cubic-server-error" role="alert">{channelsError} <button type="button" onclick={() => refreshServerChannels(server)}>Retry list</button></div>{/if}
+            </div>
+          {/if}
         {/each}
       </div>
       <form class="cubic-server-create" onsubmit={createServer}>
@@ -3220,7 +3304,7 @@
   <section class="chat-panel" class:open={activeConversation !== null || activeServer !== null} class:cubic-members-open={memberPanelOpen}>
     {#if activeConversation}
       <header class="chat-header">
-        <button class="chat-back" type="button" aria-label="Back to conversations" title="Back" onclick={closeConversation}><Icon name="back" size={24} /></button>
+        <button class="chat-back" type="button" aria-label={activeConversation.kind === 'server_text' ? 'Back to server' : 'Back to conversations'} title="Back" onclick={closeConversation}><Icon name="back" size={24} /></button>
         {#if activeConversation.kind === 'direct' && activeConversation.peer}
           <button class="cubic-profile-header-opener" type="button" aria-label={`Open ${activeConversation.peer.displayName}'s profile`} onclick={() => openProfile(activeConversation.peer)}>
             <span class="avatar cubic-user-avatar-shell">{conversationLetter(activeConversation)}{#if activeConversation.peer.avatarUrl}{#key activeConversation.peer.avatarUrl}<img src={activeConversation.peer.avatarUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span>
@@ -3232,16 +3316,18 @@
         {/if}
         <div class="chat-heading">
           <strong>{conversationName(activeConversation)}</strong>
-          <small>{activeConversation.kind === 'group' ? `${activeConversation.memberCount ?? groupDetails?.members?.length ?? 0} members` : `@${activeConversation.peer?.username ?? ''}`}</small>
+          <small>{activeConversation.kind === 'server_text' ? `Text channel · ${activeServer?.name ?? 'Server'}` : activeConversation.kind === 'group' ? `${activeConversation.memberCount ?? groupDetails?.members?.length ?? 0} members` : `@${activeConversation.peer?.username ?? ''}`}</small>
         </div>
         {#if activeConversation.kind === 'group'}
           <button class="chat-meta-button" type="button" aria-label="Group settings" title="Group settings" onclick={() => { memberPanelOpen = false; groupPanelOpen = !groupPanelOpen; if (groupPanelOpen) refreshGroupDetails().catch(() => {}); }}>
             <Icon name="settings" size={19} />
           </button>
         {/if}
-        <button class="chat-meta-button" type="button" aria-label="Members" title="Members" aria-expanded={memberPanelOpen} onclick={() => { groupPanelOpen = false; memberPanelOpen = !memberPanelOpen; if (memberPanelOpen && realtimeSocket) requestPresenceSnapshot(realtimeSocket); }}>
-          <Icon name="users" size={19} />
-        </button>
+        {#if activeConversation.kind !== 'server_text'}
+          <button class="chat-meta-button" type="button" aria-label="Members" title="Members" aria-expanded={memberPanelOpen} onclick={() => { groupPanelOpen = false; memberPanelOpen = !memberPanelOpen; if (memberPanelOpen && realtimeSocket) requestPresenceSnapshot(realtimeSocket); }}>
+            <Icon name="users" size={19} />
+          </button>
+        {/if}
         {#if activeConversation.kind === 'direct'}
           <button
             class="chat-voice-button"
@@ -3254,7 +3340,7 @@
           >
             <Icon name={directCall?.conversationId === activeConversation.id ? 'phone-out' : 'phone'} size={19} />
           </button>
-        {:else}
+        {:else if activeConversation.kind === 'group'}
           <button
             class="chat-voice-button"
             class:active={voiceConversationId === activeConversation.id && voiceStatus === 'connected'}
@@ -3831,7 +3917,7 @@
           </div>
         </aside>
       {/if}
-      {#if memberPanelOpen}
+      {#if memberPanelOpen && activeConversation.kind !== 'server_text'}
         <MemberPanel
           title={activeConversation.kind === 'group' ? 'Group members' : 'Conversation member'}
           members={memberPanelMembers()}
@@ -3849,7 +3935,22 @@
         <div class="cubic-server-foundation-copy">
           <span class="avatar group-avatar" aria-hidden="true">{activeServer.name.slice(0, 1).toUpperCase()}</span>
           <h2>{activeServer.name}</h2>
-          <p>This server does not have channels yet. Your existing chats and groups remain available.</p>
+          <p>{serverChannels.length ? 'Select a text channel to start messaging.' : 'This server does not have channels yet. Your existing chats and groups remain available.'}</p>
+          {#if serverChannels.length}
+            <div class="cubic-channel-main-list" aria-label={`Text channels in ${activeServer.name}`}>
+              {#each serverChannels as channel (channel.id)}
+                <button type="button" aria-label={`Open text channel ${channel.name}`} onclick={() => selectChannel(channel)}># {channel.name}</button>
+              {/each}
+            </div>
+          {/if}
+          {#if activeServer.ownerUserId === currentUser.id}
+            <form class="cubic-server-create cubic-channel-create" onsubmit={createChannel}>
+              <label for="cubic-channel-name">Channel name</label>
+              <input id="cubic-channel-name" bind:value={channelName} maxlength="96" required placeholder="New text channel" />
+              <button type="submit" disabled={channelCreateBusy || channelsLoading}>{channelCreateBusy ? 'Creating…' : 'Create text channel'}</button>
+            </form>
+          {/if}
+          {#if channelsError}<div class="inline-error cubic-server-error" role="alert">{channelsError}</div>{/if}
           <button type="button" onclick={() => { activeServer = null; tab = 'chats'; }}>Back to chats</button>
         </div>
       </section>
