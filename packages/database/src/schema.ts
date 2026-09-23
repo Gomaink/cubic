@@ -64,6 +64,30 @@ export const serverMembers = pgTable(
   ]
 );
 
+export const serverInvites = pgTable(
+  'server_invites',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
+    inviterUserId: uuid('inviter_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    inviteeUserId: uuid('invitee_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    status: varchar('status', { length: 16 }).notNull().default('pending'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    respondedAt: timestamp('responded_at', { withTimezone: true, mode: 'date' })
+  },
+  (table) => [
+    uniqueIndex('server_invites_pending_pair_uq')
+      .on(table.serverId, table.inviteeUserId)
+      .where(sql`${table.status} = 'pending'`),
+    index('server_invites_invitee_status_created_idx')
+      .on(table.inviteeUserId, table.status, table.createdAt),
+    index('server_invites_server_status_created_idx')
+      .on(table.serverId, table.status, table.createdAt),
+    check('server_invites_status_ck', sql`${table.status} in ('pending', 'accepted', 'cancelled')`),
+    check('server_invites_distinct_users_ck', sql`${table.inviterUserId} <> ${table.inviteeUserId}`)
+  ]
+);
+
 export const userSettings = pgTable('user_settings', {
   userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
   theme: varchar('theme', { length: 16 }).notNull().default('dark'),

@@ -124,3 +124,9 @@ conversation as its message, reaction and attachment container. Current
 `server_members` membership grants channel access; members are not copied into
 `conversation_members`. Existing DM/group authority remains separate. Text
 channels reuse conversation realtime rooms and have no call/LiveKit capability.
+Slice 3 adds targeted `server_invites`: the owner may invite an existing friend,
+the named recipient may accept, and the owner may cancel while pending. These
+invitations have no token or expiry. Acceptance creates one `server_members`
+row, not per-channel `conversation_members` rows. A non-owner may leave;
+after the membership transaction commits, the existing race-safe conversation
+room revocation evicts that user's sockets from the server's text channels.

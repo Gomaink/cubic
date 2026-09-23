@@ -26,6 +26,7 @@
   let friends = $state<any[]>([]);
   let requests = $state<any[]>([]);
   let groupInvites = $state<any[]>([]);
+  let serverInvites = $state<any[]>([]);
   let conversations = $state<any[]>([]);
   let activeConversation = $state<any | null>(null);
   type ServerSummary = { id: string; name: string; ownerUserId: string; createdAt: string; updatedAt: string };
@@ -43,6 +44,13 @@
   let serversError = $state('');
   let serverName = $state('');
   let serverCreateBusy = $state(false);
+  let serverMembers = $state<ProfileIdentity[]>([]);
+  let pendingServerInvites = $state<any[]>([]);
+  let serverInviteTarget = $state('');
+  let serverMembershipBusy = $state(false);
+  let serverMembershipError = $state('');
+  let serverDetailSequence = 0;
+  let serverInviteSequence = 0;
   let serverListRevision = 0;
   let serverRefreshSequence = 0;
   let chatMessages = $state<any[]>([]);
@@ -274,6 +282,34 @@
     groupInvites = payload.invites;
   }
 
+  async function refreshServerInvites() {
+    const sequence = ++serverInviteSequence;
+    try {
+      const payload = await api('/api/v1/servers/invites');
+      if (sequence !== serverInviteSequence) return;
+      serverInvites = payload.invites;
+    } catch (cause) {
+      if (sequence === serverInviteSequence) error = cause instanceof Error ? cause.message : 'Could not load server invitations.';
+    }
+  }
+
+  async function refreshServerMembership(server: ServerSummary) {
+    const sequence = ++serverDetailSequence;
+    serverMembershipError = '';
+    try {
+      const [members, invites] = await Promise.all([
+        api(`/api/v1/servers/${server.id}/members`),
+        server.ownerUserId === currentUser.id ? api(`/api/v1/servers/${server.id}/invites`) : Promise.resolve({ invites: [] })
+      ]);
+      if (sequence !== serverDetailSequence || activeServer?.id !== server.id) return;
+      serverMembers = members.members;
+      pendingServerInvites = invites.invites;
+    } catch (cause) {
+      if (sequence === serverDetailSequence && activeServer?.id === server.id)
+        serverMembershipError = cause instanceof Error ? cause.message : 'Could not load server members.';
+    }
+  }
+
   async function refreshConversations() {
     const payload = await api('/api/v1/conversations');
     conversations = payload.conversations;
@@ -307,6 +343,82 @@
     activeServer = server;
     tab = 'servers';
     void refreshServerChannels(server);
+    serverMembers = [];
+    pendingServerInvites = [];
+    serverInviteTarget = '';
+    void refreshServerMembership(server);
+  }
+
+  async function inviteServerFriend(event: SubmitEvent) {
+    event.preventDefault();
+    const server = activeServer;
+    if (!server || server.ownerUserId !== currentUser.id || !serverInviteTarget || serverMembershipBusy) return;
+    serverMembershipBusy = true;
+    serverMembershipError = '';
+    try {
+      const payload = await api(`/api/v1/servers/${server.id}/invites`, { method: 'POST', body: JSON.stringify({ userId: serverInviteTarget }) });
+      if (activeServer?.id !== server.id) return;
+      serverDetailSequence += 1;
+      pendingServerInvites = [...pendingServerInvites.filter((invite) => invite.id !== payload.invite.id), payload.invite];
+      serverInviteTarget = '';
+    } catch (cause) {
+      serverMembershipError = cause instanceof Error ? cause.message : 'Could not send invitation.';
+    } finally { serverMembershipBusy = false; }
+  }
+
+  async function cancelServerInvite(inviteId: string) {
+    if (serverMembershipBusy) return;
+    serverMembershipBusy = true;
+    serverMembershipError = '';
+    try {
+      await api(`/api/v1/servers/invites/${inviteId}`, { method: 'DELETE' });
+      serverDetailSequence += 1;
+      pendingServerInvites = pendingServerInvites.filter((invite) => invite.id !== inviteId);
+    } catch (cause) {
+      serverMembershipError = cause instanceof Error ? cause.message : 'Invitation changed. Refresh the list.';
+      if (activeServer) void refreshServerMembership(activeServer);
+    } finally { serverMembershipBusy = false; }
+  }
+
+  async function acceptServerInvite(inviteId: string) {
+    if (serverMembershipBusy) return;
+    serverMembershipBusy = true;
+    error = '';
+    try {
+      const payload = await api(`/api/v1/servers/invites/${inviteId}/accept`, { method: 'POST' });
+      serverInviteSequence += 1;
+      serverInvites = serverInvites.filter((invite) => invite.id !== inviteId);
+      const server = payload.server as ServerSummary;
+      serverListRevision += 1;
+      servers = [server, ...servers.filter((item) => item.id !== server.id)];
+      selectServer(server);
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : 'Invitation changed. Refresh the list.';
+      void refreshServerInvites();
+    } finally { serverMembershipBusy = false; }
+  }
+
+  async function leaveSelectedServer() {
+    const server = activeServer;
+    if (!server || server.ownerUserId === currentUser.id || serverMembershipBusy) return;
+    serverMembershipBusy = true;
+    serverMembershipError = '';
+    try {
+      await api(`/api/v1/servers/${server.id}/leave`, { method: 'POST' });
+      closeConversation();
+      serverDetailSequence += 1;
+      channelLoadSequence += 1;
+      serverListRevision += 1;
+      servers = servers.filter((item) => item.id !== server.id);
+      serverChannels = [];
+      serverMembers = [];
+      pendingServerInvites = [];
+      activeServer = null;
+      activeChannel = null;
+      tab = 'chats';
+    } catch (cause) {
+      serverMembershipError = cause instanceof Error ? cause.message : 'Could not leave server.';
+    } finally { serverMembershipBusy = false; }
   }
 
   async function refreshServerChannels(server: ServerSummary) {
@@ -419,6 +531,9 @@
     updatedCurrentUser = update(currentUser);
     selectedProfile = update(selectedProfile);
     friends = friends.map(update);
+    serverMembers = serverMembers.map(update);
+    pendingServerInvites = pendingServerInvites.map((invite) => ({ ...invite, invitee: update(invite.invitee), inviter: update(invite.inviter) }));
+    serverInvites = serverInvites.map((invite) => ({ ...invite, invitee: update(invite.invitee), inviter: update(invite.inviter) }));
     searchResults = searchResults.map(update);
     requests = requests.map((request) => ({ ...request, user: update(request.user) }));
     conversations = conversations.map((conversation) => ({ ...conversation, peer: update(conversation.peer) }));
@@ -2981,6 +3096,11 @@
     activeChannel = null;
     serverChannels = [];
     channelLoadSequence += 1;
+    serverDetailSequence += 1;
+    serverInviteSequence += 1;
+    serverMembers = [];
+    pendingServerInvites = [];
+    serverInvites = [];
     await leaveVoice();
     realtimeSocket?.disconnect();
     try { await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' }); }
@@ -2989,7 +3109,7 @@
 
   onMount(() => {
     loadMediaPreferences();
-    Promise.all([refreshSocial(), refreshGroupInvites(), refreshConversations()]).catch((e) => error = e.message);
+    Promise.all([refreshSocial(), refreshGroupInvites(), refreshServerInvites(), refreshConversations()]).catch((e) => error = e.message);
     void refreshServers();
 
     const PRESENCE_IDLE_MS = 5 * 60 * 1000;
@@ -3197,9 +3317,9 @@
     <button class="nav-action cubic-server-nav" class:active={tab === 'servers'} title="Servers" onclick={() => { tab = 'servers'; closeConversation(); activeServer = null; }}>
       <Icon name="server" size={20} /><span>Servers</span>
     </button>
-    <button class="nav-action" class:active={tab === 'people'} title="People" onclick={() => { tab = 'people'; closeConversation(); activeServer = null; }}>
+    <button class="nav-action" class:active={tab === 'people'} title="People" onclick={() => { tab = 'people'; closeConversation(); activeServer = null; serverDetailSequence += 1; void refreshServerInvites(); }}>
       <Icon name="users" size={20} />
-      <span>People{(requests.filter((r) => r.direction === 'incoming').length + groupInvites.length) ? ` · ${requests.filter((r) => r.direction === 'incoming').length + groupInvites.length}` : ''}</span>
+      <span>People{(requests.filter((r) => r.direction === 'incoming').length + groupInvites.length + serverInvites.length) ? ` · ${requests.filter((r) => r.direction === 'incoming').length + groupInvites.length + serverInvites.length}` : ''}</span>
     </button>
     <button class="cubic-profile-mobile" type="button" aria-label="Open your profile" title="Your profile" onclick={() => openProfile(currentUser)}>
       {currentUser.displayName.slice(0, 1).toUpperCase()}
@@ -3278,6 +3398,14 @@
       <header><div><small>SOCIAL</small><h1>People</h1></div></header>
       <div class="people-search"><input bind:value={query} oninput={search} placeholder="Search username or name" /></div>
       {#if error}<div class="inline-error">{error}</div>{/if}
+      {#if serverInvites.length}<h2 class="section-label">Server invitations</h2>{/if}
+      {#each serverInvites as invite (invite.id)}
+        <div class="person-row cubic-server-invite-row">
+          <span class="avatar group-avatar" aria-hidden="true">{invite.serverName.slice(0, 1).toUpperCase()}</span>
+          <div><strong>{invite.serverName}</strong><small>Pending invitation from @{invite.inviter.username}</small></div>
+          <div class="row-actions"><button type="button" aria-label={`Accept invitation to ${invite.serverName}`} onclick={() => acceptServerInvite(invite.id)} disabled={serverMembershipBusy}>Accept</button></div>
+        </div>
+      {/each}
       {#if groupInvites.length}<h2 class="section-label">Group invitations</h2>{/if}
       {#each groupInvites as invite}
         <div class="person-row">
@@ -3950,6 +4078,34 @@
               <button type="submit" disabled={channelCreateBusy || channelsLoading}>{channelCreateBusy ? 'Creating…' : 'Create text channel'}</button>
             </form>
           {/if}
+          <div class="cubic-server-membership" aria-label={`Members of ${activeServer.name}`}>
+            <div class="cubic-server-member-row"><h3>Members</h3><button type="button" aria-label="Refresh server members and invitations" onclick={() => refreshServerMembership(activeServer!)}>Refresh</button></div>
+            {#each serverMembers as member (member.id)}
+              <div class="cubic-server-member-row">
+                <button type="button" aria-label={`Open ${member.displayName}'s profile`} onclick={() => openProfile(member)}>{member.displayName}</button>
+                <small>{member.id === activeServer.ownerUserId ? 'Owner' : 'Member'}</small>
+              </div>
+            {/each}
+          </div>
+          {#if activeServer.ownerUserId === currentUser.id}
+            <form class="cubic-server-create cubic-server-invite-form" onsubmit={inviteServerFriend}>
+              <label for="cubic-server-invite-friend">Invite a friend</label>
+              <select id="cubic-server-invite-friend" bind:value={serverInviteTarget} required>
+                <option value="">Choose a friend</option>
+                {#each friends.filter((friend) => friend.id !== currentUser.id && !serverMembers.some((member) => member.id === friend.id) && !pendingServerInvites.some((invite) => invite.invitee.id === friend.id)) as friend (friend.id)}
+                  <option value={friend.id}>{friend.displayName} (@{friend.username})</option>
+                {/each}
+              </select>
+              <button type="submit" disabled={serverMembershipBusy || !serverInviteTarget}>Invite friend</button>
+            </form>
+            {#if pendingServerInvites.length}<h3>Pending invitations</h3>{/if}
+            {#each pendingServerInvites as invite (invite.id)}
+              <div class="cubic-server-member-row"><span>{invite.invitee.displayName} · Pending</span><button type="button" aria-label={`Cancel invitation for ${invite.invitee.displayName}`} onclick={() => cancelServerInvite(invite.id)} disabled={serverMembershipBusy}>Cancel</button></div>
+            {/each}
+          {:else}
+            <button class="quiet" type="button" onclick={leaveSelectedServer} disabled={serverMembershipBusy}>Leave server</button>
+          {/if}
+          {#if serverMembershipError}<div class="inline-error cubic-server-error" role="alert">{serverMembershipError} <button type="button" onclick={() => refreshServerMembership(activeServer!)}>Retry</button></div>{/if}
           {#if channelsError}<div class="inline-error cubic-server-error" role="alert">{channelsError}</div>{/if}
           <button type="button" onclick={() => { activeServer = null; tab = 'chats'; }}>Back to chats</button>
         </div>

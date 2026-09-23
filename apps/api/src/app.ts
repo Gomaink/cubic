@@ -172,7 +172,8 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     prefix: '/api/v1/servers',
     database: options.database,
     cookieName: options.cookieName,
-    sessionService: options.sessionService
+    sessionService: options.sessionService,
+    realtimeEvents
   });
 
   const attachmentStore = new AttachmentStore(options.mediaRoot ?? '/data/media');
