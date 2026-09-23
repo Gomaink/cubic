@@ -5,6 +5,7 @@ import { createRequireAuth } from '../auth/guard.js';
 import type { SessionService } from '../security/session.js';
 import { createOwnedServer, listMemberServers, resolveMemberServer } from '../servers/store.js';
 import { createOwnedTextChannel, listMemberTextChannels } from '../servers/channels.js';
+import { createCategory, deleteCategory, listMemberCategories, moveCategory, moveChannel, renameCategory } from '../servers/layout.js';
 import {
   acceptServerInvite, cancelServerInvite, createServerInvite, leaveServer,
   listOwnedServerInvites, listReceivedServerInvites, listServerMembers
@@ -20,7 +21,12 @@ export interface ServerRoutesOptions {
 
 const createServerSchema = z.object({ name: z.string().trim().min(1).max(96) });
 const serverParamsSchema = z.object({ serverId: z.string().uuid() });
-const createChannelSchema = z.object({ name: z.string().trim().min(1).max(96) });
+const createChannelSchema = z.object({ name: z.string().trim().min(1).max(96), categoryId: z.string().uuid().nullable().optional() });
+const categoryNameSchema = z.object({ name: z.string().trim().min(1).max(96) });
+const categoryParamsSchema = serverParamsSchema.extend({ categoryId: z.string().uuid() });
+const channelParamsSchema = serverParamsSchema.extend({ channelId: z.string().uuid() });
+const moveCategorySchema = z.object({ targetIndex: z.number().int().nonnegative() });
+const moveChannelSchema = z.object({ targetCategoryId: z.string().uuid().nullable(), targetIndex: z.number().int().nonnegative() });
 const inviteParamsSchema = z.object({ inviteId: z.string().uuid() });
 const inviteTargetSchema = z.object({ userId: z.string().uuid() });
 
@@ -69,7 +75,8 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
       options.database,
       params.data.serverId,
       request.auth.user.id,
-      body.data.name
+      body.data.name,
+      body.data.categoryId ?? null
     );
     if ('denied' in result) {
       return result.denied === 'not_found'
@@ -77,6 +84,64 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
         : reply.code(403).send({ error: 'Only the server owner can create channels.' });
     }
     return reply.code(201).send({ channel: result.channel });
+  });
+
+  app.get('/:serverId/categories', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = serverParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid server.' });
+    const result = await listMemberCategories(options.database, params.data.serverId, request.auth.user.id);
+    if ('denied' in result) return reply.code(404).send({ error: 'Server not found.' });
+    return { categories: result };
+  });
+
+  app.post('/:serverId/categories', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = serverParamsSchema.safeParse(request.params);
+    const body = categoryNameSchema.safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid category.' });
+    const result = await createCategory(options.database, params.data.serverId, request.auth.user.id, body.data.name);
+    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Only the server owner can manage categories.' : 'Server not found.' });
+    return reply.code(201).send(result);
+  });
+
+  app.patch('/:serverId/categories/:categoryId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = categoryParamsSchema.safeParse(request.params);
+    const body = categoryNameSchema.safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid category.' });
+    const result = await renameCategory(options.database, params.data.serverId, request.auth.user.id, params.data.categoryId, body.data.name);
+    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Only the server owner can manage categories.' : 'Category not found.' });
+    return result;
+  });
+
+  app.delete('/:serverId/categories/:categoryId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = categoryParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid category.' });
+    const result = await deleteCategory(options.database, params.data.serverId, request.auth.user.id, params.data.categoryId);
+    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Only the server owner can manage categories.' : 'Category not found.' });
+    return reply.code(204).send();
+  });
+
+  app.post('/:serverId/categories/:categoryId/move', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = categoryParamsSchema.safeParse(request.params);
+    const body = moveCategorySchema.safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid category move.' });
+    const result = await moveCategory(options.database, params.data.serverId, request.auth.user.id, params.data.categoryId, body.data.targetIndex);
+    if ('denied' in result) return reply.code(result.denied === 'invalid_index' ? 400 : result.denied === 'not_owner' ? 403 : 404).send({ error: 'Category move not allowed.' });
+    return result;
+  });
+
+  app.post('/:serverId/channels/:channelId/move', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = channelParamsSchema.safeParse(request.params);
+    const body = moveChannelSchema.safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid channel move.' });
+    const result = await moveChannel(options.database, params.data.serverId, request.auth.user.id, params.data.channelId, body.data.targetCategoryId, body.data.targetIndex);
+    if ('denied' in result) return reply.code(result.denied === 'invalid_index' ? 400 : result.denied === 'not_owner' ? 403 : 404).send({ error: 'Channel move not allowed.' });
+    return result;
   });
 
   app.get('/invites', { preHandler: requireAuth }, async (request, reply) => {

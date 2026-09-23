@@ -18,6 +18,7 @@ let activeSessions;
 let groupMembers;
 let fixtureServers;
 let fixtureChannels;
+let fixtureCategories;
 let fixtureServerMembers;
 let fixtureServerInvites;
 let fixtureServerFriends;
@@ -35,6 +36,7 @@ function attachment(name, contentType = 'image/png', dimensions = { width: 800, 
 function reset() {
   fixtureServers = [];
   fixtureChannels = [];
+  fixtureCategories = [];
   fixtureServerMembers = new Map();
   fixtureServerInvites = [];
   fixtureServerFriends = false;
@@ -264,17 +266,78 @@ const server = createServer(async (request, response) => {
     response.writeHead(204); return response.end();
   }
   const serverChannels = /^\/api\/v1\/servers\/([0-9a-f-]+)\/channels$/.exec(url.pathname);
+  const categoryRoute = /^\/api\/v1\/servers\/([0-9a-f-]+)\/categories(?:\/([0-9a-f-]+)(?:\/(move))?)?$/.exec(url.pathname);
+  const channelMoveRoute = /^\/api\/v1\/servers\/([0-9a-f-]+)\/channels\/([0-9a-f-]+)\/move$/.exec(url.pathname);
+  const compact = (rows) => rows.sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)).forEach((item, index) => { item.position = index; });
+  if (categoryRoute) {
+    const selected = fixtureServers.find((item) => item.id === categoryRoute[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
+    if (!selected) return json({ error: 'Server not found.' }, 404);
+    const current = fixtureCategories.find((item) => item.id === categoryRoute[2] && item.serverId === selected.id);
+    if (request.method === 'GET' && !categoryRoute[2]) return json({ categories: fixtureCategories.filter((item) => item.serverId === selected.id).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt)) });
+    if (selected.ownerUserId !== requestUser.id) return json({ error: 'Owner only.' }, 403);
+    if (categoryRoute[2] && !current) return json({ error: 'Category not found.' }, 404);
+    const payload = request.method === 'DELETE' ? {} : JSON.parse((await body()).toString());
+    if (request.method === 'POST' && !current) {
+      const name = typeof payload.name === 'string' ? payload.name.trim() : '';
+      if (!name || name.length > 96) return json({ error: 'Invalid category.' }, 400);
+      const now = new Date().toISOString();
+      const category = { id: randomUUID(), serverId: selected.id, name, position: fixtureCategories.filter((item) => item.serverId === selected.id).length, createdAt: now, updatedAt: now };
+      fixtureCategories.push(category);
+      return json({ category }, 201);
+    }
+    if (request.method === 'PATCH') {
+      const name = typeof payload.name === 'string' ? payload.name.trim() : '';
+      if (!name || name.length > 96) return json({ error: 'Invalid category.' }, 400);
+      current.name = name; current.updatedAt = new Date().toISOString(); return json({ category: current });
+    }
+    if (request.method === 'DELETE') {
+      const uncategorized = fixtureChannels.filter((item) => item.serverId === selected.id && item.categoryId === null);
+      const contained = fixtureChannels.filter((item) => item.serverId === selected.id && item.categoryId === current.id);
+      fixtureCategories = fixtureCategories.filter((item) => item.id !== current.id);
+      contained.forEach((item) => { item.categoryId = null; });
+      uncategorized.sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));
+      contained.sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));
+      [...uncategorized, ...contained].forEach((item, index) => { item.position = index; });
+      compact(fixtureCategories.filter((item) => item.serverId === selected.id));
+      response.writeHead(204); return response.end();
+    }
+    if (request.method === 'POST' && categoryRoute[3] === 'move') {
+      const ordered = fixtureCategories.filter((item) => item.serverId === selected.id).sort((a, b) => a.position - b.position);
+      if (!Number.isInteger(payload.targetIndex) || payload.targetIndex < 0 || payload.targetIndex >= ordered.length) return json({ error: 'Invalid index.' }, 400);
+      ordered.splice(ordered.indexOf(current), 1); ordered.splice(payload.targetIndex, 0, current);
+      ordered.forEach((item, index) => { item.position = index; }); return json({ categories: ordered });
+    }
+  }
+  if (channelMoveRoute && request.method === 'POST') {
+    const selected = fixtureServers.find((item) => item.id === channelMoveRoute[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
+    if (!selected) return json({ error: 'Server not found.' }, 404);
+    if (selected.ownerUserId !== requestUser.id) return json({ error: 'Owner only.' }, 403);
+    const channel = fixtureChannels.find((item) => item.id === channelMoveRoute[2] && item.serverId === selected.id);
+    if (!channel) return json({ error: 'Channel not found.' }, 404);
+    const payload = JSON.parse((await body()).toString());
+    if (payload.targetCategoryId && !fixtureCategories.some((item) => item.id === payload.targetCategoryId && item.serverId === selected.id)) return json({ error: 'Category not found.' }, 404);
+    const ordered = (items) => items.sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    const source = ordered(fixtureChannels.filter((item) => item.serverId === selected.id && item.categoryId === channel.categoryId && item.id !== channel.id));
+    const target = channel.categoryId === payload.targetCategoryId ? source : ordered(fixtureChannels.filter((item) => item.serverId === selected.id && item.categoryId === payload.targetCategoryId));
+    if (!Number.isInteger(payload.targetIndex) || payload.targetIndex < 0 || payload.targetIndex > target.length) return json({ error: 'Invalid index.' }, 400);
+    channel.categoryId = payload.targetCategoryId; target.splice(payload.targetIndex, 0, channel);
+    source.forEach((item, index) => { item.position = index; });
+    target.forEach((item, index) => { item.position = index; });
+    return json({ moved: true });
+  }
   if (serverChannels) {
     const selected = fixtureServers.find((item) => item.id === serverChannels[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
     if (!selected) return json({ error: 'Server not found.' }, 404);
-    if (request.method === 'GET') return json({ channels: fixtureChannels.filter((item) => item.serverId === selected.id) });
+    if (request.method === 'GET') return json({ channels: fixtureChannels.filter((item) => item.serverId === selected.id).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)) });
     if (request.method === 'POST') {
       if (selected.ownerUserId !== requestUser.id) return json({ error: 'Only owner can create channels.' }, 403);
       const payload = JSON.parse((await body()).toString());
       const name = typeof payload.name === 'string' ? payload.name.trim() : '';
       if (!name || name.length > 96) return json({ error: 'Invalid channel name.' }, 400);
+      if (payload.categoryId && !fixtureCategories.some((item) => item.id === payload.categoryId && item.serverId === selected.id)) return json({ error: 'Category not found.' }, 404);
       const now = new Date().toISOString();
-      const channel = { id: randomUUID(), serverId: selected.id, conversationId: randomUUID(), name, createdAt: now, updatedAt: now };
+      const categoryId = payload.categoryId || null;
+      const channel = { id: randomUUID(), serverId: selected.id, conversationId: randomUUID(), categoryId, position: fixtureChannels.filter((item) => item.serverId === selected.id && item.categoryId === categoryId).length, name, createdAt: now, updatedAt: now };
       fixtureChannels.push(channel);
       return json({ channel }, 201);
     }

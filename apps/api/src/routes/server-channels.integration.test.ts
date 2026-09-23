@@ -81,7 +81,9 @@ test('server text channels use owner creation, member content access and no lega
       const channel = created.json().channel;
       assert.equal(channel.name, 'general');
       assert.equal(channel.serverId, serverId);
-      assert.deepEqual(Object.keys(channel).sort(), ['conversationId', 'createdAt', 'id', 'name', 'serverId', 'updatedAt']);
+      assert.deepEqual(Object.keys(channel).sort(), ['categoryId', 'conversationId', 'createdAt', 'id', 'name', 'position', 'serverId', 'updatedAt']);
+      assert.equal(channel.categoryId, null);
+      assert.equal(channel.position, 0);
       assert.equal((await pool.query('select kind, created_by from conversations where id = $1', [channel.conversationId])).rows[0].kind, 'server_text');
       assert.equal((await pool.query('select created_by from conversations where id = $1', [channel.conversationId])).rows[0].created_by, ownerId);
       assert.equal((await pool.query('select count(*)::int as count from conversation_members where conversation_id = $1', [channel.conversationId])).rows[0].count, 0);

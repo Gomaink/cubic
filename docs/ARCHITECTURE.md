@@ -130,3 +130,10 @@ invitations have no token or expiry. Acceptance creates one `server_members`
 row, not per-channel `conversation_members` rows. A non-owner may leave;
 after the membership transaction commits, the existing race-safe conversation
 room revocation evicts that user's sockets from the server's text channels.
+Slice 5 adds `server_channel_categories` and nullable category/position fields
+on text channels. Uncategorized channels remain valid. Members read the layout;
+owner-only layout mutations serialize on the server row and verify that any
+assigned category belongs to the same server. Positions are compacted within
+affected scopes after moves or category deletion; deleting a category moves
+its channels to the uncategorized scope without deleting content. Layout is
+refreshed over HTTP and adds no realtime protocol.
