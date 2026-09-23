@@ -4392,3 +4392,55 @@ body { background: var(--cubic-onyx-0); }
   .messenger-nav:has(.cubic-server-nav) .messenger-brand strong { display: none !important; }
   .messenger-nav:has(.cubic-server-nav) .cubic-profile-mobile { flex-basis: 28px; width: 28px; height: 28px; }
 }
+
+/* Alpha 9 server shell. The rail and sidebar scroll independently of chat. */
+.messenger-nav .cubic-server-rail { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; align-items: center; gap: 8px; padding: 8px 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
+.messenger-nav .messenger-nav-spacer { flex: 0 0 auto; }
+.cubic-server-rail-item, .cubic-server-rail-create { display: grid; flex: 0 0 44px; place-items: center; width: 44px; height: 44px; border: 1px solid #42444e; border-radius: 15px; background: #24262d; color: var(--cubic-text); font-weight: 800; cursor: pointer; }
+.cubic-server-rail-item.active, .cubic-server-rail-item[aria-current="page"] { border-color: #979df9; border-radius: 11px; background: #373c75; }
+.cubic-server-rail-item:hover, .cubic-server-rail-create:hover { background: var(--cubic-bg-hover); }
+.cubic-server-rail-status { max-width: 56px; color: var(--cubic-muted); font-size: .65rem; text-align: center; }
+.cubic-server-rail-create { border-style: dashed; }
+.conversation-list.cubic-server-sidebar { display: flex; flex-direction: column; overflow-y: hidden !important; }
+.cubic-server-sidebar-head { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding-right: 12px; }
+.cubic-server-sidebar-head h1 { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cubic-server-options { display: grid; gap: 3px; padding: 8px; border-bottom: 1px solid var(--cubic-border); }
+.cubic-server-options button { min-height: 40px; padding: 7px 12px; border: 0; border-radius: 6px; background: #262831; color: var(--cubic-text); text-align: left; cursor: pointer; }
+.cubic-channel-sidebar-head { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; padding: 14px 13px 5px; color: var(--cubic-muted); font-size: .7rem; letter-spacing: .07em; }
+.cubic-channel-sidebar-head button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 6px; background: transparent; color: var(--cubic-muted); cursor: pointer; }
+.cubic-channel-sidebar-head button:hover { background: var(--cubic-bg-hover); color: var(--cubic-text); }
+.cubic-server-sidebar .cubic-channel-list { flex: 1 1 auto; min-height: 0; padding: 4px 8px 12px; overflow-y: auto; overscroll-behavior: contain; }
+.cubic-server-sidebar .cubic-channel-row { min-height: 40px; }
+.cubic-server-sidebar-members { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; width: 100%; min-height: 48px; padding: 8px 14px; border: 0; border-top: 1px solid var(--cubic-border); background: transparent; color: var(--cubic-text); text-align: left; cursor: pointer; }
+.cubic-server-dialog { width: min(420px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); margin: auto; padding: 0 14px 16px; overflow-y: auto; border: 1px solid #3a3c47; border-radius: 10px; background: #181a21; color: var(--cubic-text); box-shadow: 0 24px 70px #0009; }
+.cubic-server-dialog::backdrop { background: #000b; }
+.cubic-server-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 62px; border-bottom: 1px solid var(--cubic-border); }
+.cubic-server-dialog h2 { margin: 0; font-size: 1rem; }
+.cubic-server-dialog h3 { margin: 14px 0 6px; font-size: .8rem; }
+.cubic-server-dialog > header button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 6px; background: transparent; color: var(--cubic-text); cursor: pointer; }
+.cubic-server-dialog .cubic-server-create { margin: 12px 0; padding-top: 0; border: 0; }
+.cubic-server-dialog .cubic-server-member-row { width: 100%; padding: 5px 0; }
+.cubic-server-dialog .cubic-server-member-row button { min-height: 36px; padding: 4px 10px; border: 1px solid #454852; border-radius: 6px; background: #292b34; color: var(--cubic-text); cursor: pointer; }
+.chat-panel.cubic-server-members-open { position: relative; }
+.cubic-server-member-pane { position: absolute; z-index: 12; inset: 0 0 0 auto; display: flex; flex-direction: column; width: 240px; min-height: 0; border-left: 1px solid var(--cubic-border); background: #15161b; box-shadow: -12px 0 28px #0004; }
+.cubic-server-member-pane > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 66px; padding: 10px 12px; border-bottom: 1px solid var(--cubic-border); }
+.cubic-server-member-pane h2 { margin: 2px 0 0; font-size: .9rem; }
+.cubic-server-member-pane small { color: var(--cubic-muted); }
+.cubic-server-member-pane > header button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; background: transparent; color: var(--cubic-text); cursor: pointer; }
+.cubic-server-member-scroll { min-height: 0; padding: 10px; overflow-y: auto; }
+.cubic-server-member-refresh { min-height: 38px; margin-bottom: 8px; border: 0; background: transparent; color: var(--cubic-muted); cursor: pointer; }
+.cubic-server-member-entry { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 52px; padding: 5px; border: 0; border-radius: 6px; background: transparent; color: var(--cubic-text); text-align: left; cursor: pointer; }
+.cubic-server-member-entry:hover { background: var(--cubic-bg-hover); }
+.cubic-server-member-entry .avatar { flex: 0 0 34px; width: 34px; height: 34px; }
+.cubic-server-member-entry strong, .cubic-server-member-entry small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cubic-server-foundation-copy { align-content: center; }
+.cubic-server-foundation-copy h2 { font-size: 1.1rem; }
+@media (min-width: 1200px) { .chat-panel.cubic-server-members-open { padding-right: 240px; } }
+@media (max-width: 680px) {
+  .messenger-nav .cubic-server-rail { display: none; }
+  .messenger-nav .messenger-nav-spacer { flex: 1 1 auto; }
+  .conversation-list.cubic-server-sidebar { height: calc(100dvh - 64px); }
+  .chat-panel.cubic-server-empty:not(.cubic-server-members-open) { transform: translate3d(100%, 0, 0); pointer-events: none; }
+  .cubic-server-member-pane { width: 100%; border-left: 0; }
+  .cubic-server-dialog { width: 100%; max-height: calc(100dvh - 56px); margin: auto auto 0; border-radius: 14px 14px 0 0; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+}
