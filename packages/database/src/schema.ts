@@ -154,6 +154,22 @@ export const conversations = pgTable(
   (table) => [index('conversations_updated_at_idx').on(table.updatedAt)]
 );
 
+export const serverTextChannels = pgTable(
+  'server_text_channels',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'restrict' }),
+    conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'restrict' }),
+    name: varchar('name', { length: 96 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex('server_text_channels_conversation_uq').on(table.conversationId),
+    index('server_text_channels_server_created_idx').on(table.serverId, table.createdAt, table.id)
+  ]
+);
+
 export const conversationMembers = pgTable(
   'conversation_members',
   {

@@ -1,11 +1,12 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { Server, type Socket } from 'socket.io';
 import { z } from 'zod';
 import type { Database } from '@cubic/database';
-import { conversationMembers } from '@cubic/database/schema';
+import { conversationMembers, conversations } from '@cubic/database/schema';
 import {
   authorizeDirectCallStart,
+  resolveConversationAccess,
   resolveConversationMembership
 } from '../authorization/conversations.js';
 import type { SessionIdentity, SessionService } from '../security/session.js';
@@ -636,20 +637,36 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
       const memberships = await options.database.db
         .select({ conversationId: conversationMembers.conversationId })
         .from(conversationMembers)
-        .where(eq(conversationMembers.userId, identity.userId));
+        .innerJoin(conversations, eq(conversations.id, conversationMembers.conversationId))
+        .where(and(
+          eq(conversationMembers.userId, identity.userId),
+          inArray(conversations.kind, ['direct', 'group'])
+        ));
+      const channels = await options.database.pool.query<{ conversation_id: string }>(
+        `select channel.conversation_id
+           from server_members member
+           join server_text_channels channel on channel.server_id = member.server_id
+           join conversations c on c.id = channel.conversation_id and c.kind = 'server_text'
+          where member.user_id = $1`,
+        [identity.userId]
+      );
 
-      for (const membership of memberships) {
-        if (initialAdmission.invalidFor(membership.conversationId)) continue;
+      const conversationIds = new Set([
+        ...memberships.map((membership) => membership.conversationId),
+        ...channels.rows.map((channel) => channel.conversation_id)
+      ]);
+      for (const conversationId of conversationIds) {
+        if (initialAdmission.invalidFor(conversationId)) continue;
         // The configured single-process in-memory adapter joins synchronously.
-        socket.join(conversationRoom(membership.conversationId));
-        if (initialAdmission.invalidFor(membership.conversationId))
-          socket.leave(conversationRoom(membership.conversationId));
+        socket.join(conversationRoom(conversationId));
+        if (initialAdmission.invalidFor(conversationId))
+          socket.leave(conversationRoom(conversationId));
       }
 
       if (!socket.connected) return;
       socket.emit('realtime:ready', {
         userId: identity.userId,
-        conversationCount: memberships.length
+        conversationCount: conversationIds.size
       });
     } catch {
       socket.disconnect(true);
@@ -676,7 +693,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
           return;
         }
         try {
-          const membership = await resolveConversationMembership(
+          const membership = await resolveConversationAccess(
             options.database,
             parsed.data.conversationId,
             identity.userId

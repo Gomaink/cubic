@@ -17,6 +17,7 @@ let sessionMode;
 let activeSessions;
 let groupMembers;
 let fixtureServers;
+let fixtureChannels;
 let fixturePresence;
 let holdPresenceSnapshots = false;
 let heldPresenceSnapshots = [];
@@ -30,6 +31,7 @@ function attachment(name, contentType = 'image/png', dimensions = { width: 800, 
 
 function reset() {
   fixtureServers = [];
+  fixtureChannels = [];
   user.displayName = 'Tester';
   user.avatarUrl = null;
   peer.displayName = 'Fixture DM';
@@ -202,6 +204,21 @@ const server = createServer(async (request, response) => {
     const selected = fixtureServers.find((item) => item.id === serverDetail[1] && item.ownerUserId === requestUser.id);
     return selected ? json({ server: selected }) : json({ error: 'Server not found.' }, 404);
   }
+  const serverChannels = /^\/api\/v1\/servers\/([0-9a-f-]+)\/channels$/.exec(url.pathname);
+  if (serverChannels) {
+    const selected = fixtureServers.find((item) => item.id === serverChannels[1] && item.ownerUserId === requestUser.id);
+    if (!selected) return json({ error: 'Server not found.' }, 404);
+    if (request.method === 'GET') return json({ channels: fixtureChannels.filter((item) => item.serverId === selected.id) });
+    if (request.method === 'POST') {
+      const payload = JSON.parse((await body()).toString());
+      const name = typeof payload.name === 'string' ? payload.name.trim() : '';
+      if (!name || name.length > 96) return json({ error: 'Invalid channel name.' }, 400);
+      const now = new Date().toISOString();
+      const channel = { id: randomUUID(), serverId: selected.id, conversationId: randomUUID(), name, createdAt: now, updatedAt: now };
+      fixtureChannels.push(channel);
+      return json({ channel }, 201);
+    }
+  }
   if (url.pathname === '/api/v1/social/requests') return json({ requests: [] });
   if (url.pathname === '/api/v1/groups/invites') return json({ invites: [] });
   if (url.pathname === `/api/v1/groups/${group}`) return json({ group: { id: group, title: 'Fixture group', members: groupMembers, invites: [], currentRole: isPeer ? 'member' : 'owner' } });
@@ -214,7 +231,7 @@ const server = createServer(async (request, response) => {
     if (request.method === 'POST') {
       const payload = JSON.parse((await body()).toString());
       const target = messages.find((item) => item.id === payload.replyToMessageId);
-      const message = { id: randomUUID(), conversationId, senderId: user.id, createdAt: new Date().toISOString(), body: payload.body,
+      const message = { id: randomUUID(), conversationId, senderId: requestUser.id, senderDisplayName: requestUser.displayName, createdAt: new Date().toISOString(), body: payload.body,
         editedAt: null, deletedAt: null, attachments: payload.attachmentIds.map((id) => staged.get(id)), clientMessageId: payload.clientMessageId,
         reactions: [],
         replyTo: target ? { id: target.id, senderId: target.senderId, senderUsername: target.senderUsername ?? peer.username,
@@ -278,6 +295,7 @@ const server = createServer(async (request, response) => {
     const upload = (await body()).toString();
     const name = /filename="([^"]+)"/.exec(upload)?.[1] ?? 'upload.png';
     const item = attachment(name);
+    item.conversationId = url.pathname.split('/')[4];
     staged.set(item.id, item);
     return json({ attachment: item }, 201);
   }

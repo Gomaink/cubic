@@ -71,6 +71,13 @@
       "when": 1790121141645,
       "tag": "0009_deep_mantis",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790125947670,
+      "tag": "0010_useful_lily_hollister",
+      "breakpoints": true
     }
   ]
 }

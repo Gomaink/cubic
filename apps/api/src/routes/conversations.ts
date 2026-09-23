@@ -7,7 +7,7 @@ import { createRequireAuth } from '../auth/guard.js';
 import { normalizeLegacyAvatarUrl } from '../auth/identity.js';
 import {
   authorizeConversationContentCreation,
-  resolveConversationMembership
+  resolveConversationAccess
 } from '../authorization/conversations.js';
 import type { SessionService } from '../security/session.js';
 import type { RealtimeEvents, RealtimeMessage, RealtimeReaction } from '../realtime/events.js';
@@ -393,7 +393,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     const params = conversationParamsSchema.safeParse(request.params);
     const query = messagesQuerySchema.safeParse(request.query);
     if (!params.success || !query.success) return reply.code(400).send({ error: 'Invalid request.' });
-    if (!(await resolveConversationMembership(options.database, params.data.id, request.auth.user.id))) return reply.code(404).send({ error: 'Conversation not found.' });
+    if (!(await resolveConversationAccess(options.database, params.data.id, request.auth.user.id))) return reply.code(404).send({ error: 'Conversation not found.' });
 
     const conditions = [eq(messages.conversationId, params.data.id)];
     if (query.data.before) conditions.push(lt(messages.createdAt, new Date(query.data.before)));
@@ -611,7 +611,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     if (!params.success || !parsed.success) return reply.code(400).send({ error: 'Invalid message.' });
 
     const me = request.auth.user.id;
-    if (!(await resolveConversationMembership(options.database, params.data.id, me))) {
+    if (!(await resolveConversationAccess(options.database, params.data.id, me))) {
       return reply.code(404).send({ error: 'Conversation not found.' });
     }
 
@@ -658,7 +658,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     if (!params.success) return reply.code(400).send({ error: 'Invalid message.' });
 
     const me = request.auth.user.id;
-    if (!(await resolveConversationMembership(options.database, params.data.id, me))) {
+    if (!(await resolveConversationAccess(options.database, params.data.id, me))) {
       return reply.code(404).send({ error: 'Conversation not found.' });
     }
 
@@ -715,7 +715,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     if (!parsed.success) return reply.code(400).send({ error: 'Unsupported reaction.' });
 
     const me = request.auth.user.id;
-    if (!(await resolveConversationMembership(options.database, params.data.id, me))) {
+    if (!(await resolveConversationAccess(options.database, params.data.id, me))) {
       return reply.code(404).send({ error: 'Conversation not found.' });
     }
 
@@ -754,7 +754,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
     if (!parsed.success) return reply.code(400).send({ error: 'Unsupported reaction.' });
 
     const me = request.auth.user.id;
-    if (!(await resolveConversationMembership(options.database, params.data.id, me))) {
+    if (!(await resolveConversationAccess(options.database, params.data.id, me))) {
       return reply.code(404).send({ error: 'Conversation not found.' });
     }
 

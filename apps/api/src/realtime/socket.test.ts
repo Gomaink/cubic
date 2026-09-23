@@ -258,6 +258,7 @@ class RealtimeSessionRepository implements SessionRepository {
 class RealtimeDatabase {
   readonly selectResults: any[][] = [];
   readonly conversationMemberships = new Map<string, Set<string>>();
+  readonly serverChannelMemberships = new Map<string, Set<string>>();
   readonly directPairs = new Map<string, { lowId: string; highId: string }>();
   readonly blockedConversations = new Set<string>();
   autoJoinReadGate: ((rows: any[]) => Promise<void>) | null = null;
@@ -332,6 +333,12 @@ class RealtimeDatabase {
         await this.presenceSnapshotReadGate?.(rows);
         return { rows, rowCount: rows.length };
       }
+      if (normalized.includes('from server_members member join server_text_channels channel')) {
+        const rows = [...this.serverChannelMemberships]
+          .filter(([, members]) => members.has(params[0]))
+          .map(([id]) => ({ conversation_id: id }));
+        return { rows, rowCount: rows.length };
+      }
       if (normalized.includes("c.kind in ('direct', 'group')")) {
         const pair = this.directPairs.get(params[0]);
         const member = this.conversationMemberships.get(params[0])?.has(params[1]);
@@ -343,6 +350,11 @@ class RealtimeDatabase {
             }]
           : [];
         await this.membershipReadGate?.(rows);
+        return { rows, rowCount: rows.length };
+      }
+      if (normalized.includes('join server_text_channels channel on channel.conversation_id = c.id')) {
+        const member = this.serverChannelMemberships.get(params[0])?.has(params[1]);
+        const rows = member ? [{ conversation_id: params[0], server_id: randomUUID() }] : [];
         return { rows, rowCount: rows.length };
       }
       if (normalized.includes("c.kind = 'direct'")) {
@@ -1022,6 +1034,47 @@ test('conversation authorization and message mutation propagation remain intact'
   outsider.close();
   await delay(20);
   assert.equal(harness.realtime.registry.socketCount, 0);
+});
+
+test('server text channels admit current members through the existing room path only', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const channelConversationId = randomUUID();
+  const memberId = '10000000-0000-4000-8000-000000000001';
+  const outsiderId = '10000000-0000-4000-8000-000000000002';
+  const memberSession = harness.repository.add('channel-member', memberId);
+  const outsiderSession = harness.repository.add('channel-outsider', outsiderId);
+  harness.database.serverChannelMemberships.set(channelConversationId, new Set([memberId]));
+
+  const member = await connectClient(harness, 'channel-member');
+  const outsider = await connectClient(harness, 'channel-outsider');
+  context.after(() => { member.close(); outsider.close(); });
+  assert.equal(serverSocketIsInRoom(harness, memberSession.session.id, channelConversationId), true);
+  assert.equal(serverSocketIsInRoom(harness, outsiderSession.session.id, channelConversationId), false);
+
+  const denied = await socketAck<{ ok: boolean; error?: string }>(
+    outsider, 'conversation:join', { conversationId: channelConversationId }
+  );
+  assert.deepEqual(denied, { ok: false, error: 'Conversation not found.' });
+  const joined = await socketAck<{ ok: boolean }>(
+    member, 'conversation:join', { conversationId: channelConversationId }
+  );
+  assert.deepEqual(joined, { ok: true });
+
+  let outsiderMessages = 0;
+  outsider.on('message:created', () => { outsiderMessages += 1; });
+  const delivered = waitForEvent<any>(member, 'message:created');
+  const message = { id: randomUUID(), conversationId: channelConversationId };
+  harness.events.emitMessageCreated({ conversationId: channelConversationId, message: message as never });
+  assert.equal((await delivered).id, message.id);
+  assert.equal(outsiderMessages, 0);
+  assert.equal(serverSocketIsInRoom(harness, outsiderSession.session.id, channelConversationId), false);
+
+  const callDenied = await socketAck<{ ok: boolean; error?: string }>(
+    member, 'call:start', { conversationId: channelConversationId }
+  );
+  assert.equal(callDenied.ok, false);
+  assert.equal(harness.database.callStatuses.size, 0);
 });
 
 test('a removal invalidates an in-flight explicit join without evicting another member', async (context) => {
