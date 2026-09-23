@@ -355,6 +355,7 @@ class RealtimeDatabase {
       if (normalized.includes('join server_text_channels channel on channel.conversation_id = c.id')) {
         const member = this.serverChannelMemberships.get(params[0])?.has(params[1]);
         const rows = member ? [{ conversation_id: params[0], server_id: randomUUID() }] : [];
+        await this.membershipReadGate?.(rows);
         return { rows, rowCount: rows.length };
       }
       if (normalized.includes("c.kind = 'direct'")) {
@@ -1075,6 +1076,64 @@ test('server text channels admit current members through the existing room path 
   );
   assert.equal(callDenied.ok, false);
   assert.equal(harness.database.callStatuses.size, 0);
+});
+
+test('server membership addition admits channel rooms and leave revokes joined and in-flight channel admissions', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const ownerId = randomUUID(), memberId = randomUUID(), outsiderId = randomUUID();
+  const firstChannel = randomUUID(), secondChannel = randomUUID();
+  const ownerSession = harness.repository.add('server-owner-room', ownerId);
+  const memberSession = harness.repository.add('server-member-room', memberId);
+  const outsiderSession = harness.repository.add('server-outsider-room', outsiderId);
+  harness.database.serverChannelMemberships.set(firstChannel, new Set([ownerId]));
+  harness.database.serverChannelMemberships.set(secondChannel, new Set([ownerId]));
+  const owner = await connectClient(harness, 'server-owner-room');
+  const member = await connectClient(harness, 'server-member-room');
+  const outsider = await connectClient(harness, 'server-outsider-room');
+  context.after(() => { owner.close(); member.close(); outsider.close(); });
+  assert.deepEqual(await socketAck(outsider, 'conversation:join', { conversationId: firstChannel }), { ok: false, error: 'Conversation not found.' });
+  assert.deepEqual(await socketAck(member, 'conversation:join', { conversationId: firstChannel }), { ok: false, error: 'Conversation not found.' });
+  harness.database.serverChannelMemberships.get(firstChannel)!.add(memberId);
+  harness.database.serverChannelMemberships.get(secondChannel)!.add(memberId);
+  for (const id of [firstChannel, secondChannel]) {
+    assert.deepEqual(await socketAck(owner, 'conversation:join', { conversationId: id }), { ok: true });
+    assert.deepEqual(await socketAck(member, 'conversation:join', { conversationId: id }), { ok: true });
+  }
+  const beforeLeave = waitForEvent(member, 'message:created');
+  harness.events.emitMessageCreated({ conversationId: firstChannel, message: { id: randomUUID(), conversationId: firstChannel } as never });
+  await beforeLeave;
+
+  const barrier = readBarrier();
+  harness.database.membershipReadGate = async (rows) => {
+    if (rows.some((row) => row.server_id)) await barrier.gate();
+  };
+  const pending = socketAck<any>(member, 'conversation:join', { conversationId: secondChannel });
+  await barrier.entered;
+  harness.database.serverChannelMemberships.get(firstChannel)!.delete(memberId);
+  harness.database.serverChannelMemberships.get(secondChannel)!.delete(memberId);
+  for (const id of [firstChannel, secondChannel]) {
+    harness.events.emitConversationRemoved({ conversationId: id, removedUserIds: [memberId], remainingUserIds: [] });
+  }
+  barrier.release();
+  assert.deepEqual(await pending, { ok: false, error: 'Conversation not found.' });
+  assert.equal(serverSocketIsInRoom(harness, memberSession.session.id, firstChannel), false);
+  assert.equal(serverSocketIsInRoom(harness, memberSession.session.id, secondChannel), false);
+  assert.equal(serverSocketIsInRoom(harness, ownerSession.session.id, firstChannel), true);
+  assert.equal(serverSocketIsInRoom(harness, ownerSession.session.id, secondChannel), true);
+  assert.equal(serverSocketIsInRoom(harness, outsiderSession.session.id, firstChannel), false);
+  harness.database.membershipReadGate = null;
+  assert.deepEqual(await socketAck(member, 'conversation:join', { conversationId: firstChannel }), { ok: false, error: 'Conversation not found.' });
+  let staleEvents = 0;
+  member.on('message:created', () => { staleEvents += 1; });
+  member.on('message:reactions', () => { staleEvents += 1; });
+  const ownerMessage = waitForEvent(owner, 'message:created');
+  harness.events.emitMessageCreated({ conversationId: firstChannel, message: { id: randomUUID(), conversationId: firstChannel } as never });
+  await ownerMessage;
+  const ownerReaction = waitForEvent(owner, 'message:reactions');
+  harness.events.emitMessageReactionsChanged({ conversationId: firstChannel, messageId: randomUUID(), userId: ownerId, reaction: '👍', active: true, reactions: [] });
+  await ownerReaction;
+  assert.equal(staleEvents, 0);
 });
 
 test('a removal invalidates an in-flight explicit join without evicting another member', async (context) => {

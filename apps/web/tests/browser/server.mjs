@@ -18,6 +18,9 @@ let activeSessions;
 let groupMembers;
 let fixtureServers;
 let fixtureChannels;
+let fixtureServerMembers;
+let fixtureServerInvites;
+let fixtureServerFriends;
 let fixturePresence;
 let holdPresenceSnapshots = false;
 let heldPresenceSnapshots = [];
@@ -32,6 +35,9 @@ function attachment(name, contentType = 'image/png', dimensions = { width: 800, 
 function reset() {
   fixtureServers = [];
   fixtureChannels = [];
+  fixtureServerMembers = new Map();
+  fixtureServerInvites = [];
+  fixtureServerFriends = false;
   user.displayName = 'Tester';
   user.avatarUrl = null;
   peer.displayName = 'Fixture DM';
@@ -84,6 +90,7 @@ const server = createServer(async (request, response) => {
   };
 
   if (url.pathname === '/__test/reset') { reset(); return json({ ok: true }); }
+  if (url.pathname === '/__test/server-friends') { fixtureServerFriends = true; return json({ ok: true }); }
   if (url.pathname === '/__test/session-mode') {
     sessionMode = url.searchParams.get('value') ?? 'ok';
     return json({ ok: true });
@@ -186,9 +193,9 @@ const server = createServer(async (request, response) => {
     response.writeHead(204);
     return response.end();
   }
-  if (url.pathname === '/api/v1/social/friends') return json({ friends: [] });
+  if (url.pathname === '/api/v1/social/friends') return json({ friends: fixtureServerFriends ? [isPeer ? user : peer] : [] });
   if (url.pathname === '/api/v1/servers' && request.method === 'GET') {
-    return json({ servers: fixtureServers.filter((item) => item.ownerUserId === requestUser.id) });
+    return json({ servers: fixtureServers.filter((item) => fixtureServerMembers.get(item.id)?.has(requestUser.id)) });
   }
   if (url.pathname === '/api/v1/servers' && request.method === 'POST') {
     const payload = JSON.parse((await body()).toString());
@@ -197,19 +204,72 @@ const server = createServer(async (request, response) => {
     const now = new Date().toISOString();
     const server = { id: randomUUID(), name, ownerUserId: requestUser.id, createdAt: now, updatedAt: now };
     fixtureServers.push(server);
+    fixtureServerMembers.set(server.id, new Set([requestUser.id]));
     return json({ server }, 201);
+  }
+  if (url.pathname === '/api/v1/servers/invites' && request.method === 'GET') {
+    return json({ invites: fixtureServerInvites.filter((item) => item.invitee.id === requestUser.id && item.status === 'pending') });
+  }
+  const inviteAction = /^\/api\/v1\/servers\/invites\/([0-9a-f-]+)(\/accept)?$/.exec(url.pathname);
+  if (inviteAction) {
+    const invite = fixtureServerInvites.find((item) => item.id === inviteAction[1] && item.status === 'pending');
+    if (!invite) return json({ error: 'Invitation not found.' }, 404);
+    if (inviteAction[2] && request.method === 'POST') {
+      if (invite.invitee.id !== requestUser.id) return json({ error: 'Invitation not found.' }, 404);
+      invite.status = 'accepted';
+      fixtureServerMembers.get(invite.serverId).add(requestUser.id);
+      return json({ server: fixtureServers.find((item) => item.id === invite.serverId) });
+    }
+    if (!inviteAction[2] && request.method === 'DELETE') {
+      const server = fixtureServers.find((item) => item.id === invite.serverId);
+      if (server?.ownerUserId !== requestUser.id) return json({ error: 'Invitation not found.' }, 404);
+      invite.status = 'cancelled';
+      response.writeHead(204); return response.end();
+    }
   }
   const serverDetail = /^\/api\/v1\/servers\/([0-9a-f-]+)$/.exec(url.pathname);
   if (serverDetail && request.method === 'GET') {
-    const selected = fixtureServers.find((item) => item.id === serverDetail[1] && item.ownerUserId === requestUser.id);
+    const selected = fixtureServers.find((item) => item.id === serverDetail[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
     return selected ? json({ server: selected }) : json({ error: 'Server not found.' }, 404);
+  }
+  const serverInvites = /^\/api\/v1\/servers\/([0-9a-f-]+)\/invites$/.exec(url.pathname);
+  if (serverInvites) {
+    const selected = fixtureServers.find((item) => item.id === serverInvites[1]);
+    if (selected?.ownerUserId !== requestUser.id) return json({ error: 'Server not found.' }, 404);
+    if (request.method === 'GET') return json({ invites: fixtureServerInvites.filter((item) => item.serverId === selected.id && item.status === 'pending') });
+    if (request.method === 'POST') {
+      const payload = JSON.parse((await body()).toString());
+      if (!fixtureServerFriends || payload.userId !== (isPeer ? user.id : peer.id)) return json({ error: 'You can only invite friends.' }, 403);
+      if (fixtureServerMembers.get(selected.id)?.has(payload.userId)) return json({ error: 'Already a member.' }, 409);
+      if (fixtureServerInvites.some((item) => item.serverId === selected.id && item.invitee.id === payload.userId && item.status === 'pending')) return json({ error: 'Already pending.' }, 409);
+      const invite = { id: randomUUID(), serverId: selected.id, serverName: selected.name, inviter: requestUser, invitee: isPeer ? user : peer, status: 'pending', createdAt: new Date().toISOString() };
+      fixtureServerInvites.push(invite);
+      return json({ invite }, 201);
+    }
+  }
+  const serverMembers = /^\/api\/v1\/servers\/([0-9a-f-]+)\/members$/.exec(url.pathname);
+  if (serverMembers && request.method === 'GET') {
+    const selected = fixtureServers.find((item) => item.id === serverMembers[1]);
+    const members = fixtureServerMembers.get(serverMembers[1]);
+    if (!selected || !members?.has(requestUser.id)) return json({ error: 'Server not found.' }, 404);
+    return json({ members: [...members].map((id) => ({ ...(id === user.id ? user : peer), owner: id === selected.ownerUserId })) });
+  }
+  const serverLeave = /^\/api\/v1\/servers\/([0-9a-f-]+)\/leave$/.exec(url.pathname);
+  if (serverLeave && request.method === 'POST') {
+    const selected = fixtureServers.find((item) => item.id === serverLeave[1]);
+    const members = fixtureServerMembers.get(serverLeave[1]);
+    if (!selected || !members?.has(requestUser.id)) return json({ error: 'Server not found.' }, 404);
+    if (selected.ownerUserId === requestUser.id) return json({ error: 'Owner cannot leave.' }, 403);
+    members.delete(requestUser.id);
+    response.writeHead(204); return response.end();
   }
   const serverChannels = /^\/api\/v1\/servers\/([0-9a-f-]+)\/channels$/.exec(url.pathname);
   if (serverChannels) {
-    const selected = fixtureServers.find((item) => item.id === serverChannels[1] && item.ownerUserId === requestUser.id);
+    const selected = fixtureServers.find((item) => item.id === serverChannels[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
     if (!selected) return json({ error: 'Server not found.' }, 404);
     if (request.method === 'GET') return json({ channels: fixtureChannels.filter((item) => item.serverId === selected.id) });
     if (request.method === 'POST') {
+      if (selected.ownerUserId !== requestUser.id) return json({ error: 'Only owner can create channels.' }, 403);
       const payload = JSON.parse((await body()).toString());
       const name = typeof payload.name === 'string' ? payload.name.trim() : '';
       if (!name || name.length > 96) return json({ error: 'Invalid channel name.' }, 400);
@@ -228,6 +288,8 @@ const server = createServer(async (request, response) => {
   ] });
   if (url.pathname.endsWith('/messages')) {
     const conversationId = url.pathname.split('/')[4];
+    const channel = fixtureChannels.find((item) => item.conversationId === conversationId);
+    if (channel && !fixtureServerMembers.get(channel.serverId)?.has(requestUser.id)) return json({ error: 'Conversation not found.' }, 404);
     if (request.method === 'POST') {
       const payload = JSON.parse((await body()).toString());
       const target = messages.find((item) => item.id === payload.replyToMessageId);
