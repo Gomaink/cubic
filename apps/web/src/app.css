@@ -4430,6 +4430,22 @@ body { background: var(--cubic-onyx-0); }
 .cubic-server-dialog .cubic-server-create { margin: 12px 0; padding-top: 0; border: 0; }
 .cubic-server-dialog .cubic-server-member-row { width: 100%; padding: 5px 0; }
 .cubic-server-dialog .cubic-server-member-row button { min-height: 36px; padding: 4px 10px; border: 1px solid #454852; border-radius: 6px; background: #292b34; color: var(--cubic-text); cursor: pointer; }
+.cubic-share-invites { display: grid; gap: 10px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--cubic-border); }
+.cubic-share-invites h3 { margin: 0; }
+.cubic-share-invites p, .cubic-share-invites small { margin: 0; color: var(--cubic-muted); font-size: .82rem; }
+.cubic-share-invites > button, .cubic-share-actions button, .cubic-share-link-row button { min-height: 40px; padding: 7px 10px; border: 1px solid #6b70ad; border-radius: 7px; background: #39409a; color: #fff; cursor: pointer; }
+.cubic-share-invites button:disabled { opacity: .6; cursor: default; }
+.cubic-share-once { display: grid; gap: 8px; min-width: 0; padding: 10px; border: 1px solid #454852; border-radius: 8px; }
+.cubic-share-once label { font-size: .8rem; font-weight: 700; }
+.cubic-share-once input { width: 100%; min-width: 0; padding: 9px; border: 1px solid #6b70ad; border-radius: 6px; background: #101117; color: var(--cubic-text); font-size: .78rem; }
+.cubic-share-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.cubic-share-link-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--cubic-border); }
+.cubic-share-link-row span { min-width: 0; overflow-wrap: anywhere; font-size: .8rem; }
+.cubic-invite-panel { width: min(100%, 480px); }
+.cubic-invite-panel .auth-copy h1 { font-size: clamp(2.6rem, 11vw, 4.5rem); }
+.cubic-invite-panel > p { max-width: 38ch; }
+.cubic-invite-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
+.cubic-invite-panel > button { margin-top: 12px; }
 .cubic-server-remove-confirm { display: grid; gap: 12px; padding-top: 14px; }
 .cubic-server-remove-confirm p { margin: 0; overflow-wrap: anywhere; }
 .cubic-server-remove-confirm p + p { color: var(--cubic-muted); font-size: .88rem; }

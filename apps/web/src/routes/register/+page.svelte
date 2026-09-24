@@ -1,4 +1,5 @@
 <script lang="ts">
+  let { data } = $props();
   let email = $state('');
   let username = $state('');
   let displayName = $state('');
@@ -25,7 +26,7 @@
         return;
       }
 
-      window.location.assign('/app');
+      window.location.assign(data.continueInvite ? '/invite' : '/app');
     } catch {
       error = 'Cubic could not reach the API.';
     } finally {
@@ -76,7 +77,7 @@
       </button>
     </form>
 
-    <p class="auth-switch">Already registered? <a href="/login">Log in</a>.</p>
+    <p class="auth-switch">Already registered? <a href={data.continueInvite ? '/login?returnTo=invite' : '/login'}>Log in</a>.</p>
   </section>
   <aside class="auth-aside" aria-hidden="true">
     <span>Argon2id</span>

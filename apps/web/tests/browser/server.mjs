@@ -21,6 +21,7 @@ let fixtureChannels;
 let fixtureCategories;
 let fixtureServerMembers;
 let fixtureServerInvites;
+let fixtureShareInviteLinks;
 let fixtureServerFriends;
 let fixturePresence;
 let holdPresenceSnapshots = false;
@@ -39,6 +40,7 @@ function reset() {
   fixtureCategories = [];
   fixtureServerMembers = new Map();
   fixtureServerInvites = [];
+  fixtureShareInviteLinks = [];
   fixtureServerFriends = false;
   user.displayName = 'Tester';
   user.avatarUrl = null;
@@ -141,8 +143,39 @@ const server = createServer(async (request, response) => {
     return json(event);
   }
   const isPeer = request.headers.cookie?.includes('cubic_session=browser-peer');
+  if (url.pathname === '/api/v1/auth/login' && request.method === 'POST') {
+    const payload = JSON.parse((await body()).toString());
+    const account = String(payload.identifier).toLowerCase().includes('peer') ? 'browser-peer' : 'browser-fixture';
+    response.setHeader('set-cookie', `cubic_session=${account}; Path=/; HttpOnly; SameSite=Lax`);
+    return json({ user: account === 'browser-peer' ? peer : user });
+  }
+  if (url.pathname === '/api/v1/auth/register' && request.method === 'POST') {
+    response.setHeader('set-cookie', 'cubic_session=browser-peer; Path=/; HttpOnly; SameSite=Lax');
+    return json({ user: peer });
+  }
+  if (url.pathname === '/api/v1/server-invite-links/preview' && request.method === 'POST') {
+    const payload = JSON.parse((await body()).toString());
+    const link = fixtureShareInviteLinks.find((item) => item.token === payload.token && !item.revokedAt && Date.parse(item.expiresAt) > Date.now());
+    if (!link) return json({ error: 'Invite unavailable.' }, 404);
+    const server = fixtureServers.find((item) => item.id === link.serverId);
+    if (!server) return json({ error: 'Invite unavailable.' }, 404);
+    const preview = { valid: true, server: { id: server.id, name: server.name } };
+    if (request.headers.cookie?.includes('cubic_session=browser-peer')) preview.alreadyMember = fixtureServerMembers.get(server.id)?.has(peer.id) ?? false;
+    else if (request.headers.cookie?.includes('cubic_session=browser-fixture')) preview.alreadyMember = fixtureServerMembers.get(server.id)?.has(user.id) ?? false;
+    return json(preview);
+  }
   if (!isPeer && !request.headers.cookie?.includes('cubic_session=browser-fixture')) return json({ error: 'Authentication required.' }, 401);
   const requestUser = isPeer ? peer : user;
+  if (url.pathname === '/api/v1/server-invite-links/join' && request.method === 'POST') {
+    const payload = JSON.parse((await body()).toString());
+    const link = fixtureShareInviteLinks.find((item) => item.token === payload.token && !item.revokedAt && Date.parse(item.expiresAt) > Date.now());
+    if (!link) return json({ error: 'Invite unavailable.' }, 404);
+    const selected = fixtureServers.find((item) => item.id === link.serverId);
+    if (!selected) return json({ error: 'Invite unavailable.' }, 404);
+    const alreadyMember = fixtureServerMembers.get(selected.id).has(requestUser.id);
+    fixtureServerMembers.get(selected.id).add(requestUser.id);
+    return json({ server: { id: selected.id, name: selected.name }, joined: !alreadyMember, alreadyMember });
+  }
   if (url.pathname === '/api/v1/users/me/profile' && request.method === 'PATCH') {
     const payload = JSON.parse((await body()).toString());
     if (typeof payload.displayName !== 'string' || !payload.displayName.trim()) return json({ error: 'Invalid profile.' }, 400);
@@ -247,6 +280,24 @@ const server = createServer(async (request, response) => {
       const invite = { id: randomUUID(), serverId: selected.id, serverName: selected.name, inviter: requestUser, invitee: isPeer ? user : peer, status: 'pending', createdAt: new Date().toISOString() };
       fixtureServerInvites.push(invite);
       return json({ invite }, 201);
+    }
+  }
+  const shareLinks = /^\/api\/v1\/servers\/([0-9a-f-]+)\/invite-links(?:\/([0-9a-f-]+)\/revoke)?$/.exec(url.pathname);
+  if (shareLinks) {
+    const selected = fixtureServers.find((item) => item.id === shareLinks[1]);
+    if (selected?.ownerUserId !== requestUser.id) return json({ error: 'Server not found.' }, 404);
+    if (shareLinks[2]) {
+      const link = fixtureShareInviteLinks.find((item) => item.id === shareLinks[2] && item.serverId === selected.id);
+      if (!link) return json({ error: 'Invite link not found.' }, 404);
+      link.revokedAt ??= new Date().toISOString();
+      return json({ inviteLink: { id: link.id, createdAt: link.createdAt, expiresAt: link.expiresAt, revokedAt: link.revokedAt } });
+    }
+    if (request.method === 'GET') return json({ inviteLinks: fixtureShareInviteLinks.filter((item) => item.serverId === selected.id).map(({ token, serverId, ...metadata }) => metadata) });
+    if (request.method === 'POST') {
+      const createdAt = new Date().toISOString();
+      const link = { id: randomUUID(), serverId: selected.id, token: randomUUID().replaceAll('-', '') + 'abcdefghijk', createdAt, expiresAt: new Date(Date.parse(createdAt) + 7 * 24 * 60 * 60 * 1000).toISOString(), revokedAt: null };
+      fixtureShareInviteLinks.push(link);
+      return json({ inviteLink: { id: link.id, createdAt: link.createdAt, expiresAt: link.expiresAt, revokedAt: null }, token: link.token }, 201);
     }
   }
   const serverMembers = /^\/api\/v1\/servers\/([0-9a-f-]+)\/members$/.exec(url.pathname);

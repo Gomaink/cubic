@@ -32,6 +32,7 @@
   type ServerSummary = { id: string; name: string; ownerUserId: string; createdAt: string; updatedAt: string };
   type ServerTextChannel = { id: string; serverId: string; conversationId: string; categoryId: string | null; position: number; name: string; createdAt: string; updatedAt: string };
   type ServerCategory = { id: string; serverId: string; name: string; position: number; createdAt: string; updatedAt: string };
+  type ShareInviteLink = { id: string; createdAt: string; expiresAt: string; revokedAt: string | null };
   let servers = $state<ServerSummary[]>([]);
   let activeServer = $state<ServerSummary | null>(null);
   let serverChannels = $state<ServerTextChannel[]>([]);
@@ -55,6 +56,12 @@
   let serverCreateBusy = $state(false);
   let serverMembers = $state<ProfileIdentity[]>([]);
   let pendingServerInvites = $state<any[]>([]);
+  let shareInviteLinks = $state<ShareInviteLink[]>([]);
+  let oneTimeInviteUrl = $state('');
+  let shareInviteBusy = $state(false);
+  let shareInviteError = $state('');
+  let shareInviteNotice = $state('');
+  let shareInviteSequence = 0;
   let serverInviteTarget = $state('');
   let serverMembershipBusy = $state(false);
   let serverMembershipError = $state('');
@@ -343,6 +350,13 @@
       const payload = await api('/api/v1/servers');
       if (sequence !== serverRefreshSequence || revision !== serverListRevision) return;
       servers = payload.servers;
+      let pendingServerId: string | null = null;
+      try { pendingServerId = sessionStorage.getItem('cubic:open-server'); } catch { /* Storage may be unavailable. */ }
+      if (pendingServerId) {
+        try { sessionStorage.removeItem('cubic:open-server'); } catch { /* Selection can still continue. */ }
+        const pendingServer = servers.find((item) => item.id === pendingServerId);
+        if (pendingServer) selectServer(pendingServer);
+      }
       if (activeServer) {
         const current = servers.find((server) => server.id === activeServer?.id);
         if (current) activeServer = current;
@@ -357,6 +371,9 @@
           serverCategories = [];
           serverMembers = [];
           pendingServerInvites = [];
+          shareInviteSequence += 1;
+          shareInviteLinks = [];
+          oneTimeInviteUrl = '';
           activeChannel = null;
           activeServer = null;
         }
@@ -382,6 +399,9 @@
     void refreshServerChannels(server);
     serverMembers = [];
     pendingServerInvites = [];
+    shareInviteSequence += 1;
+    shareInviteLinks = [];
+    oneTimeInviteUrl = '';
     serverInviteTarget = '';
     void refreshServerMembership(server);
   }
@@ -433,6 +453,70 @@
         void refreshServerMembership(current);
       }
     } finally { serverMembershipBusy = false; }
+  }
+
+  async function refreshShareInviteLinks(server: ServerSummary) {
+    const sequence = ++shareInviteSequence;
+    shareInviteError = '';
+    try {
+      const payload = await api(`/api/v1/servers/${server.id}/invite-links`);
+      if (sequence !== shareInviteSequence || activeServer?.id !== server.id) return;
+      shareInviteLinks = payload.inviteLinks;
+    } catch (cause) {
+      if (sequence === shareInviteSequence && activeServer?.id === server.id)
+        shareInviteError = cause instanceof Error ? cause.message : 'Could not load share links.';
+    }
+  }
+
+  async function createShareInviteLink() {
+    const server = activeServer;
+    if (!server || server.ownerUserId !== currentUser.id || shareInviteBusy) return;
+    shareInviteBusy = true;
+    shareInviteError = '';
+    shareInviteNotice = '';
+    try {
+      const result = await api(`/api/v1/servers/${server.id}/invite-links`, { method: 'POST' });
+      if (activeServer?.id !== server.id || serverDialog !== 'invite') return;
+      shareInviteSequence += 1;
+      shareInviteLinks = [result.inviteLink, ...shareInviteLinks];
+      oneTimeInviteUrl = `${window.location.origin}/invite#${result.token}`;
+    } catch (cause) {
+      if (activeServer?.id === server.id) shareInviteError = cause instanceof Error ? cause.message : 'Could not create share link.';
+    } finally { shareInviteBusy = false; }
+  }
+
+  async function copyShareInviteLink() {
+    if (!oneTimeInviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(oneTimeInviteUrl);
+      shareInviteNotice = 'Link copied.';
+    } catch {
+      shareInviteNotice = 'Select the link above to copy it manually.';
+    }
+  }
+
+  async function shareInviteLink() {
+    if (!oneTimeInviteUrl || !navigator.share) return;
+    try { await navigator.share({ url: oneTimeInviteUrl }); }
+    catch { /* User cancelled sharing or the platform declined it. */ }
+  }
+
+  async function revokeShareInviteLink(linkId: string) {
+    const server = activeServer;
+    if (!server || server.ownerUserId !== currentUser.id || shareInviteBusy) return;
+    shareInviteBusy = true;
+    shareInviteError = '';
+    try {
+      const result = await api(`/api/v1/servers/${server.id}/invite-links/${linkId}/revoke`, { method: 'POST' });
+      if (activeServer?.id !== server.id) return;
+      shareInviteSequence += 1;
+      shareInviteLinks = shareInviteLinks.map((link) => link.id === linkId ? result.inviteLink : link);
+    } catch (cause) {
+      if (activeServer?.id === server.id) {
+        shareInviteError = cause instanceof Error ? cause.message : 'Could not revoke link.';
+        void refreshShareInviteLinks(server);
+      }
+    } finally { shareInviteBusy = false; }
   }
 
   async function acceptServerInvite(inviteId: string) {
@@ -664,11 +748,14 @@
     serverDialogReturnFocus = trigger.currentTarget instanceof HTMLElement ? trigger.currentTarget : null;
     serverMenuOpen = false;
     serverDialog = kind;
+    if (kind === 'invite' && activeServer) void refreshShareInviteLinks(activeServer);
   }
 
   function closeServerDialog() {
     if (!serverDialog) return;
     serverDialog = null;
+    oneTimeInviteUrl = '';
+    shareInviteNotice = '';
     memberRemovalTarget = null;
     const previous = serverDialogReturnFocus;
     serverDialogReturnFocus = null;
@@ -3579,6 +3666,7 @@
         </form>
         {#if layoutError}<p class="inline-error" role="alert">{layoutError}</p>{/if}
       {:else if serverDialog === 'invite' && activeServer && activeServer.ownerUserId === currentUser.id}
+        <h3>Targeted friend invitation</h3>
         <form class="cubic-server-create" onsubmit={inviteServerFriend}>
           <label for="cubic-server-invite-friend">Invite a friend</label>
           <select id="cubic-server-invite-friend" bind:value={serverInviteTarget} required>
@@ -3593,6 +3681,32 @@
         {#each pendingServerInvites as invite (invite.id)}
           <div class="cubic-server-member-row"><span>{invite.invitee.displayName} · Pending</span><button type="button" aria-label={`Cancel invitation for ${invite.invitee.displayName}`} onclick={() => cancelServerInvite(invite.id)} disabled={serverMembershipBusy}>Cancel</button></div>
         {/each}
+        <section class="cubic-share-invites" aria-label="Shareable invite links">
+          <h3>Share invite link</h3>
+          <p>Anyone with a link can join. Links expire after 7 days. Removing a member does not revoke a link.</p>
+          <button type="button" onclick={createShareInviteLink} disabled={shareInviteBusy}>{shareInviteBusy ? 'Creating…' : 'Create shareable link'}</button>
+          {#if oneTimeInviteUrl}
+            <div class="cubic-share-once">
+              <label for="cubic-share-invite-url">New link — shown only once</label>
+              <input id="cubic-share-invite-url" value={oneTimeInviteUrl} readonly onclick={(event) => event.currentTarget.select()} />
+              <div class="cubic-share-actions">
+                <button type="button" onclick={copyShareInviteLink}>Copy link</button>
+                {#if typeof navigator !== 'undefined' && typeof navigator.share === 'function'}<button type="button" onclick={shareInviteLink}>Share link</button>{/if}
+                <button type="button" onclick={() => { oneTimeInviteUrl = ''; shareInviteNotice = ''; }}>Done</button>
+              </div>
+              <small>After closing this link, it cannot be revealed again. Create a new one if needed.</small>
+            </div>
+          {/if}
+          {#if shareInviteNotice}<p role="status">{shareInviteNotice}</p>{/if}
+          {#if shareInviteLinks.length}<h3>Existing links</h3>{/if}
+          {#each shareInviteLinks as link (link.id)}
+            <div class="cubic-share-link-row">
+              <span>Created {new Date(link.createdAt).toLocaleDateString()} · {link.revokedAt ? 'Revoked' : Date.parse(link.expiresAt) <= Date.now() ? 'Expired' : `Expires ${new Date(link.expiresAt).toLocaleDateString()}`}</span>
+              {#if !link.revokedAt && Date.parse(link.expiresAt) > Date.now()}<button type="button" aria-label={`Revoke link created ${new Date(link.createdAt).toLocaleDateString()}`} onclick={() => revokeShareInviteLink(link.id)} disabled={shareInviteBusy}>Revoke</button>{/if}
+            </div>
+          {/each}
+          {#if shareInviteError}<p class="inline-error" role="alert">{shareInviteError} <button type="button" onclick={() => refreshShareInviteLinks(activeServer!)}>Retry</button></p>{/if}
+        </section>
         {#if serverMembershipError}<p class="inline-error" role="alert">{serverMembershipError} <button type="button" onclick={() => refreshServerMembership(activeServer!)}>Retry</button></p>{/if}
       {:else if serverDialog === 'remove-member' && activeServer && memberRemovalTarget && activeServer.ownerUserId === currentUser.id}
         <div class="cubic-server-remove-confirm">

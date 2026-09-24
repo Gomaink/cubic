@@ -11,6 +11,7 @@ import {
   listOwnedServerInvites, listReceivedServerInvites, listServerMembers
 } from '../servers/invites.js';
 import type { RealtimeEvents } from '../realtime/events.js';
+import { createServerInviteLink, listOwnedServerInviteLinks, revokeServerInviteLink } from '../servers/invite-links.js';
 
 export interface ServerRoutesOptions {
   database: Database;
@@ -30,6 +31,7 @@ const moveChannelSchema = z.object({ targetCategoryId: z.string().uuid().nullabl
 const inviteParamsSchema = z.object({ inviteId: z.string().uuid() });
 const inviteTargetSchema = z.object({ userId: z.string().uuid() });
 const memberParamsSchema = serverParamsSchema.extend({ userId: z.string().uuid() });
+const inviteLinkParamsSchema = serverParamsSchema.extend({ linkId: z.string().uuid() });
 
 export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app, options) => {
   const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
@@ -162,6 +164,36 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     const result = await listOwnedServerInvites(options.database, params.data.serverId, request.auth.user.id);
     if ('denied' in result) return reply.code(404).send({ error: 'Server not found.' });
     return { invites: result.value };
+  });
+
+  app.post('/:serverId/invite-links', { preHandler: requireAuth, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = serverParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid server.' });
+    const result = await createServerInviteLink(options.database, params.data.serverId, request.auth.user.id);
+    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Only the server owner can create invite links.' : 'Server not found.' });
+    reply.header('cache-control', 'no-store');
+    return reply.code(201).send(result.value);
+  });
+
+  app.get('/:serverId/invite-links', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = serverParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid server.' });
+    const result = await listOwnedServerInviteLinks(options.database, params.data.serverId, request.auth.user.id);
+    if ('denied' in result) return reply.code(404).send({ error: 'Server not found.' });
+    reply.header('cache-control', 'no-store');
+    return { inviteLinks: result.value };
+  });
+
+  app.post('/:serverId/invite-links/:linkId/revoke', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = inviteLinkParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid invite link.' });
+    const result = await revokeServerInviteLink(options.database, params.data.serverId, params.data.linkId, request.auth.user.id);
+    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Only the server owner can revoke invite links.' : 'Invite link not found.' });
+    reply.header('cache-control', 'no-store');
+    return { inviteLink: result.value };
   });
 
   app.get('/:serverId/members', { preHandler: requireAuth }, async (request, reply) => {

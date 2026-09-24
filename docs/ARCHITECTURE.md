@@ -141,3 +141,11 @@ assigned category belongs to the same server. Positions are compacted within
 affected scopes after moves or category deletion; deleting a category moves
 its channels to the uncategorized scope without deleting content. Layout is
 refreshed over HTTP and adds no realtime protocol.
+Slice 6 adds separate `server_invite_links` for reusable, seven-day shareable
+invites. Only a SHA-256 digest of each 256-bit bearer is stored; the raw bearer
+is returned once at creation and shared in a URL fragment. Guest preview reveals
+only server identity, while joining requires authentication and inserts only
+`server_members`. Owner creation/revocation and bearer joining serialize on the
+server row, with validity rechecked under the lock. Removing a member is not a
+ban: a still-valid link can allow rejoining. Targeted friend invitations remain
+independent; rich DM/group invite cards are deferred.

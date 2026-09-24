@@ -1,4 +1,5 @@
 <script lang="ts">
+  let { data } = $props();
   let identifier = $state('');
   let password = $state('');
   let error = $state('');
@@ -23,7 +24,7 @@
         return;
       }
 
-      window.location.assign('/app');
+      window.location.assign(data.continueInvite ? '/invite' : '/app');
     } catch {
       error = 'Cubic could not reach the API.';
     } finally {
@@ -64,7 +65,7 @@
       </button>
     </form>
 
-    <p class="auth-switch">New to Cubic? <a href="/register">Create an account</a>.</p>
+    <p class="auth-switch">New to Cubic? <a href={data.continueInvite ? '/register?returnTo=invite' : '/register'}>Create an account</a>.</p>
   </section>
   <aside class="auth-aside" aria-hidden="true">
     <span>alpha.2</span>
