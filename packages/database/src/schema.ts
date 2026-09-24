@@ -88,6 +88,25 @@ export const serverInvites = pgTable(
   ]
 );
 
+export const serverInviteLinks = pgTable(
+  'server_invite_links',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
+    creatorUserId: uuid('creator_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    tokenDigest: varchar('token_digest', { length: 64 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' })
+  },
+  (table) => [
+    uniqueIndex('server_invite_links_token_digest_uq').on(table.tokenDigest),
+    index('server_invite_links_server_created_idx').on(table.serverId, table.createdAt, table.id),
+    check('server_invite_links_token_digest_ck', sql`${table.tokenDigest} ~ '^[0-9a-f]{64}$'`),
+    check('server_invite_links_expiry_ck', sql`${table.expiresAt} > ${table.createdAt}`)
+  ]
+);
+
 export const userSettings = pgTable('user_settings', {
   userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
   theme: varchar('theme', { length: 16 }).notNull().default('dark'),
