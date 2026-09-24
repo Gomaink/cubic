@@ -130,6 +130,10 @@ invitations have no token or expiry. Acceptance creates one `server_members`
 row, not per-channel `conversation_members` rows. A non-owner may leave;
 after the membership transaction commits, the existing race-safe conversation
 room revocation evicts that user's sockets from the server's text channels.
+The owner can also remove an ordinary server member through the same locked
+membership-deletion and post-commit room-revocation path. Removal is not a ban:
+it leaves messages and invite history intact, and a later valid invite can
+restore membership.
 Slice 5 adds `server_channel_categories` and nullable category/position fields
 on text channels. Uncategorized channels remain valid. Members read the layout;
 owner-only layout mutations serialize on the server row and verify that any
