@@ -2670,6 +2670,57 @@ body { background: var(--cubic-onyx-0); }
   font-style: italic;
 }
 
+.cubic-server-invite-card {
+  display: flex;
+  gap: 11px;
+  width: min(360px, 100%);
+  min-height: 105px;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 11px;
+  border: 1px solid var(--cubic-onyx-border);
+  border-radius: 7px;
+  background: #202127;
+}
+.cubic-server-invite-card-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: #343949;
+  color: #e7eafd;
+  font-weight: 700;
+}
+.cubic-server-invite-card-detail { min-width: 0; flex: 1; }
+.cubic-server-invite-card-detail small {
+  display: block;
+  color: #aab0c1;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .07em;
+}
+.cubic-server-invite-card-detail p,
+.cubic-server-invite-card-name {
+  display: block;
+  overflow-wrap: anywhere;
+  margin: 4px 0 7px;
+  color: #e5e7ef;
+}
+.cubic-server-invite-card-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.cubic-server-invite-card button {
+  min-height: 36px;
+  padding: 5px 10px;
+  border: 1px solid #525c83;
+  border-radius: 5px;
+  background: #3c4a81;
+  color: #fff;
+  cursor: pointer;
+}
+.cubic-server-invite-card button:focus-visible { outline: 2px solid #c6d1ff; outline-offset: 2px; }
+.cubic-server-invite-card button:disabled { opacity: .65; cursor: default; }
+.cubic-server-invite-card .cubic-server-invite-card-refresh { background: transparent; }
+
 .discord-message-hover-time {
   visibility: hidden;
   width: 100%;

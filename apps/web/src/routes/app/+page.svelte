@@ -12,6 +12,8 @@
   import SessionSettings from '$lib/ui/SessionSettings.svelte';
   import MemberPanel from '$lib/ui/MemberPanel.svelte';
   import ProfileCard from '$lib/ui/ProfileCard.svelte';
+  import ServerInviteCard from '$lib/ui/ServerInviteCard.svelte';
+  import { firstTrustedServerInviteToken, ServerInvitePreviewQueue } from '$lib/server-invite-links';
 
   let { data } = $props();
   let updatedCurrentUser = $state<typeof data.user | null>(null);
@@ -76,6 +78,8 @@
   let serverListRevision = 0;
   let serverRefreshSequence = 0;
   let chatMessages = $state<any[]>([]);
+  let trustedInviteOrigin = $state('');
+  const invitePreviewQueue = new ServerInvitePreviewQueue();
   let messageBody = $state('');
   let messageInput = $state<HTMLInputElement | null>(null);
   let busy = $state(false);
@@ -1201,6 +1205,25 @@
     reactionPickerMessageId = null;
     reactionBusyKey = null;
     deleteCandidate = null;
+  }
+
+  function messageInviteToken(message: any, conversationKind: string | undefined, origin: string): string | null {
+    if (!origin || message.deletedAt || (conversationKind !== 'direct' && conversationKind !== 'group')) return null;
+    return firstTrustedServerInviteToken(message.body, origin);
+  }
+
+  async function openServerFromInvite(serverId: string, conversationId: string) {
+    if (activeConversation?.id !== conversationId) return;
+    try {
+      const payload = await api(`/api/v1/servers/${serverId}`);
+      if (activeConversation?.id !== conversationId) return;
+      const server = payload.server as ServerSummary;
+      serverListRevision += 1;
+      servers = [server, ...servers.filter((item) => item.id !== server.id)];
+      selectServer(server);
+    } catch {
+      if (activeConversation?.id === conversationId) error = 'Could not open this server. You may no longer be a member.';
+    }
   }
 
 
@@ -3381,6 +3404,7 @@
   }
 
   onMount(() => {
+    trustedInviteOrigin = window.location.origin;
     loadMediaPreferences();
     Promise.all([refreshSocial(), refreshGroupInvites(), refreshServerInvites(), refreshConversations()]).catch((e) => error = e.message);
     void refreshServers();
@@ -3559,6 +3583,7 @@
     navigator.mediaDevices?.addEventListener?.('devicechange', onMediaDeviceChange);
 
     return () => {
+      invitePreviewQueue.dispose();
       if (resumeTimer) clearTimeout(resumeTimer);
       if (idleTimer) clearTimeout(idleTimer);
       pendingPresenceSnapshot = null;
@@ -4054,6 +4079,7 @@
           <div class="chat-empty"><strong>No messages yet</strong><span>Send the first message to start the conversation.</span></div>
         {/if}
         {#each chatMessages as message, index (message.id)}
+          {@const inviteToken = messageInviteToken(message, activeConversation?.kind, trustedInviteOrigin)}
           {#if showMessageDateDivider(index)}
             <div class="message-date-divider" aria-label={formatMessageDay(message.createdAt)}>
               <span>{formatMessageDay(message.createdAt)}</span>
@@ -4110,6 +4136,17 @@
                   <span class="cubic-message-edited">(edited)</span>
                 {/if}
               </div>
+
+              {#if inviteToken}
+                {#key inviteToken}
+                  <ServerInviteCard
+                    token={inviteToken}
+                    queue={invitePreviewQueue}
+                    onJoined={() => { void refreshServers(); }}
+                    onGoToServer={(serverId) => { void openServerFromInvite(serverId, message.conversationId); }}
+                  />
+                {/key}
+              {/if}
 
               {#if !message.deletedAt && attachmentsOf(message).length > 0}
                 <MessageAttachments attachments={attachmentsOf(message)} />

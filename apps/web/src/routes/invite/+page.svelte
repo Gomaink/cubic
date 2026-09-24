@@ -1,13 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { joinServerInvite, previewServerInvite, validServerInviteToken, type ServerInvitePreview } from '$lib/server-invite-links';
 
   const continuationKey = 'cubic:pending-server-invite';
   const serverSelectionKey = 'cubic:open-server';
-  const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
-  type Preview = { valid: true; server: { id: string; name: string }; alreadyMember?: boolean };
 
   let inviteState = $state<'loading' | 'guest' | 'ready' | 'already' | 'unavailable' | 'network-error' | 'joining'>('loading');
-  let preview = $state<Preview | null>(null);
+  let preview = $state<ServerInvitePreview | null>(null);
   let error = $state('');
   let token: string | null = null;
 
@@ -21,16 +20,13 @@
     inviteState = 'loading';
     error = '';
     try {
-      const [inviteResponse, sessionResponse] = await Promise.all([
-        fetch('/api/v1/server-invite-links/preview', {
-          method: 'POST', headers: { 'content-type': 'application/json' },
-          credentials: 'include', cache: 'no-store', body: JSON.stringify({ token })
-        }),
+      const [inviteResult, sessionResponse] = await Promise.all([
+        previewServerInvite(token),
         fetch('/api/v1/auth/me', { credentials: 'include', cache: 'no-store' })
       ]);
-      if (inviteResponse.status === 404) { clearInvite(); inviteState = 'unavailable'; return; }
-      if (!inviteResponse.ok || (!sessionResponse.ok && sessionResponse.status !== 401)) throw new Error('Could not reach Cubic.');
-      preview = await inviteResponse.json() as Preview;
+      if (inviteResult.kind === 'unavailable') { clearInvite(); inviteState = 'unavailable'; return; }
+      if (inviteResult.kind !== 'available' || (!sessionResponse.ok && sessionResponse.status !== 401)) throw new Error('Could not reach Cubic.');
+      preview = inviteResult.preview;
       inviteState = sessionResponse.ok ? (preview.alreadyMember ? 'already' : 'ready') : 'guest';
     } catch {
       error = 'Could not check this invitation. Please try again.';
@@ -43,10 +39,7 @@
     inviteState = 'joining';
     error = '';
     try {
-      const response = await fetch('/api/v1/server-invite-links/join', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        credentials: 'include', cache: 'no-store', body: JSON.stringify({ token })
-      });
+      const response = await joinServerInvite(token);
       if (response.status === 404) { clearInvite(); inviteState = 'unavailable'; return; }
       if (response.status === 401) { inviteState = 'guest'; return; }
       if (!response.ok) throw new Error('Could not join this server.');
@@ -69,13 +62,13 @@
     const fragment = window.location.hash.slice(1);
     if (fragment) {
       window.history.replaceState(window.history.state, '', '/invite');
-      if (!tokenPattern.test(fragment)) { clearInvite(); inviteState = 'unavailable'; return; }
+      if (!validServerInviteToken(fragment)) { clearInvite(); inviteState = 'unavailable'; return; }
       token = fragment;
       try { sessionStorage.setItem(continuationKey, fragment); } catch { /* Current-tab preview still works. */ }
     } else {
       try { token = sessionStorage.getItem(continuationKey); } catch { token = null; }
     }
-    if (!token || !tokenPattern.test(token)) { clearInvite(); inviteState = 'unavailable'; return; }
+    if (!validServerInviteToken(token)) { clearInvite(); inviteState = 'unavailable'; return; }
     void loadPreview();
   });
 </script>
