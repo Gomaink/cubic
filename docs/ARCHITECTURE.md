@@ -148,4 +148,7 @@ only server identity, while joining requires authentication and inserts only
 `server_members`. Owner creation/revocation and bearer joining serialize on the
 server row, with validity rechecked under the lock. Removing a member is not a
 ban: a still-valid link can allow rejoining. Targeted friend invitations remain
-independent; rich DM/group invite cards are deferred.
+independent. In DMs and legacy groups, a trusted same-origin invite URL can
+derive one transient card below the unchanged message body. The card resolves
+through the existing preview/join APIs; server text channels do not render
+cards, and there is no message metadata or external URL unfurling.
