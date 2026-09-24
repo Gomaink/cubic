@@ -163,6 +163,79 @@ test('targeted friend joins existing text channel, sends a message, then leaves 
   }
 });
 
+test('owner confirms ordinary member removal without changing chats or server content', async ({ page, browser, request }) => {
+  await request.post('http://127.0.0.1:3198/__test/server-friends');
+  await page.reload();
+  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await createServer(page, 'Removal space');
+  await createChannel(page, 'general');
+  const serverId = await page.evaluate(async () => (await (await fetch('/api/v1/servers')).json()).servers[0].id as string);
+  const conversationId = await page.evaluate(async (id) => (await (await fetch(`/api/v1/servers/${id}/channels`)).json()).channels[0].conversationId as string, serverId);
+  await page.getByRole('button', { name: 'Back to server' }).click();
+  await page.getByRole('button', { name: 'Options for Removal space' }).click();
+  await page.getByRole('button', { name: 'Invite people' }).click();
+  const inviteDialog = page.getByRole('dialog', { name: 'Invite people' });
+  await inviteDialog.getByRole('combobox', { name: 'Invite a friend' }).selectOption('fixture-peer');
+  await inviteDialog.getByRole('button', { name: 'Invite friend' }).click();
+  await inviteDialog.getByRole('button', { name: 'Close server dialog' }).click();
+
+  const friendContext = await browser.newContext();
+  try {
+    await friendContext.addCookies([{ name: 'cubic_session', value: 'browser-peer', domain: '127.0.0.1', path: '/' }]);
+    const friendPage = await friendContext.newPage();
+    await friendPage.goto('/app');
+    await friendPage.getByRole('button', { name: 'People', exact: false }).click();
+    await friendPage.getByRole('button', { name: 'Accept invitation to Removal space' }).click();
+    await friendPage.getByRole('button', { name: 'Members · 2' }).click();
+    await expect(friendPage.getByRole('button', { name: /Remove .* from server/ })).toHaveCount(0);
+    const directRemovalStatus = await friendPage.evaluate(async (id) => (await fetch(`/api/v1/servers/${id}/members/fixture-user`, { method: 'DELETE' })).status, serverId);
+    expect(directRemovalStatus).toBe(403);
+    await friendPage.getByRole('button', { name: 'Close server members' }).click();
+    await friendPage.getByRole('button', { name: 'Text channel general' }).click();
+
+    await page.getByRole('button', { name: 'Text channel general' }).click();
+    await page.getByRole('button', { name: 'Server members' }).click();
+    await page.getByRole('button', { name: 'Refresh members' }).click();
+    const pane = page.getByRole('complementary', { name: 'Members of Removal space' });
+    await expect(pane.getByRole('heading', { name: 'Members · 2' })).toBeVisible();
+    await expect(pane.getByRole('button', { name: 'Remove Tester from server' })).toHaveCount(0);
+    await pane.getByRole('button', { name: 'Remove Fixture DM from server' }).click();
+    const confirmation = page.getByRole('dialog', { name: 'Remove server member' });
+    await expect(confirmation).toContainText('Remove Fixture DM from Removal space?');
+    await expect(confirmation).toContainText('Their previous messages will remain.');
+    await confirmation.getByRole('button', { name: 'Cancel' }).click();
+    await expect(confirmation).toHaveCount(0);
+    await expect(pane.getByRole('button', { name: 'Remove Fixture DM from server' })).toBeFocused();
+    await pane.getByRole('button', { name: 'Remove Fixture DM from server' }).click();
+    await confirmation.getByRole('button', { name: 'Remove from server' }).click();
+    await expect(confirmation).toHaveCount(0);
+    await expect(pane.getByRole('heading', { name: 'Members · 1' })).toBeVisible();
+    await expect(pane.getByRole('button', { name: 'Remove Fixture DM from server' })).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+    await expect(friendPage.locator('.cubic-server-sidebar-head')).toHaveCount(0);
+    await expect(friendPage.locator('.cubic-server-row')).toHaveCount(0);
+    await friendPage.reload();
+    await friendPage.getByRole('button', { name: 'Servers', exact: true }).click();
+    await expect(friendPage.locator('.cubic-server-row')).toHaveCount(0);
+    const denied = await friendPage.evaluate(async ({ serverId, conversationId }) => ({
+      server: (await fetch(`/api/v1/servers/${serverId}`)).status,
+      messages: (await fetch(`/api/v1/conversations/${conversationId}/messages`)).status
+    }), { serverId, conversationId });
+    expect(denied).toEqual({ server: 404, messages: 404 });
+    await friendPage.getByRole('button', { name: 'Chats', exact: true }).click();
+    await expect(friendPage.locator('.conversation-row').filter({ hasText: 'Fixture group' })).toBeVisible();
+    await expect(friendPage.locator('.conversation-row').filter({ hasText: 'Tester' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Close server members' }).click();
+    await page.getByPlaceholder('Message…').fill('Content remains usable');
+    await page.getByRole('button', { name: 'Send message' }).click();
+    await expect(page.getByText('Content remains usable')).toBeVisible();
+  } finally {
+    await friendContext.close().catch(() => {});
+  }
+});
+
 test('server shell keeps channel, member and DM/group contexts separate', async ({ page }) => {
   await page.locator('.conversation-row').filter({ hasText: 'Fixture DM' }).click();
   await expect(page.locator('.chat-heading')).toContainText('Fixture DM');

@@ -4430,6 +4430,12 @@ body { background: var(--cubic-onyx-0); }
 .cubic-server-dialog .cubic-server-create { margin: 12px 0; padding-top: 0; border: 0; }
 .cubic-server-dialog .cubic-server-member-row { width: 100%; padding: 5px 0; }
 .cubic-server-dialog .cubic-server-member-row button { min-height: 36px; padding: 4px 10px; border: 1px solid #454852; border-radius: 6px; background: #292b34; color: var(--cubic-text); cursor: pointer; }
+.cubic-server-remove-confirm { display: grid; gap: 12px; padding-top: 14px; }
+.cubic-server-remove-confirm p { margin: 0; overflow-wrap: anywhere; }
+.cubic-server-remove-confirm p + p { color: var(--cubic-muted); font-size: .88rem; }
+.cubic-server-remove-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.cubic-server-remove-actions button { min-height: 40px; padding: 6px 12px; border: 1px solid #454852; border-radius: 6px; background: #292b34; color: var(--cubic-text); cursor: pointer; }
+.cubic-server-remove-actions .cubic-server-remove-submit { border-color: #9d4a51; background: #642c34; color: #fff; }
 .chat-panel.cubic-server-members-open { position: relative; }
 .cubic-server-member-pane { position: absolute; z-index: 12; inset: 0 0 0 auto; display: flex; flex-direction: column; width: 240px; min-height: 0; border-left: 1px solid var(--cubic-border); background: #15161b; box-shadow: -12px 0 28px #0004; }
 .cubic-server-member-pane > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 66px; padding: 10px 12px; border-bottom: 1px solid var(--cubic-border); }
@@ -4438,7 +4444,11 @@ body { background: var(--cubic-onyx-0); }
 .cubic-server-member-pane > header button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; background: transparent; color: var(--cubic-text); cursor: pointer; }
 .cubic-server-member-scroll { min-height: 0; padding: 10px; overflow-y: auto; }
 .cubic-server-member-refresh { min-height: 38px; margin-bottom: 8px; border: 0; background: transparent; color: var(--cubic-muted); cursor: pointer; }
+.cubic-server-member-row-entry { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .cubic-server-member-entry { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 52px; padding: 5px; border: 0; border-radius: 6px; background: transparent; color: var(--cubic-text); text-align: left; cursor: pointer; }
+.cubic-server-member-row-entry .cubic-server-member-entry { flex: 1 1 auto; min-width: 0; }
+.cubic-server-member-remove { flex: 0 0 auto; min-height: 40px; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: #e7a6ad; cursor: pointer; }
+.cubic-server-member-remove:hover { background: #642c34; color: #fff; }
 .cubic-server-member-entry:hover { background: var(--cubic-bg-hover); }
 .cubic-server-member-entry .avatar { flex: 0 0 34px; width: 34px; height: 34px; }
 .cubic-server-member-entry strong, .cubic-server-member-entry small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

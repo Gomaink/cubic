@@ -256,6 +256,22 @@ const server = createServer(async (request, response) => {
     if (!selected || !members?.has(requestUser.id)) return json({ error: 'Server not found.' }, 404);
     return json({ members: [...members].map((id) => ({ ...(id === user.id ? user : peer), owner: id === selected.ownerUserId })) });
   }
+  const serverMemberRemove = /^\/api\/v1\/servers\/([0-9a-f-]+)\/members\/(fixture-user|fixture-peer)$/.exec(url.pathname);
+  if (serverMemberRemove && request.method === 'DELETE') {
+    const selected = fixtureServers.find((item) => item.id === serverMemberRemove[1]);
+    const members = fixtureServerMembers.get(serverMemberRemove[1]);
+    if (!selected || !members?.has(requestUser.id)) return json({ error: 'Server member not found.' }, 404);
+    if (selected.ownerUserId !== requestUser.id) return json({ error: 'Only the server owner can remove members.' }, 403);
+    if (selected.ownerUserId === serverMemberRemove[2]) return json({ error: 'The server owner cannot be removed.' }, 403);
+    if (!members.has(serverMemberRemove[2])) return json({ error: 'Server member not found.' }, 404);
+    members.delete(serverMemberRemove[2]);
+    for (const channel of fixtureChannels.filter((item) => item.serverId === selected.id)) {
+      for (const [socketId, userId] of fixtureSockets) {
+        if (userId === serverMemberRemove[2]) io.sockets.sockets.get(socketId)?.emit('conversation:removed', { conversationId: channel.conversationId });
+      }
+    }
+    response.writeHead(204); return response.end();
+  }
   const serverLeave = /^\/api\/v1\/servers\/([0-9a-f-]+)\/leave$/.exec(url.pathname);
   if (serverLeave && request.method === 'POST') {
     const selected = fixtureServers.find((item) => item.id === serverLeave[1]);

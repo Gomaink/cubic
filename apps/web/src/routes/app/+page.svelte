@@ -60,8 +60,9 @@
   let serverMembershipError = $state('');
   let serverMembersOpen = $state(false);
   let serverMembersReturnFocus: HTMLElement | null = null;
+  let memberRemovalTarget = $state<ProfileIdentity | null>(null);
   let serverMenuOpen = $state(false);
-  let serverDialog = $state<'server' | 'channel' | 'invite' | 'category' | 'rename-category' | 'move-channel' | null>(null);
+  let serverDialog = $state<'server' | 'channel' | 'invite' | 'category' | 'rename-category' | 'move-channel' | 'remove-member' | null>(null);
   let serverDialogReturnFocus: HTMLElement | null = null;
   let serverDetailSequence = 0;
   let serverInviteSequence = 0;
@@ -342,7 +343,24 @@
       const payload = await api('/api/v1/servers');
       if (sequence !== serverRefreshSequence || revision !== serverListRevision) return;
       servers = payload.servers;
-      if (activeServer) activeServer = servers.find((server) => server.id === activeServer?.id) ?? null;
+      if (activeServer) {
+        const current = servers.find((server) => server.id === activeServer?.id);
+        if (current) activeServer = current;
+        else {
+          if (activeConversation?.kind === 'server_text') closeConversation();
+          closeServerDialog();
+          serverMembersOpen = false;
+          serverMenuOpen = false;
+          serverDetailSequence += 1;
+          channelLoadSequence += 1;
+          serverChannels = [];
+          serverCategories = [];
+          serverMembers = [];
+          pendingServerInvites = [];
+          activeChannel = null;
+          activeServer = null;
+        }
+      }
     } catch (cause) {
       if (sequence === serverRefreshSequence && revision === serverListRevision) {
         serversError = cause instanceof Error ? cause.message : 'Could not load servers.';
@@ -460,6 +478,36 @@
       tab = 'chats';
     } catch (cause) {
       if (activeServer?.id === server.id) serverMembershipError = cause instanceof Error ? cause.message : 'Could not leave server.';
+    } finally { serverMembershipBusy = false; }
+  }
+
+  function confirmMemberRemoval(member: ProfileIdentity, event: MouseEvent) {
+    if (!activeServer || activeServer.ownerUserId !== currentUser.id || member.id === currentUser.id) return;
+    memberRemovalTarget = member;
+    serverMembershipError = '';
+    openServerDialog('remove-member', event);
+  }
+
+  async function removeSelectedServerMember() {
+    const server = activeServer;
+    const target = memberRemovalTarget;
+    if (!server || !target || serverDialog !== 'remove-member' || server.ownerUserId !== currentUser.id ||
+        target.id === currentUser.id || serverMembershipBusy) return;
+    serverMembershipBusy = true;
+    serverMembershipError = '';
+    try {
+      await api(`/api/v1/servers/${server.id}/members/${target.id}`, { method: 'DELETE' });
+      if (activeServer?.id !== server.id || memberRemovalTarget?.id !== target.id) return;
+      serverDetailSequence += 1;
+      serverMembers = serverMembers.filter((member) => member.id !== target.id);
+      if (selectedProfile?.id === target.id) selectedProfile = null;
+      closeServerDialog();
+      await tick();
+      document.querySelector<HTMLButtonElement>('.cubic-server-member-refresh')?.focus();
+      void refreshServerMembership(server);
+    } catch (cause) {
+      if (activeServer?.id === server.id && memberRemovalTarget?.id === target.id)
+        serverMembershipError = cause instanceof Error ? cause.message : 'Could not remove server member.';
     } finally { serverMembershipBusy = false; }
   }
 
@@ -621,6 +669,7 @@
   function closeServerDialog() {
     if (!serverDialog) return;
     serverDialog = null;
+    memberRemovalTarget = null;
     const previous = serverDialogReturnFocus;
     serverDialogReturnFocus = null;
     void tick().then(() => previous?.isConnected && previous.focus());
@@ -3363,8 +3412,10 @@
       }
     });
     socket.on('conversation:removed', (event: any) => {
+      const wasServerChannel = serverChannels.some((channel) => channel.conversationId === event?.conversationId);
       if (voiceConversationId === event?.conversationId) void leaveVoice();
       if (activeConversation?.id === event?.conversationId) closeConversation();
+      if (wasServerChannel) void refreshServers();
       refreshConversations().catch(() => {});
     });
     socket.on('group:invites:updated', () => {
@@ -3489,8 +3540,8 @@
   {/if}
 
   {#if serverDialog}
-    <dialog class="cubic-server-dialog" use:showServerDialog aria-label={serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : serverDialog === 'invite' ? 'Invite people' : serverDialog === 'move-channel' ? 'Move channel' : serverDialog === 'rename-category' ? 'Rename category' : 'Create category'} onclose={closeServerDialog}>
-      <header><h2>{serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : serverDialog === 'invite' ? 'Invite people' : serverDialog === 'move-channel' ? 'Move channel' : serverDialog === 'rename-category' ? 'Rename category' : 'Create category'}</h2><button type="button" aria-label="Close server dialog" onclick={closeServerDialog}><Icon name="x" size={18} /></button></header>
+    <dialog class="cubic-server-dialog" use:showServerDialog aria-label={serverDialog === 'remove-member' ? 'Remove server member' : serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : serverDialog === 'invite' ? 'Invite people' : serverDialog === 'move-channel' ? 'Move channel' : serverDialog === 'rename-category' ? 'Rename category' : 'Create category'} onclose={closeServerDialog} oncancel={(event) => { if (serverDialog === 'remove-member' && serverMembershipBusy) event.preventDefault(); }}>
+      <header><h2>{serverDialog === 'remove-member' ? 'Remove server member' : serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : serverDialog === 'invite' ? 'Invite people' : serverDialog === 'move-channel' ? 'Move channel' : serverDialog === 'rename-category' ? 'Rename category' : 'Create category'}</h2><button type="button" aria-label="Close server dialog" onclick={closeServerDialog} disabled={serverDialog === 'remove-member' && serverMembershipBusy}><Icon name="x" size={18} /></button></header>
       {#if serverDialog === 'server'}
         <form class="cubic-server-create" onsubmit={createServer}>
           <label for="cubic-server-name">Server name</label>
@@ -3543,6 +3594,16 @@
           <div class="cubic-server-member-row"><span>{invite.invitee.displayName} · Pending</span><button type="button" aria-label={`Cancel invitation for ${invite.invitee.displayName}`} onclick={() => cancelServerInvite(invite.id)} disabled={serverMembershipBusy}>Cancel</button></div>
         {/each}
         {#if serverMembershipError}<p class="inline-error" role="alert">{serverMembershipError} <button type="button" onclick={() => refreshServerMembership(activeServer!)}>Retry</button></p>{/if}
+      {:else if serverDialog === 'remove-member' && activeServer && memberRemovalTarget && activeServer.ownerUserId === currentUser.id}
+        <div class="cubic-server-remove-confirm">
+          <p>Remove <strong>{memberRemovalTarget.displayName}</strong> from <strong>{activeServer.name}</strong>?</p>
+          <p>They will lose access to this server. Their previous messages will remain.</p>
+          {#if serverMembershipError}<p class="inline-error" role="alert">{serverMembershipError}</p>{/if}
+          <div class="cubic-server-remove-actions">
+            <button type="button" onclick={closeServerDialog} disabled={serverMembershipBusy}>Cancel</button>
+            <button type="button" class="cubic-server-remove-submit" onclick={removeSelectedServerMember} disabled={serverMembershipBusy}>{serverMembershipBusy ? 'Removing…' : 'Remove from server'}</button>
+          </div>
+        </div>
       {/if}
     </dialog>
   {/if}
@@ -4331,10 +4392,15 @@
         <div class="cubic-server-member-scroll">
           <button type="button" class="cubic-server-member-refresh" onclick={() => refreshServerMembership(activeServer!)}>Refresh members</button>
           {#each serverMembers as member (member.id)}
-            <button class="cubic-server-member-entry" type="button" aria-label={`Open ${member.displayName}'s profile, ${member.id === activeServer.ownerUserId ? 'owner' : 'member'}`} onclick={() => openProfile(member)}>
-              <span class="avatar cubic-user-avatar-shell">{member.displayName.slice(0,1).toUpperCase()}{#if member.avatarUrl}{#key member.avatarUrl}<img src={member.avatarUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span>
-              <span><strong>{member.displayName}</strong><small>{member.id === activeServer.ownerUserId ? 'Owner' : 'Member'}</small></span>
-            </button>
+            <div class="cubic-server-member-row-entry">
+              <button class="cubic-server-member-entry" type="button" aria-label={`Open ${member.displayName}'s profile, ${member.id === activeServer.ownerUserId ? 'owner' : 'member'}`} onclick={() => openProfile(member)}>
+                <span class="avatar cubic-user-avatar-shell">{member.displayName.slice(0,1).toUpperCase()}{#if member.avatarUrl}{#key member.avatarUrl}<img src={member.avatarUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span>
+                <span><strong>{member.displayName}</strong><small>{member.id === activeServer.ownerUserId ? 'Owner' : 'Member'}</small></span>
+              </button>
+              {#if activeServer.ownerUserId === currentUser.id && member.id !== activeServer.ownerUserId}
+                <button class="cubic-server-member-remove" type="button" aria-label={`Remove ${member.displayName} from server`} title="Remove from server" onclick={(event) => confirmMemberRemoval(member, event)} disabled={serverMembershipBusy}>Remove</button>
+              {/if}
+            </div>
           {/each}
           {#if serverMembershipError}<p class="inline-error" role="alert">{serverMembershipError}</p>{/if}
         </div>

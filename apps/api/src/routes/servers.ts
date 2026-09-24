@@ -7,7 +7,7 @@ import { createOwnedServer, listMemberServers, resolveMemberServer } from '../se
 import { createOwnedTextChannel, listMemberTextChannels } from '../servers/channels.js';
 import { createCategory, deleteCategory, listMemberCategories, moveCategory, moveChannel, renameCategory } from '../servers/layout.js';
 import {
-  acceptServerInvite, cancelServerInvite, createServerInvite, leaveServer,
+  acceptServerInvite, cancelServerInvite, createServerInvite, leaveServer, removeServerMember,
   listOwnedServerInvites, listReceivedServerInvites, listServerMembers
 } from '../servers/invites.js';
 import type { RealtimeEvents } from '../realtime/events.js';
@@ -29,9 +29,15 @@ const moveCategorySchema = z.object({ targetIndex: z.number().int().nonnegative(
 const moveChannelSchema = z.object({ targetCategoryId: z.string().uuid().nullable(), targetIndex: z.number().int().nonnegative() });
 const inviteParamsSchema = z.object({ inviteId: z.string().uuid() });
 const inviteTargetSchema = z.object({ userId: z.string().uuid() });
+const memberParamsSchema = serverParamsSchema.extend({ userId: z.string().uuid() });
 
 export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app, options) => {
   const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
+  const revokeChannelRooms = (conversationIds: string[], userId: string) => {
+    for (const conversationId of conversationIds) {
+      options.realtimeEvents?.emitConversationRemoved({ conversationId, removedUserIds: [userId], remainingUserIds: [] });
+    }
+  };
 
   app.post('/', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
@@ -167,6 +173,20 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     return { members: result.value };
   });
 
+  app.delete('/:serverId/members/:userId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = memberParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid server member.' });
+    const result = await removeServerMember(options.database, params.data.serverId, request.auth.user.id, params.data.userId);
+    if ('denied' in result) {
+      if (result.denied === 'not_owner') return reply.code(403).send({ error: 'Only the server owner can remove members.' });
+      if (result.denied === 'owner') return reply.code(403).send({ error: 'The server owner cannot be removed.' });
+      return reply.code(404).send({ error: 'Server member not found.' });
+    }
+    revokeChannelRooms(result.value, params.data.userId);
+    return reply.code(204).send();
+  });
+
   app.post('/:serverId/invites', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
     const params = serverParamsSchema.safeParse(request.params);
@@ -209,9 +229,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     const actorId = request.auth.user.id;
     const result = await leaveServer(options.database, params.data.serverId, actorId);
     if ('denied' in result) return reply.code(result.denied === 'owner' ? 403 : 404).send({ error: result.denied === 'owner' ? 'The server owner cannot leave.' : 'Server not found.' });
-    for (const conversationId of result.value) {
-      options.realtimeEvents?.emitConversationRemoved({ conversationId, removedUserIds: [actorId], remainingUserIds: [] });
-    }
+    revokeChannelRooms(result.value, actorId);
     return reply.code(204).send();
   });
 };

@@ -161,15 +161,33 @@ export async function cancelServerInvite(database: Database, inviteId: string, a
   });
 }
 
+async function removeMembershipAndListChannels(client: PoolClient, serverId: string, userId: string): Promise<string[] | null> {
+  const deleted = await client.query('delete from server_members where server_id = $1 and user_id = $2 returning user_id', [serverId, userId]);
+  if (!deleted.rowCount) return null;
+  const channels = await client.query<{ conversation_id: string }>(
+    'select conversation_id from server_text_channels where server_id = $1 order by created_at, id', [serverId]
+  );
+  return channels.rows.map((row) => row.conversation_id);
+}
+
 export async function leaveServer(database: Database, serverId: string, actorId: string): Promise<Result<string[]>> {
   return withServerTransaction(database, serverId, async (client, ownerId) => {
     if (!ownerId) return { denied: 'not_found' };
     if (ownerId === actorId) return { denied: 'owner' };
-    const deleted = await client.query('delete from server_members where server_id = $1 and user_id = $2 returning user_id', [serverId, actorId]);
-    if (!deleted.rowCount) return { denied: 'not_found' };
-    const channels = await client.query<{ conversation_id: string }>(
-      `select conversation_id from server_text_channels where server_id = $1 order by created_at, id`, [serverId]
-    );
-    return { value: channels.rows.map((row) => row.conversation_id) };
+    const channels = await removeMembershipAndListChannels(client, serverId, actorId);
+    return channels ? { value: channels } : { denied: 'not_found' };
+  });
+}
+
+export async function removeServerMember(database: Database, serverId: string, actorId: string, targetUserId: string): Promise<Result<string[]>> {
+  return withServerTransaction(database, serverId, async (client, ownerId) => {
+    if (!ownerId) return { denied: 'not_found' };
+    if (ownerId !== actorId) {
+      const member = await client.query('select 1 from server_members where server_id = $1 and user_id = $2', [serverId, actorId]);
+      return { denied: member.rowCount ? 'not_owner' : 'not_found' };
+    }
+    if (ownerId === targetUserId) return { denied: 'owner' };
+    const channels = await removeMembershipAndListChannels(client, serverId, targetUserId);
+    return channels ? { value: channels } : { denied: 'not_found' };
   });
 }
