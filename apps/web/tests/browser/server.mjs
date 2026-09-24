@@ -3,12 +3,14 @@ import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { Server } from 'socket.io';
+import sharp from 'sharp';
 
 const user = { id: 'fixture-user', username: 'tester', displayName: 'Tester', avatarUrl: null };
 const peer = { id: 'fixture-peer', username: 'peer', displayName: 'Fixture DM', avatarUrl: null };
 const dm = '11111111-1111-4111-8111-111111111111';
 const group = '22222222-2222-4222-8222-222222222222';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
+const fixtureIconWebp = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#f25252' } }).webp().toBuffer();
 const animatedGif = Buffer.from('47494638396101000100800000000000ffffff21f90400000000002c000000000100010000020244010021f90400000000002c00000000010001000002024c01003b', 'hex');
 let messages;
 let staged;
@@ -17,6 +19,7 @@ let sessionMode;
 let activeSessions;
 let groupMembers;
 let fixtureServers;
+let fixtureIconCounter;
 let fixtureChannels;
 let fixtureCategories;
 let fixtureServerMembers;
@@ -36,6 +39,7 @@ function attachment(name, contentType = 'image/png', dimensions = { width: 800, 
 
 function reset() {
   fixtureServers = [];
+  fixtureIconCounter = 0;
   fixtureChannels = [];
   fixtureCategories = [];
   fixtureServerMembers = new Map();
@@ -95,6 +99,12 @@ const server = createServer(async (request, response) => {
 
   if (url.pathname === '/__test/reset') { reset(); return json({ ok: true }); }
   if (url.pathname === '/__test/server-friends') { fixtureServerFriends = true; return json({ ok: true }); }
+  if (url.pathname === '/__test/server-member' && request.method === 'POST') {
+    const members = fixtureServerMembers.get(url.searchParams.get('serverId'));
+    if (!members) return json({ error: 'Server not found.' }, 404);
+    members.add(peer.id);
+    return json({ ok: true });
+  }
   if (url.pathname === '/__test/session-mode') {
     sessionMode = url.searchParams.get('value') ?? 'ok';
     return json({ ok: true });
@@ -237,10 +247,33 @@ const server = createServer(async (request, response) => {
     const name = typeof payload.name === 'string' ? payload.name.trim() : '';
     if (!name || name.length > 96) return json({ error: 'Invalid server name.' }, 400);
     const now = new Date().toISOString();
-    const server = { id: randomUUID(), name, ownerUserId: requestUser.id, createdAt: now, updatedAt: now };
+    const server = { id: randomUUID(), name, iconUrl: null, ownerUserId: requestUser.id, createdAt: now, updatedAt: now };
     fixtureServers.push(server);
     fixtureServerMembers.set(server.id, new Set([requestUser.id]));
     return json({ server }, 201);
+  }
+  const serverIcon = /^\/api\/v1\/servers\/([0-9a-f-]+)\/icon$/.exec(url.pathname);
+  if (serverIcon) {
+    const selected = fixtureServers.find((item) => item.id === serverIcon[1]);
+    if (!selected || !fixtureServerMembers.get(selected.id)?.has(requestUser.id)) return json({ error: 'Server not found.' }, 404);
+    if (request.method === 'GET') {
+      if (!selected.iconUrl) return json({ error: 'Server icon not found.' }, 404);
+      response.writeHead(200, { 'content-type': 'image/webp', 'cache-control': 'private, no-store' });
+      return response.end(fixtureIconWebp);
+    }
+    if (selected.ownerUserId !== requestUser.id) return json({ error: 'Only the server owner can manage icons.' }, 403);
+    if (request.method === 'PUT') {
+      const upload = await body();
+      if (!upload.includes(png)) return json({ error: 'Use a valid JPEG, PNG or WebP image.' }, 415);
+      selected.iconUrl = `/api/v1/servers/${selected.id}/icon?v=${++fixtureIconCounter}`;
+      selected.updatedAt = new Date().toISOString();
+      return json({ server: selected });
+    }
+    if (request.method === 'DELETE') {
+      selected.iconUrl = null;
+      selected.updatedAt = new Date().toISOString();
+      return json({ server: selected });
+    }
   }
   if (url.pathname === '/api/v1/servers/invites' && request.method === 'GET') {
     return json({ invites: fixtureServerInvites.filter((item) => item.invitee.id === requestUser.id && item.status === 'pending') });

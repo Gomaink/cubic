@@ -31,7 +31,7 @@
   let serverInvites = $state<any[]>([]);
   let conversations = $state<any[]>([]);
   let activeConversation = $state<any | null>(null);
-  type ServerSummary = { id: string; name: string; ownerUserId: string; createdAt: string; updatedAt: string };
+  type ServerSummary = { id: string; name: string; iconUrl: string | null; ownerUserId: string; createdAt: string; updatedAt: string };
   type ServerTextChannel = { id: string; serverId: string; conversationId: string; categoryId: string | null; position: number; name: string; createdAt: string; updatedAt: string };
   type ServerCategory = { id: string; serverId: string; name: string; position: number; createdAt: string; updatedAt: string };
   type ShareInviteLink = { id: string; createdAt: string; expiresAt: string; revokedAt: string | null };
@@ -56,6 +56,9 @@
   let serversError = $state('');
   let serverName = $state('');
   let serverCreateBusy = $state(false);
+  let serverIconFile = $state<File | null>(null);
+  let serverIconBusy = $state(false);
+  let serverIconError = $state('');
   let serverMembers = $state<ProfileIdentity[]>([]);
   let pendingServerInvites = $state<any[]>([]);
   let shareInviteLinks = $state<ShareInviteLink[]>([]);
@@ -71,7 +74,7 @@
   let serverMembersReturnFocus: HTMLElement | null = null;
   let memberRemovalTarget = $state<ProfileIdentity | null>(null);
   let serverMenuOpen = $state(false);
-  let serverDialog = $state<'server' | 'channel' | 'invite' | 'category' | 'rename-category' | 'move-channel' | 'remove-member' | null>(null);
+  let serverDialog = $state<'server' | 'channel' | 'invite' | 'category' | 'rename-category' | 'move-channel' | 'remove-member' | 'icon' | null>(null);
   let serverDialogReturnFocus: HTMLElement | null = null;
   let serverDetailSequence = 0;
   let serverInviteSequence = 0;
@@ -748,10 +751,50 @@
     }
   }
 
+  function applyServerIdentity(server: ServerSummary) {
+    serverListRevision += 1;
+    servers = servers.map((item) => item.id === server.id ? server : item);
+    if (activeServer?.id === server.id) activeServer = server;
+  }
+
+  async function uploadServerIcon(event: SubmitEvent) {
+    event.preventDefault();
+    const server = activeServer;
+    const file = serverIconFile;
+    if (!server || !file || serverIconBusy || server.ownerUserId !== currentUser.id) return;
+    if (file.size > 5 * 1024 * 1024) { serverIconError = 'Choose an image up to 5 MiB.'; return; }
+    serverIconBusy = true;
+    serverIconError = '';
+    const body = new FormData();
+    body.append('icon', file);
+    try {
+      const payload = await api(`/api/v1/servers/${server.id}/icon`, { method: 'PUT', body });
+      applyServerIdentity(payload.server as ServerSummary);
+      if (activeServer?.id === server.id && serverDialog === 'icon') closeServerDialog();
+    } catch (cause) {
+      if (activeServer?.id === server.id && serverDialog === 'icon') serverIconError = cause instanceof Error ? cause.message : 'Could not upload server icon.';
+    } finally { serverIconBusy = false; }
+  }
+
+  async function removeSelectedServerIcon() {
+    const server = activeServer;
+    if (!server || serverIconBusy || server.ownerUserId !== currentUser.id) return;
+    serverIconBusy = true;
+    serverIconError = '';
+    try {
+      const payload = await api(`/api/v1/servers/${server.id}/icon`, { method: 'DELETE' });
+      applyServerIdentity(payload.server as ServerSummary);
+      if (activeServer?.id === server.id && serverDialog === 'icon') closeServerDialog();
+    } catch (cause) {
+      if (activeServer?.id === server.id && serverDialog === 'icon') serverIconError = cause instanceof Error ? cause.message : 'Could not remove server icon.';
+    } finally { serverIconBusy = false; }
+  }
+
   function openServerDialog(kind: NonNullable<typeof serverDialog>, trigger: Event) {
     serverDialogReturnFocus = trigger.currentTarget instanceof HTMLElement ? trigger.currentTarget : null;
     serverMenuOpen = false;
     serverDialog = kind;
+    if (kind === 'icon') { serverIconFile = null; serverIconError = ''; }
     if (kind === 'invite' && activeServer) void refreshShareInviteLinks(activeServer);
   }
 
@@ -761,6 +804,8 @@
     oneTimeInviteUrl = '';
     shareInviteNotice = '';
     memberRemovalTarget = null;
+    serverIconFile = null;
+    serverIconError = '';
     const previous = serverDialogReturnFocus;
     serverDialogReturnFocus = null;
     void tick().then(() => previous?.isConnected && previous.focus());
@@ -3622,7 +3667,7 @@
       {#if serversLoading}<span class="cubic-server-rail-status">Loading…</span>{/if}
       {#if !serversLoading && servers.length === 0}<span class="cubic-server-rail-status">No servers</span>{/if}
       {#each servers as server (server.id)}
-        <button class="cubic-server-rail-item" class:active={activeServer?.id === server.id} type="button" aria-label={`Open server ${server.name}`} aria-current={activeServer?.id === server.id ? 'page' : undefined} title={server.name} onclick={() => selectServer(server)}>{server.name.slice(0, 1).toUpperCase()}</button>
+        <button class="cubic-server-rail-item" class:active={activeServer?.id === server.id} type="button" aria-label={`Open server ${server.name}`} aria-current={activeServer?.id === server.id ? 'page' : undefined} title={server.name} onclick={() => selectServer(server)}><span class="cubic-server-icon-shell">{server.name.slice(0, 1).toUpperCase()}{#if server.iconUrl}{#key server.iconUrl}<img src={server.iconUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span></button>
       {/each}
       <button class="cubic-server-rail-create" type="button" aria-label="Create server" title="Create server" onclick={(event) => openServerDialog('server', event)}><Icon name="plus" size={20} /></button>
     </div>
@@ -3652,8 +3697,8 @@
   {/if}
 
   {#if serverDialog}
-    <dialog class="cubic-server-dialog" use:showServerDialog aria-label={serverDialog === 'remove-member' ? 'Remove server member' : serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : serverDialog === 'invite' ? 'Invite people' : serverDialog === 'move-channel' ? 'Move channel' : serverDialog === 'rename-category' ? 'Rename category' : 'Create category'} onclose={closeServerDialog} oncancel={(event) => { if (serverDialog === 'remove-member' && serverMembershipBusy) event.preventDefault(); }}>
-      <header><h2>{serverDialog === 'remove-member' ? 'Remove server member' : serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : serverDialog === 'invite' ? 'Invite people' : serverDialog === 'move-channel' ? 'Move channel' : serverDialog === 'rename-category' ? 'Rename category' : 'Create category'}</h2><button type="button" aria-label="Close server dialog" onclick={closeServerDialog} disabled={serverDialog === 'remove-member' && serverMembershipBusy}><Icon name="x" size={18} /></button></header>
+    <dialog class="cubic-server-dialog" use:showServerDialog aria-label={serverDialog === 'icon' ? 'Server icon' : serverDialog === 'remove-member' ? 'Remove server member' : serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : serverDialog === 'invite' ? 'Invite people' : serverDialog === 'move-channel' ? 'Move channel' : serverDialog === 'rename-category' ? 'Rename category' : 'Create category'} onclose={closeServerDialog} oncancel={(event) => { if ((serverDialog === 'remove-member' && serverMembershipBusy) || (serverDialog === 'icon' && serverIconBusy)) event.preventDefault(); }}>
+      <header><h2>{serverDialog === 'icon' ? 'Server icon' : serverDialog === 'remove-member' ? 'Remove server member' : serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : serverDialog === 'invite' ? 'Invite people' : serverDialog === 'move-channel' ? 'Move channel' : serverDialog === 'rename-category' ? 'Rename category' : 'Create category'}</h2><button type="button" aria-label="Close server dialog" onclick={closeServerDialog} disabled={(serverDialog === 'remove-member' && serverMembershipBusy) || (serverDialog === 'icon' && serverIconBusy)}><Icon name="x" size={18} /></button></header>
       {#if serverDialog === 'server'}
         <form class="cubic-server-create" onsubmit={createServer}>
           <label for="cubic-server-name">Server name</label>
@@ -3661,6 +3706,18 @@
           <button type="submit" disabled={serverCreateBusy}>{serverCreateBusy ? 'Creating…' : 'Create server'}</button>
         </form>
         {#if serversError}<p class="inline-error" role="alert">{serversError}</p>{/if}
+      {:else if serverDialog === 'icon' && activeServer?.ownerUserId === currentUser.id}
+        <form class="cubic-server-create cubic-server-icon-form" onsubmit={uploadServerIcon}>
+          <div class="cubic-server-icon-current" aria-label={`Current icon for ${activeServer.name}`}>
+            <span class="cubic-server-icon-shell">{activeServer.name.slice(0, 1).toUpperCase()}{#if activeServer.iconUrl}{#key activeServer.iconUrl}<img src={activeServer.iconUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span>
+            <span>{activeServer.iconUrl ? 'Current server icon' : 'Using fallback initials'}</span>
+          </div>
+          <label for="cubic-server-icon-file">Choose JPEG, PNG or WebP (up to 5 MiB)</label>
+          <input id="cubic-server-icon-file" type="file" accept="image/jpeg,image/png,image/webp" onchange={(event) => serverIconFile = event.currentTarget.files?.[0] ?? null} disabled={serverIconBusy} />
+          <button type="submit" disabled={serverIconBusy || !serverIconFile}>{serverIconBusy ? 'Saving…' : activeServer.iconUrl ? 'Replace icon' : 'Upload icon'}</button>
+          {#if activeServer.iconUrl}<button type="button" class="quiet" onclick={removeSelectedServerIcon} disabled={serverIconBusy}>Remove icon</button>{/if}
+          {#if serverIconError}<p class="inline-error" role="alert">{serverIconError}</p>{/if}
+        </form>
       {:else if serverDialog === 'channel' && activeServer}
         <form class="cubic-server-create" onsubmit={createChannel}>
           <label for="cubic-channel-name">Channel name</label>
@@ -3773,13 +3830,14 @@
     {:else if tab === 'servers'}
       {#if activeServer}
         <header class="conversation-list-header cubic-server-sidebar-head">
-          <div><small>SERVER</small><h1>{activeServer.name}</h1></div>
+          <div class="cubic-server-heading"><span class="cubic-server-icon-shell" aria-hidden="true">{activeServer.name.slice(0, 1).toUpperCase()}{#if activeServer.iconUrl}{#key activeServer.iconUrl}<img src={activeServer.iconUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span><span><small>SERVER</small><h1>{activeServer.name}</h1></span></div>
           <button class="icon-action" type="button" aria-label={`Options for ${activeServer.name}`} aria-expanded={serverMenuOpen} onclick={() => serverMenuOpen = !serverMenuOpen}><Icon name="more" size={19} /></button>
         </header>
         {#if serverMenuOpen}
           <div class="cubic-server-options" aria-label="Server options">
             {#if activeServer.ownerUserId === currentUser.id}
               <button type="button" onclick={(event) => openServerDialog('invite', event)}>Invite people</button>
+              <button type="button" onclick={(event) => openServerDialog('icon', event)}>Server icon</button>
             {:else}
               <button type="button" onclick={leaveSelectedServer} disabled={serverMembershipBusy}>Leave server</button>
             {/if}
@@ -3839,7 +3897,7 @@
           {#if !serversLoading && servers.length === 0}<p class="cubic-server-list-status">No servers yet. Create one to get started.</p>{/if}
           {#each servers as server (server.id)}
             <button class="conversation-row cubic-server-row" aria-label={`Open server ${server.name}`} onclick={() => selectServer(server)}>
-              <span class="avatar group-avatar">{server.name.slice(0, 1).toUpperCase()}</span>
+              <span class="avatar group-avatar cubic-server-icon-shell">{server.name.slice(0, 1).toUpperCase()}{#if server.iconUrl}{#key server.iconUrl}<img src={server.iconUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span>
               <span class="conversation-copy"><strong>{server.name}</strong><small>Server</small></span>
             </button>
           {/each}

@@ -56,7 +56,8 @@ test('server API creates atomic owner membership and scopes list/detail without 
       createdServerIds.push(server.id);
       assert.equal(server.name, 'Aurora');
       assert.equal(server.ownerUserId, ownerId);
-      assert.deepEqual(Object.keys(server).sort(), ['createdAt', 'id', 'name', 'ownerUserId', 'updatedAt']);
+      assert.deepEqual(Object.keys(server).sort(), ['createdAt', 'iconUrl', 'id', 'name', 'ownerUserId', 'updatedAt']);
+      assert.equal(server.iconUrl, null);
       assert.equal(Number((await pool.query('select count(*)::int as n from server_members where server_id = $1 and user_id = $2', [server.id, ownerId])).rows[0].n), 1);
 
       const duplicateName = await app.inject({ method: 'POST', url: '/api/v1/servers', headers: owner, payload: { name: 'Aurora' } });

@@ -12,12 +12,15 @@ import {
 } from '../servers/invites.js';
 import type { RealtimeEvents } from '../realtime/events.js';
 import { createServerInviteLink, listOwnedServerInviteLinks, revokeServerInviteLink } from '../servers/invite-links.js';
+import { ServerIconStore, SERVER_ICON_MAX_BYTES, InvalidServerIconError } from '../server-icons/storage.js';
+import { checkIconOwner, replaceServerIcon, removeServerIcon } from '../server-icons/service.js';
 
 export interface ServerRoutesOptions {
   database: Database;
   cookieName: string;
   sessionService: SessionService;
   realtimeEvents?: RealtimeEvents;
+  iconStore?: ServerIconStore;
 }
 
 const createServerSchema = z.object({ name: z.string().trim().min(1).max(96) });
@@ -61,6 +64,63 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     if (!params.success) return reply.code(400).send({ error: 'Invalid server.' });
     const server = await resolveMemberServer(options.database, params.data.serverId, request.auth.user.id);
     if (!server) return reply.code(404).send({ error: 'Server not found.' });
+    return { server };
+  });
+
+  app.get('/:serverId/icon', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = serverParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid server.' });
+    if (!options.iconStore) return reply.code(404).send({ error: 'Server icon not found.' });
+    const key = await options.database.pool.query<{ icon_key: string | null }>(
+      `select s.icon_key from servers s
+         join server_members m on m.server_id = s.id and m.user_id = $2
+        where s.id = $1`, [params.data.serverId, request.auth.user.id]
+    );
+    if (!key.rows[0]?.icon_key) return reply.code(404).send({ error: 'Server icon not found.' });
+    try {
+      const bytes = await options.iconStore.read(key.rows[0].icon_key);
+      reply.header('cache-control', 'private, no-store');
+      reply.header('content-disposition', 'inline; filename="server-icon.webp"');
+      return reply.type('image/webp').send(bytes);
+    } catch { return reply.code(404).send({ error: 'Server icon not found.' }); }
+  });
+
+  app.put('/:serverId/icon', { preHandler: requireAuth, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = serverParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid server.' });
+    if (!options.iconStore) return reply.code(503).send({ error: 'Server icons unavailable.' });
+    const preflight = await checkIconOwner(options.database, params.data.serverId, request.auth.user.id);
+    if (preflight !== true) return reply.code(preflight.denied === 'not_owner' ? 403 : 404).send({ error: 'Server not found or icon management denied.' });
+    const part = await request.file({ limits: { files: 1, fileSize: SERVER_ICON_MAX_BYTES + 1 } }).catch(() => null);
+    if (!part || part.fieldname !== 'icon') return reply.code(400).send({ error: 'Choose one server icon.' });
+    let input: Buffer;
+    try { input = await part.toBuffer(); }
+    catch { return reply.code(413).send({ error: 'Server icon is too large.' }); }
+    if (part.file.truncated || input.length > SERVER_ICON_MAX_BYTES) return reply.code(413).send({ error: 'Server icon is too large.' });
+    let result;
+    try {
+      result = await replaceServerIcon({ database: options.database, store: options.iconStore, serverId: params.data.serverId,
+        actorId: request.auth.user.id, input, logger: app.log });
+    } catch (error) {
+      if (error instanceof InvalidServerIconError) return reply.code(415).send({ error: 'Use a valid JPEG, PNG or WebP image.' });
+      throw error;
+    }
+    if (result !== true) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: 'Server not found or icon management denied.' });
+    const server = await resolveMemberServer(options.database, params.data.serverId, request.auth.user.id);
+    return { server };
+  });
+
+  app.delete('/:serverId/icon', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = serverParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid server.' });
+    if (!options.iconStore) return reply.code(503).send({ error: 'Server icons unavailable.' });
+    const result = await removeServerIcon({ database: options.database, store: options.iconStore,
+      serverId: params.data.serverId, actorId: request.auth.user.id, logger: app.log });
+    if (result !== true) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: 'Server not found or icon management denied.' });
+    const server = await resolveMemberServer(options.database, params.data.serverId, request.auth.user.id);
     return { server };
   });
 

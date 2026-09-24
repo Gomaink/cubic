@@ -152,3 +152,13 @@ independent. In DMs and legacy groups, a trusted same-origin invite URL can
 derive one transient card below the unchanged message body. The card resolves
 through the existing preview/join APIs; server text channels do not render
 cards, and there is no message metadata or external URL unfurling.
+Slice 7 stores an optional `servers.icon_key` for owner-managed server icons.
+Only JPEG/PNG/WebP inputs are decoded and normalized to a 512×512 WebP in a
+dedicated local `server-icons` namespace. Mutations revalidate owner authority
+under the canonical server-row lock; current members fetch icons through an
+authorized route. Files are staged temporarily, atomically published under a
+new immutable key before the DB swap, and old files are deleted only after
+commit. A bounded startup/periodic sweep removes icon files unreferenced by
+`servers.icon_key` and stale temp files after a one-hour grace period, with a
+fresh DB reference check before canonical deletion. This does not use the
+attachment deletion queue or add a realtime protocol.

@@ -37,6 +37,8 @@ import type { SessionService } from './security/session.js';
 import type { LiveKitAuthorizationService } from './voice/authorization.js';
 import { browserCorsOptions, createBrowserMutationProtection } from './security/browser-request.js';
 import { securityRoutes } from './routes/security.js';
+import { ServerIconStore } from './server-icons/storage.js';
+import { ServerIconReconciler, ServerIconReconciliationScheduler } from './server-icons/reconciliation.js';
 
 export interface CreateAppOptions {
   database: Database;
@@ -76,6 +78,8 @@ export interface CreateAppOptions {
 export async function createApp(options: CreateAppOptions): Promise<FastifyInstance> {
   const realtimeEvents = options.realtimeEvents ?? createRealtimeEvents();
   const mediaStore = new LocalMediaStore(options.mediaRoot ?? '/data/media', options.groupAvatarMaxBytes ?? 2 * 1024 * 1024);
+  const iconStore = new ServerIconStore(options.mediaRoot ?? '/data/media');
+  await iconStore.prepare();
   const app = Fastify({
     logger: options.logger ?? true,
     trustProxy: options.trustedProxyCidrs,
@@ -174,8 +178,14 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     database: options.database,
     cookieName: options.cookieName,
     sessionService: options.sessionService,
-    realtimeEvents
+    realtimeEvents,
+    iconStore
   });
+
+  const iconReconciler = new ServerIconReconciler({ database: options.database, store: iconStore, logger: app.log });
+  const iconReconciliationScheduler = new ServerIconReconciliationScheduler(iconReconciler, app.log);
+  app.addHook('onReady', async () => iconReconciliationScheduler.start());
+  app.addHook('onClose', async () => iconReconciliationScheduler.stop());
 
   await app.register(serverInviteLinkRoutes, {
     prefix: '/api/v1/server-invite-links',
