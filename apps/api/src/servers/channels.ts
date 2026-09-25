@@ -1,4 +1,5 @@
 import type { Database } from '@cubic/database';
+import { compactLayoutScope } from './layout.js';
 
 export interface ServerTextChannelRecord {
   id: string;
@@ -67,12 +68,7 @@ export async function createOwnedTextChannel(
         return { denied: 'not_found' };
       }
     }
-    const scope = await client.query<{ count: string }>(
-      `select count(*)::text as count from server_text_channels
-        where server_id = $1 and category_id is not distinct from $2::uuid`,
-      [serverId, categoryId]
-    );
-    const position = Number(scope.rows[0]?.count ?? 0);
+    const position = await compactLayoutScope(client, serverId, categoryId);
 
     const conversation = await client.query<{ id: string }>(
       `insert into conversations (kind, created_by)

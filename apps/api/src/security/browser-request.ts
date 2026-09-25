@@ -6,6 +6,7 @@ const NON_BROWSER_AUTH_PATHS = new Set([
   '/api/v1/auth/register'
 ]);
 const CSP_REPORT_PATH = '/api/v1/security/csp-report';
+const LIVEKIT_WEBHOOK_PATH = '/api/v1/server-voice/webhook';
 const FETCH_METADATA_HEADERS = [
   'sec-fetch-site',
   'sec-fetch-mode',
@@ -86,6 +87,10 @@ export function browserMutationAllowed(
   const method = request.method.toUpperCase();
   if (SAFE_METHODS.has(method)) return true;
   if (request.path === CSP_REPORT_PATH) return true;
+  // This non-browser ingress is independently authenticated by LiveKit's
+  // signed body digest. It carries no Cubic browser session authority.
+  if (request.path === LIVEKIT_WEBHOOK_PATH && request.headers.origin === undefined &&
+      request.headers.cookie === undefined && !hasFetchMetadata(request.headers)) return true;
 
   const originHeader = request.headers.origin;
   if (originHeader === undefined) {

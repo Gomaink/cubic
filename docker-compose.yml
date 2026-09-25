@@ -48,6 +48,10 @@ services:
           node_ip: ${LIVEKIT_NODE_IP:-192.168.15.172}
         keys:
           ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required; set a strong unique value}: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required; set a strong unique value}
+        webhook:
+          api_key: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required; set a strong unique value}
+          urls:
+            - http://api:3001/api/v1/server-voice/webhook
         turn:
           enabled: ${LIVEKIT_TURN_ENABLED:-false}
           udp_port: 3478

@@ -32,12 +32,16 @@
   let conversations = $state<any[]>([]);
   let activeConversation = $state<any | null>(null);
   type ServerSummary = { id: string; name: string; iconUrl: string | null; ownerUserId: string; createdAt: string; updatedAt: string };
-  type ServerTextChannel = { id: string; serverId: string; conversationId: string; categoryId: string | null; position: number; name: string; createdAt: string; updatedAt: string };
+  type ServerTextChannel = { kind: 'text'; id: string; serverId: string; conversationId: string; categoryId: string | null; position: number; name: string; createdAt: string; updatedAt: string };
+  type ServerVoiceChannel = { kind: 'voice'; id: string; serverId: string; categoryId: string | null; position: number; name: string; createdAt: string; updatedAt: string };
+  type ServerLayoutChannel = ServerTextChannel | ServerVoiceChannel;
   type ServerCategory = { id: string; serverId: string; name: string; position: number; createdAt: string; updatedAt: string };
   type ShareInviteLink = { id: string; createdAt: string; expiresAt: string; revokedAt: string | null };
   let servers = $state<ServerSummary[]>([]);
   let activeServer = $state<ServerSummary | null>(null);
   let serverChannels = $state<ServerTextChannel[]>([]);
+  let serverVoiceChannels = $state<ServerVoiceChannel[]>([]);
+  let serverVoicePresence = $state<Record<string, Array<{ userId: string; displayName: string }>>>({});
   let serverCategories = $state<ServerCategory[]>([]);
   let categoryName = $state('');
   let channelCategoryId = $state('');
@@ -45,6 +49,9 @@
   let layoutError = $state('');
   let editingCategoryId = $state<string | null>(null);
   let movingChannelId = $state<string | null>(null);
+  let movingChannelKind = $state<'text' | 'voice'>('text');
+  let voiceChannelName = $state('');
+  let editingVoiceChannelId = $state<string | null>(null);
   let moveDestinationId = $state('');
   let activeChannel = $state<ServerTextChannel | null>(null);
   let channelsLoading = $state(false);
@@ -74,7 +81,7 @@
   let serverMembersReturnFocus: HTMLElement | null = null;
   let memberRemovalTarget = $state<ProfileIdentity | null>(null);
   let serverMenuOpen = $state(false);
-  let serverDialog = $state<'server' | 'channel' | 'invite' | 'category' | 'rename-category' | 'move-channel' | 'remove-member' | 'icon' | null>(null);
+  let serverDialog = $state<'server' | 'channel' | 'voice-channel' | 'rename-voice-channel' | 'invite' | 'category' | 'rename-category' | 'move-channel' | 'remove-member' | 'icon' | null>(null);
   let serverDialogReturnFocus: HTMLElement | null = null;
   let serverDetailSequence = 0;
   let serverInviteSequence = 0;
@@ -119,7 +126,11 @@
   };
 
   let voiceRoom: Room | null = null;
+  let voiceAttemptSerial = 0;
   let voiceConversationId = $state<string | null>(null);
+  let activeServerVoiceId = $state<string | null>(null);
+  let activeServerVoiceServerId = $state<string | null>(null);
+  let voiceRetryServerChannel = $state<ServerVoiceChannel | null>(null);
   let voiceConversationTitle = $state('');
   let voiceStatus = $state<'idle' | 'connecting' | 'connected' | 'reconnecting'>('idle');
   let voiceParticipants = $state<VoiceParticipantView[]>([]);
@@ -375,6 +386,7 @@
           serverDetailSequence += 1;
           channelLoadSequence += 1;
           serverChannels = [];
+          serverVoiceChannels = [];
           serverCategories = [];
           serverMembers = [];
           pendingServerInvites = [];
@@ -402,8 +414,11 @@
     activeServer = server;
     tab = 'servers';
     serverCategories = [];
+    serverVoiceChannels = [];
+    serverVoicePresence = {};
     layoutError = '';
     void refreshServerChannels(server);
+    subscribeServerVoicePresence(server.id);
     serverMembers = [];
     pendingServerInvites = [];
     shareInviteSequence += 1;
@@ -411,6 +426,17 @@
     oneTimeInviteUrl = '';
     serverInviteTarget = '';
     void refreshServerMembership(server);
+  }
+
+  function subscribeServerVoicePresence(serverId: string) {
+    const socket = realtimeSocket;
+    if (!socket?.connected) return;
+    socket.emit('server:voice:subscribe', { serverId }, (result: {
+      ok: boolean; presence?: Array<{ channelId: string; occupants: Array<{ userId: string; displayName: string }> }>;
+    }) => {
+      if (activeServer?.id !== serverId || !result?.ok) return;
+      serverVoicePresence = Object.fromEntries((result.presence ?? []).map((item) => [item.channelId, item.occupants]));
+    });
   }
 
   function toggleServerMembers(event: MouseEvent) {
@@ -561,6 +587,7 @@
       serverMembersOpen = false;
       serverMenuOpen = false;
       serverChannels = [];
+      serverVoiceChannels = [];
       serverCategories = [];
       serverMembers = [];
       pendingServerInvites = [];
@@ -607,14 +634,17 @@
     channelsLoading = true;
     channelsError = '';
     serverChannels = [];
+    serverVoiceChannels = [];
     serverCategories = [];
     try {
-      const [payload, categoryPayload] = await Promise.all([
+      const [payload, categoryPayload, voicePayload] = await Promise.all([
         api(`/api/v1/servers/${server.id}/channels`),
-        api(`/api/v1/servers/${server.id}/categories`)
+        api(`/api/v1/servers/${server.id}/categories`),
+        api(`/api/v1/servers/${server.id}/voice-channels`)
       ]);
       if (sequence !== channelLoadSequence || activeServer?.id !== server.id) return;
-      serverChannels = payload.channels;
+      serverChannels = payload.channels.map((item: Omit<ServerTextChannel, 'kind'>) => ({ ...item, kind: 'text' as const }));
+      serverVoiceChannels = voicePayload.channels.map((item: Omit<ServerVoiceChannel, 'kind'>) => ({ ...item, kind: 'voice' as const }));
       serverCategories = categoryPayload.categories;
     } catch (cause) {
       if (sequence === channelLoadSequence && activeServer?.id === server.id) {
@@ -641,7 +671,7 @@
         method: 'POST', body: JSON.stringify({ name, categoryId: channelCategoryId || null })
       });
       if (activeServer?.id !== server.id) return;
-      const channel = payload.channel as ServerTextChannel;
+      const channel = { ...payload.channel, kind: 'text' as const } as ServerTextChannel;
       channelLoadSequence += 1;
       channelsLoading = false;
       serverChannels = [...serverChannels.filter((item) => item.id !== channel.id), channel]
@@ -657,9 +687,34 @@
     }
   }
 
-  function channelsInScope(categoryId: string | null) {
-    return serverChannels.filter((channel) => channel.categoryId === categoryId)
-      .sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  async function saveVoiceChannel(event: SubmitEvent) {
+    event.preventDefault();
+    const server = activeServer;
+    if (!server || server.ownerUserId !== currentUser.id || channelCreateBusy) return;
+    const name = voiceChannelName.trim();
+    if (!name || name.length > 96) { channelsError = 'Enter a voice channel name of 1–96 characters.'; return; }
+    channelCreateBusy = true;
+    channelsError = '';
+    try {
+      const id = editingVoiceChannelId;
+      await api(`/api/v1/servers/${server.id}/voice-channels${id ? `/${id}` : ''}`, {
+        method: id ? 'PATCH' : 'POST',
+        body: JSON.stringify(id ? { name } : { name, categoryId: channelCategoryId || null })
+      });
+      if (activeServer?.id !== server.id) return;
+      voiceChannelName = '';
+      editingVoiceChannelId = null;
+      closeServerDialog();
+      await refreshServerChannels(server);
+    } catch (cause) {
+      if (activeServer?.id === server.id) channelsError = cause instanceof Error ? cause.message : 'Could not save voice channel.';
+    } finally { channelCreateBusy = false; }
+  }
+
+  function channelsInScope(categoryId: string | null): ServerLayoutChannel[] {
+    return [...serverChannels, ...serverVoiceChannels].filter((channel) => channel.categoryId === categoryId)
+      .sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) ||
+        a.id.localeCompare(b.id) || a.kind.localeCompare(b.kind));
   }
 
   async function mutateLayout(path: string, method: string, body?: object) {
@@ -699,20 +754,21 @@
     await mutateLayout(`/categories/${categoryId}/move`, 'POST', { targetIndex: index + offset });
   }
 
-  async function shiftChannel(channel: ServerTextChannel, offset: number) {
+  async function shiftChannel(channel: ServerLayoutChannel, offset: number) {
     const scope = channelsInScope(channel.categoryId);
-    const index = scope.findIndex((item) => item.id === channel.id);
+    const index = scope.findIndex((item) => item.kind === channel.kind && item.id === channel.id);
     if (index < 0) return;
-    await mutateLayout(`/channels/${channel.id}/move`, 'POST', { targetCategoryId: channel.categoryId, targetIndex: index + offset });
+    await mutateLayout(`/layout/${channel.kind}/${channel.id}/move`, 'POST', { targetCategoryId: channel.categoryId, targetIndex: index + offset });
   }
 
   async function moveSelectedChannel(event: SubmitEvent) {
     event.preventDefault();
-    const channel = serverChannels.find((item) => item.id === movingChannelId);
+    const channel = [...serverChannels, ...serverVoiceChannels].find((item) => item.id === movingChannelId && item.kind === movingChannelKind);
     if (!channel) return;
     const targetCategoryId = moveDestinationId || null;
-    const targetIndex = channelsInScope(targetCategoryId).filter((item) => item.id !== channel.id).length;
-    if (await mutateLayout(`/channels/${channel.id}/move`, 'POST', { targetCategoryId, targetIndex })) {
+    const targetIndex = channelsInScope(targetCategoryId)
+      .filter((item) => item.kind !== channel.kind || item.id !== channel.id).length;
+    if (await mutateLayout(`/layout/${channel.kind}/${channel.id}/move`, 'POST', { targetCategoryId, targetIndex })) {
       movingChannelId = null;
       closeServerDialog();
     }
@@ -3090,6 +3146,7 @@
   }
 
   async function leaveVoice(endDirect = true) {
+    voiceAttemptSerial += 1;
     const room = voiceRoom;
     const activeCall =
       directCall?.state === 'accepted' && directCall.conversationId === voiceConversationId
@@ -3102,6 +3159,9 @@
 
     voiceRoom = null;
     voiceConversationId = null;
+    activeServerVoiceId = null;
+    activeServerVoiceServerId = null;
+    voiceRetryServerChannel = null;
     voiceConversationTitle = '';
     voiceStatus = 'idle';
     voiceRetryConversation = null;
@@ -3153,6 +3213,10 @@
       await leaveVoice();
     }
 
+    const attempt = ++voiceAttemptSerial;
+    activeServerVoiceId = null;
+    activeServerVoiceServerId = null;
+    voiceRetryServerChannel = null;
     voiceStatus = 'connecting';
     voiceRetryConversation = null;
     voiceConversationId = conversation.id;
@@ -3160,6 +3224,7 @@
 
     try {
       const ticket = await api(`/api/v1/voice/conversations/${conversation.id}/token`, { method: 'POST' });
+      if (attempt !== voiceAttemptSerial) return;
       const room = new Room({
         adaptiveStream: true,
         dynacast: true
@@ -3247,7 +3312,7 @@
       });
 
       await room.connect(ticket.url, ticket.token);
-      if (voiceRoom !== room) {
+      if (voiceRoom !== room || attempt !== voiceAttemptSerial) {
         await room.disconnect();
         return;
       }
@@ -3286,6 +3351,7 @@
         callUiState = 'in-call';
       }
     } catch (e) {
+      if (attempt !== voiceAttemptSerial) return;
       const failedRoom = voiceRoom;
       voiceRoom = null;
       voiceConversationId = null;
@@ -3299,6 +3365,94 @@
         callUiState = 'rejoin';
       }
       voiceError = 'Could not connect to voice. Check your network and try again.';
+    }
+  }
+
+  async function joinServerVoice(channel: ServerVoiceChannel) {
+    voiceError = '';
+    if (!window.isSecureContext) {
+      voiceError = 'Voice requires HTTPS on mobile browsers.';
+      return;
+    }
+    if (activeServerVoiceId === channel.id && voiceRoom) return;
+    if (voiceRoom) {
+      if (!confirm(`Leave ${voiceConversationTitle || 'the current voice room'} and join ${channel.name}?`)) return;
+      await leaveVoice();
+    }
+    const attempt = ++voiceAttemptSerial;
+    voiceStatus = 'connecting';
+    activeServerVoiceId = channel.id;
+    activeServerVoiceServerId = channel.serverId;
+    voiceConversationId = null;
+    voiceConversationTitle = channel.name;
+    voiceRetryServerChannel = null;
+    try {
+      const ticket = await api(`/api/v1/server-voice/channels/${channel.id}/token`, { method: 'POST' });
+      if (attempt !== voiceAttemptSerial || activeServerVoiceId !== channel.id) return;
+      // The browser-test build substitutes only the media transport. Cubic's
+      // ticket request, selected channel and connected UI remain real.
+      const testFactory = import.meta.env.MODE === 'browser-test'
+        ? (window as Window & { __cubicServerVoiceTestRoom?: () => Room }).__cubicServerVoiceTestRoom
+        : undefined;
+      const room = testFactory?.() ?? new Room({ adaptiveStream: true, dynacast: true });
+      voiceRoom = room;
+      const resync = () => { if (voiceRoom === room) syncVoiceParticipants(); };
+      room.on(RoomEvent.ParticipantConnected, resync);
+      room.on(RoomEvent.ParticipantDisconnected, resync);
+      room.on(RoomEvent.TrackMuted, resync);
+      room.on(RoomEvent.TrackUnmuted, resync);
+      room.on(RoomEvent.ActiveSpeakersChanged, resync);
+      room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+        if (voiceRoom !== room) return;
+        attachVoiceAudio(track, publication, participant);
+        syncVoiceParticipants();
+      });
+      room.on(RoomEvent.TrackUnsubscribed, (track) => { detachVoiceAudio(track); resync(); });
+      room.on(RoomEvent.Reconnecting, () => { if (voiceRoom === room) voiceStatus = 'reconnecting'; });
+      room.on(RoomEvent.Reconnected, () => {
+        if (voiceRoom !== room) return;
+        voiceStatus = 'connected';
+        resync();
+        // Reconnect must not make a stale server membership feel authorized.
+        void api(`/api/v1/servers/${channel.serverId}/voice-channels`).then((payload) => {
+          if (voiceRoom === room && !payload.channels?.some((item: { id: string }) => item.id === channel.id))
+            void leaveVoice(false);
+        }).catch(() => {
+          if (voiceRoom === room) void leaveVoice(false);
+        });
+      });
+      room.on(RoomEvent.Disconnected, () => {
+        if (voiceRoom !== room || attempt !== voiceAttemptSerial) return;
+        void leaveVoice(false).then(() => {
+          if (voiceAttemptSerial !== attempt + 1 || voiceRoom) return;
+          voiceRetryServerChannel = channel;
+          voiceError = 'Voice connection ended. Check your network and try again.';
+        });
+      });
+      await room.connect(ticket.url, ticket.token);
+      if (voiceRoom !== room || attempt !== voiceAttemptSerial) { await room.disconnect(); return; }
+      await room.startAudio().catch(() => {
+        if (voiceRoom === room) voiceMediaNotice = 'Browser audio playback is paused. Enable audio to hear this channel.';
+      });
+      try {
+        await room.localParticipant.setMicrophoneEnabled(true,
+          microphoneCaptureOptions(browserVoiceProcessing, selectedAudioInput));
+      } catch (cause) {
+        voiceError = `Joined muted — ${mediaDeviceErrorMessage(cause, 'microphone')}`;
+      }
+      if (voiceRoom !== room) return;
+      voiceStatus = 'connected';
+      syncVoiceParticipants();
+      if (selectedAudioOutput && audioOutputSupported) {
+        room.switchActiveDevice('audiooutput', selectedAudioOutput).catch(() => {});
+      }
+    } catch {
+      if (attempt !== voiceAttemptSerial || activeServerVoiceId !== channel.id) return;
+      const failedRoom = voiceRoom;
+      await leaveVoice(false);
+      if (failedRoom) await failedRoom.disconnect().catch(() => {});
+      voiceRetryServerChannel = channel;
+      voiceError = 'Could not join voice channel. Check your access and connection.';
     }
   }
 
@@ -3436,6 +3590,8 @@
     activeServer = null;
     activeChannel = null;
     serverChannels = [];
+    serverVoiceChannels = [];
+    serverVoicePresence = {};
     channelLoadSequence += 1;
     serverDetailSequence += 1;
     serverInviteSequence += 1;
@@ -3501,6 +3657,7 @@
       reportActivity(document.visibilityState === 'hidden' || Date.now() - lastActivityAt >= PRESENCE_IDLE_MS ? 'idle' : 'active');
       scheduleIdle();
       if (activeConversation?.kind !== 'server_text') requestPresenceSnapshot(socket);
+      if (activeServer) subscribeServerVoicePresence(activeServer.id);
     });
     socket.on('disconnect', (reason) => {
       realtimeConnected = false;
@@ -3573,6 +3730,27 @@
       if (activeConversation?.id === event?.conversationId) closeConversation();
       if (wasServerChannel) void refreshServers();
       refreshConversations().catch(() => {});
+    });
+    socket.on('server:voice:presence', (event: {
+      serverId: string; channelId: string; occupants: Array<{ userId: string; displayName: string }>;
+    }) => {
+      if (event?.serverId === activeServer?.id && Array.isArray(event.occupants))
+        serverVoicePresence = { ...serverVoicePresence, [event.channelId]: event.occupants };
+    });
+    socket.on('server:removed', (event: { serverId: string }) => {
+      if (!event?.serverId) return;
+      if (activeServerVoiceServerId === event.serverId) void leaveVoice(false);
+      serverListRevision += 1;
+      servers = servers.filter((item) => item.id !== event.serverId);
+      if (activeServer?.id === event.serverId) {
+        closeConversation();
+        activeServer = null;
+        activeChannel = null;
+        serverChannels = [];
+        serverVoiceChannels = [];
+        serverVoicePresence = {};
+        tab = 'chats';
+      }
     });
     socket.on('group:invites:updated', () => {
       refreshGroupInvites().catch(() => {});
@@ -3697,8 +3875,8 @@
   {/if}
 
   {#if serverDialog}
-    <dialog class="cubic-server-dialog" use:showServerDialog aria-label={serverDialog === 'icon' ? 'Server icon' : serverDialog === 'remove-member' ? 'Remove server member' : serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : serverDialog === 'invite' ? 'Invite people' : serverDialog === 'move-channel' ? 'Move channel' : serverDialog === 'rename-category' ? 'Rename category' : 'Create category'} onclose={closeServerDialog} oncancel={(event) => { if ((serverDialog === 'remove-member' && serverMembershipBusy) || (serverDialog === 'icon' && serverIconBusy)) event.preventDefault(); }}>
-      <header><h2>{serverDialog === 'icon' ? 'Server icon' : serverDialog === 'remove-member' ? 'Remove server member' : serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : serverDialog === 'invite' ? 'Invite people' : serverDialog === 'move-channel' ? 'Move channel' : serverDialog === 'rename-category' ? 'Rename category' : 'Create category'}</h2><button type="button" aria-label="Close server dialog" onclick={closeServerDialog} disabled={(serverDialog === 'remove-member' && serverMembershipBusy) || (serverDialog === 'icon' && serverIconBusy)}><Icon name="x" size={18} /></button></header>
+    <dialog class="cubic-server-dialog" use:showServerDialog aria-label={serverDialog === 'icon' ? 'Server icon' : serverDialog === 'remove-member' ? 'Remove server member' : serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : serverDialog === 'voice-channel' ? 'Create voice channel' : serverDialog === 'rename-voice-channel' ? 'Rename voice channel' : serverDialog === 'invite' ? 'Invite people' : serverDialog === 'move-channel' ? 'Move channel' : serverDialog === 'rename-category' ? 'Rename category' : 'Create category'} onclose={closeServerDialog} oncancel={(event) => { if ((serverDialog === 'remove-member' && serverMembershipBusy) || (serverDialog === 'icon' && serverIconBusy)) event.preventDefault(); }}>
+      <header><h2>{serverDialog === 'icon' ? 'Server icon' : serverDialog === 'remove-member' ? 'Remove server member' : serverDialog === 'server' ? 'Create server' : serverDialog === 'channel' ? 'Create text channel' : serverDialog === 'voice-channel' ? 'Create voice channel' : serverDialog === 'rename-voice-channel' ? 'Rename voice channel' : serverDialog === 'invite' ? 'Invite people' : serverDialog === 'move-channel' ? 'Move channel' : serverDialog === 'rename-category' ? 'Rename category' : 'Create category'}</h2><button type="button" aria-label="Close server dialog" onclick={closeServerDialog} disabled={(serverDialog === 'remove-member' && serverMembershipBusy) || (serverDialog === 'icon' && serverIconBusy)}><Icon name="x" size={18} /></button></header>
       {#if serverDialog === 'server'}
         <form class="cubic-server-create" onsubmit={createServer}>
           <label for="cubic-server-name">Server name</label>
@@ -3728,6 +3906,20 @@
             {#each serverCategories as category (category.id)}<option value={category.id}>{category.name}</option>{/each}
           </select>
           <button type="submit" disabled={channelCreateBusy || channelsLoading}>{channelCreateBusy ? 'Creating…' : 'Create text channel'}</button>
+        </form>
+        {#if channelsError}<p class="inline-error" role="alert">{channelsError}</p>{/if}
+      {:else if (serverDialog === 'voice-channel' || serverDialog === 'rename-voice-channel') && activeServer?.ownerUserId === currentUser.id}
+        <form class="cubic-server-create" onsubmit={saveVoiceChannel}>
+          <label for="cubic-voice-channel-name">Voice channel name</label>
+          <input id="cubic-voice-channel-name" bind:value={voiceChannelName} maxlength="96" required placeholder="Lounge" />
+          {#if serverDialog === 'voice-channel'}
+            <label for="cubic-voice-channel-category">Category</label>
+            <select id="cubic-voice-channel-category" bind:value={channelCategoryId}>
+              <option value="">Uncategorized</option>
+              {#each serverCategories as category (category.id)}<option value={category.id}>{category.name}</option>{/each}
+            </select>
+          {/if}
+          <button type="submit" disabled={channelCreateBusy || channelsLoading}>{channelCreateBusy ? 'Saving…' : serverDialog === 'voice-channel' ? 'Create voice channel' : 'Save voice channel'}</button>
         </form>
         {#if channelsError}<p class="inline-error" role="alert">{channelsError}</p>{/if}
       {:else if (serverDialog === 'category' || serverDialog === 'rename-category') && activeServer?.ownerUserId === currentUser.id}
@@ -3845,24 +4037,35 @@
           </div>
         {/if}
         <div class="cubic-channel-sidebar-head">
-          <strong>TEXT CHANNELS</strong>
+          <strong>CHANNELS</strong>
           {#if activeServer.ownerUserId === currentUser.id}
             <button type="button" aria-label="Create category" title="Create category" onclick={(event) => { categoryName = ''; editingCategoryId = null; openServerDialog('category', event); }}><Icon name="plus" size={18} /></button>
             <button type="button" aria-label="Create text channel" title="Create text channel" onclick={(event) => { channelCategoryId = ''; openServerDialog('channel', event); }}><Icon name="plus" size={18} /></button>
+            <button type="button" aria-label="Create voice channel" title="Create voice channel" onclick={(event) => { voiceChannelName = ''; editingVoiceChannelId = null; channelCategoryId = ''; openServerDialog('voice-channel', event); }}><Icon name="headphones" size={18} /></button>
           {/if}
         </div>
-        <div class="cubic-channel-list" aria-label={`Text channels in ${activeServer.name}`}>
+        <div class="cubic-channel-list" aria-label={`Channels in ${activeServer.name}`}>
           {#if channelsLoading}<p class="cubic-server-list-status">Loading channels…</p>{/if}
-          {#if !channelsLoading && serverChannels.length === 0}<p class="cubic-server-list-status">This server does not have channels yet.</p>{/if}
-          {#each channelsInScope(null) as channel, index (channel.id)}
+          {#if !channelsLoading && serverChannels.length === 0 && serverVoiceChannels.length === 0}<p class="cubic-server-list-status">This server does not have channels yet.</p>{/if}
+          {#each channelsInScope(null) as channel, index (`${channel.kind}:${channel.id}`)}
             <div class="cubic-layout-channel-line">
-              <button class="cubic-channel-row" type="button" aria-label={`Text channel ${channel.name}`} aria-current={activeChannel?.id === channel.id ? 'page' : undefined} onclick={() => selectChannel(channel)}><span aria-hidden="true">#</span><span>{channel.name}</span></button>
+              {#if channel.kind === 'text'}
+                <button class="cubic-channel-row" type="button" aria-label={`Text channel ${channel.name}`} aria-current={activeChannel?.id === channel.id ? 'page' : undefined} onclick={() => selectChannel(channel)}><span aria-hidden="true">#</span><span>{channel.name}</span></button>
+              {:else}
+                <button class="cubic-channel-row cubic-voice-channel-row" type="button" aria-label={`Join voice channel ${channel.name}`} aria-current={activeServerVoiceId === channel.id ? 'true' : undefined} onclick={() => joinServerVoice(channel)}><span aria-hidden="true">🔊</span><span>{channel.name}</span></button>
+              {/if}
               {#if activeServer.ownerUserId === currentUser.id}
                 <button type="button" aria-label={`Move ${channel.name} up`} title="Move up" disabled={layoutBusy || index === 0} onclick={() => shiftChannel(channel, -1)}>↑</button>
                 <button type="button" aria-label={`Move ${channel.name} down`} title="Move down" disabled={layoutBusy || index === channelsInScope(null).length - 1} onclick={() => shiftChannel(channel, 1)}>↓</button>
-                <button type="button" aria-label={`Move ${channel.name} to category`} title="Move to category" disabled={layoutBusy} onclick={(event) => { movingChannelId = channel.id; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}>⋯</button>
+                {#if channel.kind === 'voice'}<button type="button" aria-label={`Rename voice channel ${channel.name}`} onclick={(event) => { editingVoiceChannelId = channel.id; voiceChannelName = channel.name; openServerDialog('rename-voice-channel', event); }}>Edit</button>{/if}
+                <button type="button" aria-label={`Move ${channel.name} to category`} title="Move to category" disabled={layoutBusy} onclick={(event) => { movingChannelId = channel.id; movingChannelKind = channel.kind; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}>⋯</button>
               {/if}
             </div>
+            {#if channel.kind === 'voice' && serverVoicePresence[channel.id]?.length}
+              <ul class="cubic-voice-occupants" aria-label={`People in ${channel.name}`}>
+                {#each serverVoicePresence[channel.id] as occupant (occupant.userId)}<li>{occupant.displayName}</li>{/each}
+              </ul>
+            {/if}
           {/each}
           {#each serverCategories as category, categoryIndex (category.id)}
             <section class="cubic-layout-category" aria-label={`Category ${category.name}`}>
@@ -3874,15 +4077,25 @@
                   <button type="button" aria-label={`Delete category ${category.name}`} disabled={layoutBusy} onclick={() => deleteSelectedCategory(category.id)}>×</button>
                 {/if}
               </div>
-              {#each channelsInScope(category.id) as channel, index (channel.id)}
+              {#each channelsInScope(category.id) as channel, index (`${channel.kind}:${channel.id}`)}
                 <div class="cubic-layout-channel-line">
-                  <button class="cubic-channel-row" type="button" aria-label={`Text channel ${channel.name}`} aria-current={activeChannel?.id === channel.id ? 'page' : undefined} onclick={() => selectChannel(channel)}><span aria-hidden="true">#</span><span>{channel.name}</span></button>
+                  {#if channel.kind === 'text'}
+                    <button class="cubic-channel-row" type="button" aria-label={`Text channel ${channel.name}`} aria-current={activeChannel?.id === channel.id ? 'page' : undefined} onclick={() => selectChannel(channel)}><span aria-hidden="true">#</span><span>{channel.name}</span></button>
+                  {:else}
+                    <button class="cubic-channel-row cubic-voice-channel-row" type="button" aria-label={`Join voice channel ${channel.name}`} aria-current={activeServerVoiceId === channel.id ? 'true' : undefined} onclick={() => joinServerVoice(channel)}><span aria-hidden="true">🔊</span><span>{channel.name}</span></button>
+                  {/if}
                   {#if activeServer.ownerUserId === currentUser.id}
                     <button type="button" aria-label={`Move ${channel.name} up`} disabled={layoutBusy || index === 0} onclick={() => shiftChannel(channel, -1)}>↑</button>
                     <button type="button" aria-label={`Move ${channel.name} down`} disabled={layoutBusy || index === channelsInScope(category.id).length - 1} onclick={() => shiftChannel(channel, 1)}>↓</button>
-                    <button type="button" aria-label={`Move ${channel.name} to category`} disabled={layoutBusy} onclick={(event) => { movingChannelId = channel.id; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}>⋯</button>
+                    {#if channel.kind === 'voice'}<button type="button" aria-label={`Rename voice channel ${channel.name}`} onclick={(event) => { editingVoiceChannelId = channel.id; voiceChannelName = channel.name; openServerDialog('rename-voice-channel', event); }}>Edit</button>{/if}
+                    <button type="button" aria-label={`Move ${channel.name} to category`} disabled={layoutBusy} onclick={(event) => { movingChannelId = channel.id; movingChannelKind = channel.kind; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}>⋯</button>
                   {/if}
                 </div>
+                {#if channel.kind === 'voice' && serverVoicePresence[channel.id]?.length}
+                  <ul class="cubic-voice-occupants" aria-label={`People in ${channel.name}`}>
+                    {#each serverVoicePresence[channel.id] as occupant (occupant.userId)}<li>{occupant.displayName}</li>{/each}
+                  </ul>
+                {/if}
               {/each}
             </section>
           {/each}
@@ -4669,7 +4882,7 @@
       <div class="voice-dock-head">
         <span class="voice-dock-icon" aria-hidden="true"><Icon name="headphones" size={20} /></span>
         <div>
-          <strong>{voiceConversationTitle || (voiceRetryConversation ? conversationName(voiceRetryConversation) : 'Voice')}</strong>
+          <strong>{voiceConversationTitle || voiceRetryServerChannel?.name || (voiceRetryConversation ? conversationName(voiceRetryConversation) : 'Voice')}</strong>
           <small role="status" aria-live="polite">
             {voiceStatus === 'connected'
               ? `${voiceParticipants.length} connected`
@@ -4680,7 +4893,7 @@
                   : 'Voice unavailable'}
           </small>
         </div>
-        {#if voiceStatus !== 'idle'}
+        {#if voiceStatus !== 'idle' && !activeServerVoiceId}
           <button
             class="voice-settings-button"
             class:active={mediaSettingsOpen}
@@ -4907,7 +5120,7 @@
             <Icon name={voiceDeafened ? 'headphones-off' : 'headphones'} size={18} />
             <span>{voiceDeafened ? 'Undeafen' : 'Deafen'}</span>
           </button>
-          <button
+          {#if !activeServerVoiceId}<button
             type="button"
             class:camera-active={voiceCameraEnabled}
             title={voiceCameraEnabled ? 'Turn camera off' : 'Turn camera on'}
@@ -4932,8 +5145,8 @@
           >
             <Icon name={voiceScreenShareEnabled ? 'screen-share-off' : 'screen-share'} size={18} />
             <span>{voiceScreenShareEnabled ? 'Stop share' : 'Share'}</span>
-          </button>
-          <button class="voice-leave" type="button" title="Disconnect" aria-label="Disconnect from call" onclick={() => leaveVoice()}>
+          </button>{/if}
+          <button class="voice-leave" type="button" title="Disconnect" aria-label={activeServerVoiceId ? 'Leave voice channel' : 'Disconnect from call'} onclick={() => leaveVoice()}>
             <Icon name="phone-off" size={18} /><span>Leave</span>
           </button>
         </div>
@@ -4962,6 +5175,9 @@
           <div class="voice-dock-actions">
             {#if voiceRetryConversation}
               <button type="button" onclick={() => joinVoice(voiceRetryConversation)}>Retry voice</button>
+            {/if}
+            {#if voiceRetryServerChannel}
+              <button type="button" onclick={() => joinServerVoice(voiceRetryServerChannel!)}>Retry voice channel</button>
             {/if}
             <button type="button" onclick={() => voiceError = ''}>Dismiss</button>
           </div>

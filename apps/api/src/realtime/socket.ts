@@ -21,11 +21,13 @@ import {
 import type { RealtimeEvents, ProfileChangedEvent } from './events.js';
 import { browserOriginMatches, canonicalBrowserOrigin } from '../security/browser-request.js';
 import { PresenceRegistry, type PresenceStatus } from './presence.js';
+import type { ServerVoiceService } from '../server-voice/service.js';
 
 const joinSchema = z.object({ conversationId: z.string().uuid() });
 const callStartSchema = z.object({ conversationId: z.string().uuid() });
 const callIdSchema = z.object({ callId: z.string().uuid() });
 const presenceActivitySchema = z.object({ state: z.enum(['active', 'idle']) }).strict();
+const serverPresenceSchema = z.object({ serverId: z.string().uuid() }).strict();
 
 const RING_TIMEOUT_MS = 45_000;
 const MAX_PENDING_ADMISSIONS_PER_SOCKET = 8;
@@ -38,6 +40,10 @@ function conversationRoom(conversationId: string): string {
 
 function userRoom(userId: string): string {
   return `user:${userId}`;
+}
+
+function serverVoicePresenceRoom(serverId: string): string {
+  return `server-voice-presence:${serverId}`;
 }
 
 function acknowledgePacketFailure(packet: unknown[], error: string): void {
@@ -110,6 +116,7 @@ export interface AttachRealtimeOptions {
   trustedProxyCidrs: string[];
   browserOrigin: string;
   events: RealtimeEvents;
+  serverVoice?: ServerVoiceService;
   pingIntervalMs?: number;
   pingTimeoutMs?: number;
 }
@@ -396,6 +403,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
   };
   const admissionsByUser = new Map<string, Set<Admission>>();
   const admissionsBySocket = new Map<string, Set<Admission>>();
+  const pendingVoiceSubscriptions = new Map<string, Set<{ serverId: string; cancelled: boolean }>>();
   type PendingCallStart = {
     conversationId: string;
     invalidated: boolean;
@@ -719,6 +727,42 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
       }
     );
 
+    socket.on('server:voice:subscribe', async (
+      payload: unknown,
+      acknowledge?: (result: { ok: boolean; presence?: ReturnType<ServerVoiceService['snapshot']> }) => void
+    ) => {
+      const parsed = serverPresenceSchema.safeParse(payload);
+      if (!parsed.success || !options.serverVoice) return acknowledge?.({ ok: false });
+      const pending = { serverId: parsed.data.serverId, cancelled: false };
+      let byUser = pendingVoiceSubscriptions.get(identity.userId);
+      if (!byUser) pendingVoiceSubscriptions.set(identity.userId, byUser = new Set());
+      if (byUser.size >= MAX_PENDING_ADMISSIONS_PER_SOCKET) return acknowledge?.({ ok: false });
+      byUser.add(pending);
+      try {
+        const member = await options.database.pool.query(
+          `select 1 from server_members where server_id = $1 and user_id = $2`,
+          [parsed.data.serverId, identity.userId]
+        );
+        if (!member.rowCount || pending.cancelled || !socket.connected) return acknowledge?.({ ok: false });
+        const room = serverVoicePresenceRoom(parsed.data.serverId);
+        for (const joined of socket.rooms) {
+          if (joined.startsWith('server-voice-presence:') && joined !== room) socket.leave(joined);
+        }
+        socket.join(room);
+        if (pending.cancelled || !socket.connected) {
+          socket.leave(room);
+          return acknowledge?.({ ok: false });
+        }
+        acknowledge?.({ ok: true, presence: options.serverVoice.snapshot(parsed.data.serverId) });
+      } catch {
+        if (socket.connected) acknowledge?.({ ok: false });
+      } finally {
+        byUser.delete(pending);
+        if (byUser.size === 0 && pendingVoiceSubscriptions.get(identity.userId) === byUser)
+          pendingVoiceSubscriptions.delete(identity.userId);
+      }
+    });
+
     socket.on('presence:set', (payload: unknown, acknowledge?: (result: { ok: boolean }) => void) => {
       const parsed = presenceActivitySchema.safeParse(payload);
       acknowledge?.({ ok: parsed.success && presence.setActivity(socket.id, parsed.data.state) });
@@ -1030,6 +1074,19 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     }
   });
 
+  const unsubscribeServerVoicePresence = options.events.onServerVoicePresence((event) => {
+    io.to(serverVoicePresenceRoom(event.serverId)).emit('server:voice:presence', event);
+  });
+
+  const unsubscribeServerMemberRemoved = options.events.onServerMemberRemoved((event) => {
+    for (const pending of pendingVoiceSubscriptions.get(event.userId) ?? []) {
+      if (pending.serverId === event.serverId) pending.cancelled = true;
+    }
+    const room = userRoom(event.userId);
+    io.in(room).socketsLeave(serverVoicePresenceRoom(event.serverId));
+    io.to(room).emit('server:removed', { serverId: event.serverId });
+  });
+
   const unsubscribeProfileChanged = options.events.onProfileChanged((event) => {
     const existing = profileFanouts.get(event.userId);
     if (existing) {
@@ -1123,6 +1180,8 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
       unsubscribeOpened();
       unsubscribeChanged();
       unsubscribeRemoved();
+      unsubscribeServerVoicePresence();
+      unsubscribeServerMemberRemoved();
       unsubscribeInvites();
       unsubscribeSessionRevoked();
       unsubscribeProfileChanged();

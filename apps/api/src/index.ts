@@ -8,6 +8,7 @@ import {
   LiveKitAuthorizationService,
   createDatabaseVoiceAuthorizationStore
 } from './voice/authorization.js';
+import { ServerVoiceService } from './server-voice/service.js';
 
 const env = loadEnv();
 const database = createDatabase(env.DATABASE_URL);
@@ -22,6 +23,16 @@ const livekitAuthorization = new LiveKitAuthorizationService({
   store: createDatabaseVoiceAuthorizationStore(database),
   events: realtimeEvents,
   reconciliationIntervalMs: env.LIVEKIT_AUTHORIZATION_RECONCILE_MS
+});
+const serverVoice = new ServerVoiceService({
+  database,
+  sessions: sessionService,
+  events: realtimeEvents,
+  apiKey: env.LIVEKIT_API_KEY,
+  apiSecret: env.LIVEKIT_API_SECRET,
+  apiUrl: env.LIVEKIT_API_URL,
+  publicUrl: env.LIVEKIT_PUBLIC_URL,
+  intervalMs: env.LIVEKIT_AUTHORIZATION_RECONCILE_MS
 });
 const app = await createApp({
   database,
@@ -55,6 +66,7 @@ const app = await createApp({
   attachmentReconciliationMissingBatchSize:
     env.ATTACHMENT_RECONCILIATION_MISSING_BATCH_SIZE,
   livekitAuthorization,
+  serverVoice,
   livekitPublicUrl: env.LIVEKIT_PUBLIC_URL,
   realtimeEvents,
   logger: env.NODE_ENV !== 'test'
@@ -68,7 +80,8 @@ const realtime = attachRealtime({
   revalidateIntervalMs: env.SESSION_SOCKET_REVALIDATE_MS,
   trustedProxyCidrs: env.TRUST_PROXY_CIDRS,
   browserOrigin: env.CORS_ORIGIN,
-  events: realtimeEvents
+  events: realtimeEvents,
+  serverVoice
 });
 
 let shuttingDown = false;

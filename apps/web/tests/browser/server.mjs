@@ -1,6 +1,6 @@
 // Isolated, in-memory API fixtures: never connects to PostgreSQL or live services.
 import { createServer } from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { Server } from 'socket.io';
 import sharp from 'sharp';
@@ -21,6 +21,8 @@ let groupMembers;
 let fixtureServers;
 let fixtureIconCounter;
 let fixtureChannels;
+let fixtureVoiceChannels;
+let fixtureServerVoiceConnected;
 let fixtureCategories;
 let fixtureServerMembers;
 let fixtureServerInvites;
@@ -41,6 +43,8 @@ function reset() {
   fixtureServers = [];
   fixtureIconCounter = 0;
   fixtureChannels = [];
+  fixtureVoiceChannels = [];
+  fixtureServerVoiceConnected = false;
   fixtureCategories = [];
   fixtureServerMembers = new Map();
   fixtureServerInvites = [];
@@ -99,6 +103,10 @@ const server = createServer(async (request, response) => {
 
   if (url.pathname === '/__test/reset') { reset(); return json({ ok: true }); }
   if (url.pathname === '/__test/server-friends') { fixtureServerFriends = true; return json({ ok: true }); }
+  if (url.pathname === '/__test/server-voice-connected') {
+    fixtureServerVoiceConnected = true;
+    return json({ ok: true });
+  }
   if (url.pathname === '/__test/server-member' && request.method === 'POST') {
     const members = fixtureServerMembers.get(url.searchParams.get('serverId'));
     if (!members) return json({ error: 'Server not found.' }, 404);
@@ -354,6 +362,9 @@ const server = createServer(async (request, response) => {
         if (userId === serverMemberRemove[2]) io.sockets.sockets.get(socketId)?.emit('conversation:removed', { conversationId: channel.conversationId });
       }
     }
+    for (const [socketId, userId] of fixtureSockets) {
+      if (userId === serverMemberRemove[2]) io.sockets.sockets.get(socketId)?.emit('server:removed', { serverId: selected.id });
+    }
     response.writeHead(204); return response.end();
   }
   const serverLeave = /^\/api\/v1\/servers\/([0-9a-f-]+)\/leave$/.exec(url.pathname);
@@ -391,8 +402,8 @@ const server = createServer(async (request, response) => {
       current.name = name; current.updatedAt = new Date().toISOString(); return json({ category: current });
     }
     if (request.method === 'DELETE') {
-      const uncategorized = fixtureChannels.filter((item) => item.serverId === selected.id && item.categoryId === null);
-      const contained = fixtureChannels.filter((item) => item.serverId === selected.id && item.categoryId === current.id);
+      const uncategorized = [...fixtureChannels, ...fixtureVoiceChannels].filter((item) => item.serverId === selected.id && item.categoryId === null);
+      const contained = [...fixtureChannels, ...fixtureVoiceChannels].filter((item) => item.serverId === selected.id && item.categoryId === current.id);
       fixtureCategories = fixtureCategories.filter((item) => item.id !== current.id);
       contained.forEach((item) => { item.categoryId = null; });
       uncategorized.sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt));
@@ -424,6 +435,56 @@ const server = createServer(async (request, response) => {
     source.forEach((item, index) => { item.position = index; });
     target.forEach((item, index) => { item.position = index; });
     return json({ moved: true });
+  }
+  const typedMove = /^\/api\/v1\/servers\/([0-9a-f-]+)\/layout\/(text|voice)\/([0-9a-f-]+)\/move$/.exec(url.pathname);
+  if (typedMove && request.method === 'POST') {
+    const selected = fixtureServers.find((item) => item.id === typedMove[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
+    if (!selected) return json({ error: 'Server not found.' }, 404);
+    if (selected.ownerUserId !== requestUser.id) return json({ error: 'Owner only.' }, 403);
+    const all = [...fixtureChannels, ...fixtureVoiceChannels];
+    const channel = (typedMove[2] === 'text' ? fixtureChannels : fixtureVoiceChannels).find((item) => item.id === typedMove[3] && item.serverId === selected.id);
+    if (!channel) return json({ error: 'Channel not found.' }, 404);
+    const payload = JSON.parse((await body()).toString());
+    if (payload.targetCategoryId && !fixtureCategories.some((item) => item.id === payload.targetCategoryId && item.serverId === selected.id)) return json({ error: 'Category not found.' }, 404);
+    const ordered = (items) => items.sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    const source = ordered(all.filter((item) => item.serverId === selected.id && item.categoryId === channel.categoryId && item.id !== channel.id));
+    const target = channel.categoryId === payload.targetCategoryId ? source : ordered(all.filter((item) => item.serverId === selected.id && item.categoryId === payload.targetCategoryId));
+    if (!Number.isInteger(payload.targetIndex) || payload.targetIndex < 0 || payload.targetIndex > target.length) return json({ error: 'Invalid index.' }, 400);
+    channel.categoryId = payload.targetCategoryId; target.splice(payload.targetIndex, 0, channel);
+    source.forEach((item, index) => { item.position = index; });
+    target.forEach((item, index) => { item.position = index; });
+    return json({ moved: true });
+  }
+  const voiceChannels = /^\/api\/v1\/servers\/([0-9a-f-]+)\/voice-channels(?:\/([0-9a-f-]+))?$/.exec(url.pathname);
+  if (voiceChannels) {
+    const selected = fixtureServers.find((item) => item.id === voiceChannels[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
+    if (!selected) return json({ error: 'Server not found.' }, 404);
+    if (request.method === 'GET' && !voiceChannels[2]) return json({ channels: fixtureVoiceChannels.filter((item) => item.serverId === selected.id).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)) });
+    if (selected.ownerUserId !== requestUser.id) return json({ error: 'Owner only.' }, 403);
+    const payload = JSON.parse((await body()).toString());
+    const name = typeof payload.name === 'string' ? payload.name.trim() : '';
+    if (!name || name.length > 96) return json({ error: 'Invalid voice channel.' }, 400);
+    if (request.method === 'PATCH' && voiceChannels[2]) {
+      const channel = fixtureVoiceChannels.find((item) => item.id === voiceChannels[2] && item.serverId === selected.id);
+      if (!channel) return json({ error: 'Voice channel not found.' }, 404);
+      channel.name = name; channel.updatedAt = new Date().toISOString(); return json({ channel });
+    }
+    if (request.method === 'POST' && !voiceChannels[2]) {
+      if (payload.categoryId && !fixtureCategories.some((item) => item.id === payload.categoryId && item.serverId === selected.id)) return json({ error: 'Category not found.' }, 404);
+      const now = new Date().toISOString(); const categoryId = payload.categoryId || null;
+      const channel = { id: randomUUID(), serverId: selected.id, categoryId, name,
+        position: [...fixtureChannels, ...fixtureVoiceChannels].filter((item) => item.serverId === selected.id && item.categoryId === categoryId).length,
+        createdAt: now, updatedAt: now };
+      fixtureVoiceChannels.push(channel); return json({ channel }, 201);
+    }
+  }
+  const voiceToken = /^\/api\/v1\/server-voice\/channels\/([0-9a-f-]+)\/token$/.exec(url.pathname);
+  if (voiceToken && request.method === 'POST') {
+    const channel = fixtureVoiceChannels.find((item) => item.id === voiceToken[1]);
+    if (!channel || !fixtureServerMembers.get(channel.serverId)?.has(requestUser.id))
+      return json({ error: 'Voice channel unavailable.' }, 404);
+    if (!fixtureServerVoiceConnected) return json({ error: 'Fixture LiveKit unavailable.' }, 503);
+    return json({ url: 'wss://fixture-livekit.invalid', token: `fixture-ticket:cubic-server-voice-${channel.id}` });
   }
   if (serverChannels) {
     const selected = fixtureServers.find((item) => item.id === serverChannels[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
@@ -543,6 +604,10 @@ io.on('connection', (socket) => {
   io.emit('presence:changed', { userId: socketUserId, status: 'online' });
   socket.emit('realtime:ready', { userId: socketUserId, conversationCount: 2 });
   socket.on('conversation:join', (_event, ack) => ack?.({ ok: true }));
+  socket.on('server:voice:subscribe', (event, ack) => {
+    const member = fixtureServerMembers.get(event?.serverId)?.has(fixtureSockets.get(socket.id));
+    ack?.({ ok: Boolean(member), presence: [] });
+  });
   socket.on('presence:snapshot', (_event, ack) => {
     const result = { ok: true, statuses: Object.fromEntries(groupMembers.map((member) => [member.id, fixturePresence.get(member.id) ?? 'offline'])) };
     if (holdPresenceSnapshots) heldPresenceSnapshots.push(() => ack?.(result));
@@ -564,6 +629,12 @@ io.on('connection', (socket) => {
     }
   });
 });
+// Build a test-only bundle so the media-transport seam is absent from normal
+// production builds. The preview server and all Cubic UI/API calls stay real.
+const browserBuild = spawnSync('npm', ['run', 'build', '--', '--mode', 'browser-test'], {
+  cwd: new URL('../..', import.meta.url), stdio: 'inherit'
+});
+if (browserBuild.status !== 0) throw new Error('Could not build browser acceptance fixture.');
 server.listen(3198, '127.0.0.1');
 const web = spawn(process.execPath, ['server.mjs'], {
   env: {
