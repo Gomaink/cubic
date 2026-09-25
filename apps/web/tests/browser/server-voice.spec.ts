@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openMessages, openServers } from './navigation';
 
 test.beforeEach(async ({ page, context, request }) => {
   await request.post('http://127.0.0.1:3198/__test/reset');
@@ -7,7 +8,7 @@ test.beforeEach(async ({ page, context, request }) => {
 });
 
 test('owner manages voice channels in mixed text/voice order and media outage preserves navigation', async ({ page }) => {
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await page.getByRole('button', { name: 'Create server' }).first().click();
   await page.getByRole('dialog', { name: 'Create server' }).getByRole('textbox', { name: 'Server name' }).fill('Voice Hub');
   await page.getByRole('dialog', { name: 'Create server' }).getByRole('button', { name: 'Create server' }).click();
@@ -18,7 +19,7 @@ test('owner manages voice channels in mixed text/voice order and media outage pr
   await page.getByRole('dialog', { name: 'Create text channel' }).getByRole('textbox', { name: 'Channel name' }).fill('chat');
   await page.getByRole('dialog', { name: 'Create text channel' }).getByRole('combobox', { name: 'Category' }).selectOption({ label: 'General' });
   await page.getByRole('dialog', { name: 'Create text channel' }).getByRole('button', { name: 'Create text channel' }).click();
-  await page.getByRole('button', { name: 'Back to server' }).click();
+  if ((page.viewportSize()?.width ?? 1000) <= 680) await page.getByRole('button', { name: 'Back to server' }).click();
   await page.getByRole('button', { name: 'Create voice channel' }).click();
   const create = page.getByRole('dialog', { name: 'Create voice channel' });
   await create.getByRole('textbox', { name: 'Voice channel name' }).fill('Lounge');
@@ -44,7 +45,7 @@ test('owner manages voice channels in mixed text/voice order and media outage pr
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
-test('member ticket joins the selected voice room, keeps text usable, and leaves cleanly', async ({ page, request }) => {
+test('member ticket joins the selected voice room, keeps text usable, and leaves cleanly', async ({ page, request }, testInfo) => {
   await request.post('http://127.0.0.1:3198/__test/server-voice-connected');
   await page.addInitScript(() => {
     if (navigator.mediaDevices && !navigator.mediaDevices.getDisplayMedia) {
@@ -118,14 +119,14 @@ test('member ticket joins the selected voice room, keeps text usable, and leaves
     };
   });
   await page.reload();
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await page.getByRole('button', { name: 'Create server' }).first().click();
   await page.getByRole('dialog', { name: 'Create server' }).getByRole('textbox', { name: 'Server name' }).fill('Voice Hub');
   await page.getByRole('dialog', { name: 'Create server' }).getByRole('button', { name: 'Create server' }).click();
   await page.getByRole('button', { name: 'Create text channel' }).click();
   await page.getByRole('dialog', { name: 'Create text channel' }).getByRole('textbox', { name: 'Channel name' }).fill('chat');
   await page.getByRole('dialog', { name: 'Create text channel' }).getByRole('button', { name: 'Create text channel' }).click();
-  await page.getByRole('button', { name: 'Back to server' }).click();
+  if ((page.viewportSize()?.width ?? 1000) <= 680) await page.getByRole('button', { name: 'Back to server' }).click();
   await page.getByRole('button', { name: 'Create voice channel' }).click();
   await page.getByRole('dialog', { name: 'Create voice channel' }).getByRole('textbox', { name: 'Voice channel name' }).fill('Lounge');
   await page.getByRole('dialog', { name: 'Create voice channel' }).getByRole('button', { name: 'Create voice channel' }).click();
@@ -181,12 +182,13 @@ test('member ticket joins the selected voice room, keeps text usable, and leaves
   await dock.getByRole('button', { name: 'Show media stage' }).click();
   await expect(stage).toBeVisible();
   await stage.getByRole('button', { name: 'Minimize media stage' }).click();
-  await page.getByRole('button', { name: 'Chats', exact: true }).click();
+  await openMessages(page);
   await page.locator('.conversation-row').filter({ hasText: 'Fixture DM' }).click();
   await expect(dock).toContainText('1 connected');
+  if (testInfo.project.name === 'desktop') await page.screenshot({ path: '/tmp/cubic-alpha11-slice1/desktop-voice-in-messages.png' });
   await dock.getByRole('button', { name: 'Show media stage' }).click();
   await expect(stage).toBeVisible();
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await expect(dock).toContainText('1 connected');
   await dock.getByRole('button', { name: 'Stop sharing screen' }).click();
   await expect.poll(() => page.evaluate(() => (window as any).__cubicVoiceTest?.shareStops)).toBe(1);

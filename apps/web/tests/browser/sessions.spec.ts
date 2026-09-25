@@ -3,7 +3,8 @@ import { test, expect, type Page } from '@playwright/test';
 const fixture = 'http://127.0.0.1:3198';
 
 async function openSessions(page: Page) {
-  await page.getByRole('button', { name: 'Active sessions' }).click();
+  await page.getByRole('button', { name: 'Account actions' }).click();
+  await page.getByRole('button', { name: 'Sessions', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Active sessions' })).toBeVisible();
 }
 
@@ -25,7 +26,8 @@ test('session dialog is responsive, keyboard accessible, and shows safe session 
     return route.continue();
   });
 
-  await page.getByRole('button', { name: 'Active sessions' }).click();
+  await page.getByRole('button', { name: 'Account actions' }).click();
+  await page.getByRole('button', { name: 'Sessions', exact: true }).click();
   await expect(page.getByText('Loading active sessions…')).toBeVisible();
   const dialog = page.getByRole('dialog', { name: 'Active sessions' });
   await expect(dialog.getByText('Firefox on Linux')).toBeVisible();
@@ -44,7 +46,7 @@ test('session dialog is responsive, keyboard accessible, and shows safe session 
 
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Active sessions' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Account actions' })).toBeVisible();
 });
 
 test('session dialog handles error, retry, and empty states', async ({ page, request }) => {

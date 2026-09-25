@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { openServers } from './navigation';
 
 async function createShareLink(page: import('@playwright/test').Page) {
   await page.getByRole('button', { name: 'Create server' }).first().click();
@@ -19,7 +20,7 @@ test.beforeEach(async ({ page, context, request }) => {
   await request.post('http://127.0.0.1:3198/__test/reset');
   await context.addCookies([{ name: 'cubic_session', value: 'browser-fixture', domain: '127.0.0.1', path: '/' }]);
   await page.goto('/app');
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
 });
 
 test('owner displays a bearer once, manages metadata, and revoke makes the link unavailable', async ({ page, browser }) => {

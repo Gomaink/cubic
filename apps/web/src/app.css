@@ -1912,7 +1912,7 @@ body {
 .chat-meta-button,
 .chat-voice-button,
 .icon-action {
-  display: inline-grid !important;
+  display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
   width: 38px !important;
@@ -2196,7 +2196,7 @@ body {
 
 /* Cubic alpha.5 history + deafen + Onyx refinement */
 :root {
-  --cubic-font: "gg sans", "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  --cubic-font: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
   --cubic-onyx-0: #0c0d0f;
   --cubic-onyx-1: #111214;
   --cubic-onyx-2: #17181c;
@@ -4565,4 +4565,54 @@ body { background: var(--cubic-onyx-0); }
   .chat-panel.cubic-server-empty:not(.cubic-server-members-open) { transform: translate3d(100%, 0, 0); pointer-events: none; }
   .cubic-server-member-pane { width: 100%; border-left: 0; }
   .cubic-server-dialog { width: 100%; max-height: calc(100dvh - 56px); margin: auto auto 0; border-radius: 14px 14px 0 0; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+}
+
+/* Alpha 11.1 shell: the rail and sidebar are separate, persistent surfaces.
+   These qualified rules supersede the legacy messenger grid without changing
+   message, media, or server-management styling. */
+.messenger-shell.cubic-app-shell {
+  grid-template-columns: 66px minmax(230px, 294px) minmax(0, 1fr) !important;
+}
+.cubic-app-shell > .cubic-context-column {
+  display: flex;
+  flex-direction: column;
+  grid-column: 2;
+  min-width: 0;
+  min-height: 0;
+  max-height: 100dvh;
+  overflow: visible;
+  border-right: 1px solid #ffffff14;
+  background: var(--cubic-bg-1);
+}
+.cubic-app-shell .cubic-context-column > .conversation-list,
+.cubic-app-shell .cubic-context-column > .conversation-list.cubic-server-sidebar {
+  flex: 1 1 auto;
+  width: 100%;
+  height: auto !important;
+  max-height: none !important;
+  min-height: 0;
+  border-right: 0 !important;
+}
+.cubic-app-shell > .chat-panel { grid-column: 3; }
+.cubic-messages-header-actions { display: flex; align-items: center; gap: 2px; }
+@media (min-width: 681px) {
+  .cubic-app-shell .chat-back { display: none; }
+}
+
+@media (max-width: 680px) {
+  .messenger-shell.cubic-app-shell { grid-template-columns: 64px minmax(0, 1fr) !important; grid-template-rows: minmax(0, 1fr) !important; }
+  .cubic-app-shell > .cubic-context-column { grid-column: 2; grid-row: 1; max-height: 100dvh; }
+  .cubic-app-shell > .chat-panel {
+    position: absolute !important;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    inset: 0 !important;
+    z-index: 35;
+    width: 100% !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+  }
+  .cubic-app-shell > .chat-panel.open { transform: translateX(0) !important; pointer-events: auto; }
+  .cubic-app-shell > .chat-panel.cubic-server-empty:not(.cubic-server-members-open) { transform: translateX(100%) !important; pointer-events: none; }
+  .cubic-app-shell .cubic-context-column > .conversation-list.cubic-server-sidebar { height: auto !important; }
 }

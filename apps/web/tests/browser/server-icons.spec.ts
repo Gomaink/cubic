@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openMessages, openServers } from './navigation';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
 
@@ -9,7 +10,7 @@ test.beforeEach(async ({ page, context, request }) => {
 });
 
 test('owner uploads, replaces and removes an immutable server icon with initials fallback', async ({ page }) => {
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await page.getByRole('button', { name: 'Create server' }).first().click();
   const create = page.getByRole('dialog', { name: 'Create server' });
   await create.getByRole('textbox', { name: 'Server name' }).fill('Icons');
@@ -26,8 +27,8 @@ test('owner uploads, replaces and removes an immutable server icon with initials
   await expect(page.locator('.cubic-server-sidebar-head .cubic-server-icon-shell img')).toBeVisible();
   const firstUrl = await page.locator('.cubic-server-sidebar-head .cubic-server-icon-shell img').getAttribute('src');
 
-  await page.getByRole('button', { name: 'Chats', exact: true }).click();
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openMessages(page);
+  await openServers(page);
   await page.locator('.cubic-server-row').filter({ hasText: 'Icons' }).click();
   await expect(page.locator('.cubic-server-sidebar-head .cubic-server-icon-shell img')).toBeVisible();
   await page.getByRole('button', { name: 'Options for Icons' }).click();
@@ -55,7 +56,7 @@ test('owner uploads, replaces and removes an immutable server icon with initials
 
 test('member sees the server icon without owner icon controls', async ({ page, browser, request }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'One desktop permission run covers the shared server menu.');
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await page.getByRole('button', { name: 'Create server' }).first().click();
   const create = page.getByRole('dialog', { name: 'Create server' });
   await create.getByRole('textbox', { name: 'Server name' }).fill('Shared icon');
@@ -74,7 +75,7 @@ test('member sees the server icon without owner icon controls', async ({ page, b
     await memberContext.addCookies([{ name: 'cubic_session', value: 'browser-peer', domain: '127.0.0.1', path: '/' }]);
     const memberPage = await memberContext.newPage();
     await memberPage.goto('/app');
-    await memberPage.getByRole('button', { name: 'Servers', exact: true }).click();
+    await openServers(memberPage);
     await memberPage.locator('.cubic-server-row').filter({ hasText: 'Shared icon' }).click();
     await expect(memberPage.locator('.cubic-server-sidebar-head .cubic-server-icon-shell img')).toBeVisible();
     await memberPage.getByRole('button', { name: 'Options for Shared icon' }).click();
