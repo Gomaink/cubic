@@ -190,6 +190,14 @@ test('member ticket joins the selected voice room, keeps text usable, and leaves
   await expect(stage).toBeVisible();
   await openServers(page);
   await expect(dock).toContainText('1 connected');
+  await page.locator('.cubic-server-row').filter({ hasText: 'Voice Hub' }).click();
+  await page.getByRole('button', { name: 'Options for Voice Hub' }).click();
+  await page.getByRole('button', { name: 'Server overview' }).click();
+  await expect(page.getByRole('region', { name: 'Voice Hub server settings' })).toBeVisible();
+  await expect(dock).toContainText('1 connected');
+  if (isCompactNavigation(page)) await page.getByRole('button', { name: 'Back to server', exact: true }).click();
+  else await page.getByRole('button', { name: 'Close server settings' }).click();
+  await expect(dock).toContainText('1 connected');
   await dock.getByRole('button', { name: 'Stop sharing screen' }).click();
   await expect.poll(() => page.evaluate(() => (window as any).__cubicVoiceTest?.shareStops)).toBe(1);
   await dock.getByRole('button', { name: 'Share screen' }).click();
