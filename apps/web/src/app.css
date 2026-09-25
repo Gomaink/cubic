@@ -2808,6 +2808,30 @@ body { background: var(--cubic-onyx-0); }
 }
 
 /* Cubic alpha.6 video core */
+.video-stage.cubic-server-voice-stage {
+  position: fixed;
+  right: 22px;
+  bottom: calc(150px + env(safe-area-inset-bottom, 0px));
+  z-index: 55;
+  width: min(620px, calc(100vw - 44px));
+  height: min(42dvh, 400px);
+  min-width: 0;
+  min-height: 150px;
+  border: 1px solid #2b2d31;
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.4);
+}
+
+@media (max-width: 680px) {
+  .video-stage.cubic-server-voice-stage {
+    right: 8px;
+    bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+    width: calc(100vw - 16px);
+    height: min(38dvh, 300px);
+    min-height: 112px;
+  }
+}
+
 .video-stage {
   --video-stage-bg: #0b0c0e;
   flex: 0 0 auto;

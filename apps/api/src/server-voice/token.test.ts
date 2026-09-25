@@ -13,7 +13,7 @@ test('server voice room identity is deterministic and rejects unrelated rooms', 
   assert.equal(parseServerVoiceRoomName('cubic-server-voice-not-a-uuid'), null);
 });
 
-test('server voice token is 60-second microphone-only capability for one room', async () => {
+test('server voice token is a 60-second, room-scoped capability for the four approved media sources', async () => {
   const ticket = await createServerVoiceToken({
     apiKey, apiSecret, publicUrl: 'wss://voice.example.invalid',
     channelId, userId: '22222222-2222-4222-8222-222222222222',
@@ -27,7 +27,11 @@ test('server voice token is 60-second microphone-only capability for one room', 
   assert.equal(claims.video?.canPublish, true);
   assert.equal(claims.video?.canPublishData, false);
   assert.equal(claims.video?.canUpdateOwnMetadata, false);
-  assert.deepEqual(claims.video?.canPublishSources, ['microphone']);
+  assert.notEqual(claims.video?.roomAdmin, true);
+  assert.notEqual(claims.video?.roomCreate, true);
+  assert.notEqual(claims.video?.roomList, true);
+  assert.notEqual(claims.video?.roomRecord, true);
+  assert.deepEqual(claims.video?.canPublishSources, ['microphone', 'camera', 'screen_share', 'screen_share_audio']);
   assert.equal(Number(claims.exp) - Number(claims.nbf), SERVER_VOICE_TOKEN_TTL_SECONDS);
   assert.equal(claims.attributes?.cubicServerVoiceChannelId, channelId);
   assert.doesNotMatch(JSON.stringify(claims), /33333333-3333-4333-8333-333333333333|voice-test-secret/);
