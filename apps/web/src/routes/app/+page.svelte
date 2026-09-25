@@ -26,6 +26,7 @@
   let sessionSettingsOpen = $state(false);
   let tab = $state<'chats' | 'people' | 'servers'>('chats');
   function showMessages() {
+    navigationMenu = null;
     if (activeConversation?.kind === 'server_text') closeConversation();
     closeServerDialog();
     serverMembersOpen = false;
@@ -36,6 +37,7 @@
     activeServer = null;
   }
   function showPeople() {
+    navigationMenu = null;
     closeConversation();
     closeServerDialog();
     serverMembersOpen = false;
@@ -47,6 +49,7 @@
     void refreshServerInvites();
   }
   function showServerBrowser() {
+    navigationMenu = null;
     closeConversation();
     closeServerDialog();
     serverMembersOpen = false;
@@ -114,6 +117,10 @@
   let serverMembersReturnFocus: HTMLElement | null = null;
   let memberRemovalTarget = $state<ProfileIdentity | null>(null);
   let serverMenuOpen = $state(false);
+  let navigationMenu = $state<string | null>(null);
+  let navigationPressTimer: ReturnType<typeof setTimeout> | null = null;
+  let navigationPressConsumeTimer: ReturnType<typeof setTimeout> | null = null;
+  let consumedNavigationPress: string | null = null;
   let serverDialog = $state<'server' | 'channel' | 'voice-channel' | 'rename-voice-channel' | 'invite' | 'category' | 'rename-category' | 'move-channel' | 'remove-member' | 'icon' | null>(null);
   let serverDialogReturnFocus: HTMLElement | null = null;
   let serverDetailSequence = 0;
@@ -418,6 +425,7 @@
           closeServerDialog();
           serverMembersOpen = false;
           serverMenuOpen = false;
+          navigationMenu = null;
           serverDetailSequence += 1;
           channelLoadSequence += 1;
           serverChannels = [];
@@ -442,6 +450,14 @@
   }
 
   function selectServer(server: ServerSummary) {
+    navigationMenu = null;
+    if (activeServer?.id === server.id) {
+      closeConversation();
+      serverMembersOpen = false;
+      serverMenuOpen = false;
+      tab = 'servers';
+      return;
+    }
     closeServerDialog();
     serverMembersOpen = false;
     serverMenuOpen = false;
@@ -475,6 +491,8 @@
   }
 
   function toggleServerMembers(event: MouseEvent) {
+    navigationMenu = null;
+    serverMenuOpen = false;
     if (serverMembersOpen) { closeServerMembers(); return; }
     serverMembersReturnFocus = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
     serverMembersOpen = true;
@@ -621,6 +639,7 @@
       closeServerDialog();
       serverMembersOpen = false;
       serverMenuOpen = false;
+      navigationMenu = null;
       serverChannels = [];
       serverVoiceChannels = [];
       serverCategories = [];
@@ -752,6 +771,46 @@
         a.id.localeCompare(b.id) || a.kind.localeCompare(b.kind));
   }
 
+  function toggleNavigationMenu(key: string) {
+    serverMenuOpen = false;
+    navigationMenu = navigationMenu === key ? null : key;
+  }
+
+  function openNavigationContext(event: MouseEvent, key: string) {
+    event.preventDefault();
+    serverMenuOpen = false;
+    navigationMenu = key;
+  }
+
+  function startNavigationPress(key: string) {
+    endNavigationPress();
+    consumedNavigationPress = null;
+    navigationPressTimer = setTimeout(() => {
+      if (navigationPressConsumeTimer) clearTimeout(navigationPressConsumeTimer);
+      consumedNavigationPress = key;
+      serverMenuOpen = false;
+      navigationMenu = key;
+      navigationPressTimer = null;
+      navigationPressConsumeTimer = setTimeout(() => {
+        if (consumedNavigationPress === key) consumedNavigationPress = null;
+        navigationPressConsumeTimer = null;
+      }, 1000);
+    }, 550);
+  }
+
+  function endNavigationPress() {
+    if (navigationPressTimer) clearTimeout(navigationPressTimer);
+    navigationPressTimer = null;
+  }
+
+  function navigationPressWasConsumed(key: string) {
+    if (consumedNavigationPress !== key) return false;
+    if (navigationPressConsumeTimer) clearTimeout(navigationPressConsumeTimer);
+    navigationPressConsumeTimer = null;
+    consumedNavigationPress = null;
+    return true;
+  }
+
   async function mutateLayout(path: string, method: string, body?: object) {
     const server = activeServer;
     if (!server || layoutBusy || channelsLoading) return false;
@@ -811,6 +870,7 @@
 
   async function selectChannel(channel: ServerTextChannel) {
     if (activeServer?.id !== channel.serverId) return;
+    navigationMenu = null;
     serverMembersOpen = false;
     serverMenuOpen = false;
     activeChannel = channel;
@@ -882,7 +942,10 @@
   }
 
   function openServerDialog(kind: NonNullable<typeof serverDialog>, trigger: Event) {
-    serverDialogReturnFocus = trigger.currentTarget instanceof HTMLElement ? trigger.currentTarget : null;
+    navigationMenu = null;
+    const target = trigger.currentTarget instanceof HTMLElement ? trigger.currentTarget : null;
+    const menu = target?.closest('.cubic-navigation-actions');
+    serverDialogReturnFocus = menu?.previousElementSibling?.querySelector<HTMLElement>('button[aria-expanded]') ?? target;
     serverMenuOpen = false;
     serverDialog = kind;
     if (kind === 'icon') { serverIconFile = null; serverIconError = ''; }
@@ -3876,6 +3939,10 @@
     navigator.mediaDevices?.addEventListener?.('devicechange', onMediaDeviceChange);
 
     return () => {
+      endNavigationPress();
+      if (navigationPressConsumeTimer) clearTimeout(navigationPressConsumeTimer);
+      navigationPressConsumeTimer = null;
+      consumedNavigationPress = null;
       invitePreviewQueue.dispose();
       if (resumeTimer) clearTimeout(resumeTimer);
       if (idleTimer) clearTimeout(idleTimer);
@@ -3900,7 +3967,7 @@
 </script>
 
 <svelte:head><title>Cubic — {currentUser.displayName}</title></svelte:head>
-<svelte:window onkeydown={(event) => { if (event.key === 'Escape') { serverMenuOpen = false; if (serverMembersOpen) closeServerMembers(); } }} />
+<svelte:window onkeydown={(event) => { if (event.key === 'Escape') { navigationMenu = null; serverMenuOpen = false; if (serverMembersOpen) closeServerMembers(); } }} />
 
 <main class="messenger-shell cubic-app-shell">
   <PrimaryRail servers={servers} selectedServerId={activeServer?.id ?? null} messagesSelected={tab !== 'servers'} serverBrowserSelected={tab === 'servers' && activeServer === null} loading={serversLoading} onmessages={showMessages} onbrowse={showServerBrowser} onserver={selectServer} oncreate={(event) => openServerDialog('server', event)} />
@@ -4059,7 +4126,7 @@
       {#if activeServer}
         <header class="conversation-list-header cubic-server-sidebar-head">
           <div class="cubic-server-heading"><span class="cubic-server-icon-shell" aria-hidden="true">{activeServer.name.slice(0, 1).toUpperCase()}{#if activeServer.iconUrl}{#key activeServer.iconUrl}<img src={activeServer.iconUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span><span><small>SERVER</small><h1>{activeServer.name}</h1></span></div>
-          <button class="icon-action" type="button" aria-label={`Options for ${activeServer.name}`} aria-expanded={serverMenuOpen} onclick={() => serverMenuOpen = !serverMenuOpen}><Icon name="more" size={19} /></button>
+          <button class="icon-action" type="button" aria-label={`Options for ${activeServer.name}`} aria-expanded={serverMenuOpen} onclick={() => { navigationMenu = null; serverMenuOpen = !serverMenuOpen; }}><Icon name="more" size={19} /></button>
         </header>
         {#if serverMenuOpen}
           <div class="cubic-server-options" aria-label="Server options">
@@ -4075,28 +4142,38 @@
         <div class="cubic-channel-sidebar-head">
           <strong>CHANNELS</strong>
           {#if activeServer.ownerUserId === currentUser.id}
-            <button type="button" aria-label="Create category" title="Create category" onclick={(event) => { categoryName = ''; editingCategoryId = null; openServerDialog('category', event); }}><Icon name="plus" size={18} /></button>
-            <button type="button" aria-label="Create text channel" title="Create text channel" onclick={(event) => { channelCategoryId = ''; openServerDialog('channel', event); }}><Icon name="plus" size={18} /></button>
-            <button type="button" aria-label="Create voice channel" title="Create voice channel" onclick={(event) => { voiceChannelName = ''; editingVoiceChannelId = null; channelCategoryId = ''; openServerDialog('voice-channel', event); }}><Icon name="headphones" size={18} /></button>
+            <button type="button" aria-label="Add channel or category" aria-expanded={navigationMenu === 'create'} title="Add channel or category" onclick={() => toggleNavigationMenu('create')}><Icon name="plus" size={18} /></button>
           {/if}
         </div>
+        {#if navigationMenu === 'create'}
+          <div class="cubic-navigation-actions" role="group" aria-label="Create in this server">
+            <button type="button" onclick={(event) => { navigationMenu = null; channelCategoryId = ''; openServerDialog('channel', event); }}>Create text channel</button>
+            <button type="button" onclick={(event) => { navigationMenu = null; voiceChannelName = ''; editingVoiceChannelId = null; channelCategoryId = ''; openServerDialog('voice-channel', event); }}>Create voice channel</button>
+            <button type="button" onclick={(event) => { navigationMenu = null; categoryName = ''; editingCategoryId = null; openServerDialog('category', event); }}>Create category</button>
+          </div>
+        {/if}
         <div class="cubic-channel-list" aria-label={`Channels in ${activeServer.name}`}>
           {#if channelsLoading}<p class="cubic-server-list-status">Loading channels…</p>{/if}
-          {#if !channelsLoading && serverChannels.length === 0 && serverVoiceChannels.length === 0}<p class="cubic-server-list-status">This server does not have channels yet.</p>{/if}
+          {#if !channelsLoading && serverChannels.length === 0 && serverVoiceChannels.length === 0}<p class="cubic-server-list-status">{activeServer.ownerUserId === currentUser.id ? 'No channels yet. Add a text or voice channel to get started.' : 'This server has no channels yet.'}</p>{/if}
           {#each channelsInScope(null) as channel, index (`${channel.kind}:${channel.id}`)}
             <div class="cubic-layout-channel-line">
               {#if channel.kind === 'text'}
-                <button class="cubic-channel-row" type="button" aria-label={`Text channel ${channel.name}`} aria-current={activeChannel?.id === channel.id ? 'page' : undefined} onclick={() => selectChannel(channel)}><span aria-hidden="true">#</span><span>{channel.name}</span></button>
+                <button class="cubic-channel-row" type="button" aria-label={`Text channel ${channel.name}`} aria-current={activeChannel?.id === channel.id ? 'page' : undefined} oncontextmenu={(event) => activeServer?.ownerUserId === currentUser.id && openNavigationContext(event, `channel:${channel.kind}:${channel.id}`)} ontouchstart={() => activeServer?.ownerUserId === currentUser.id && startNavigationPress(`channel:${channel.kind}:${channel.id}`)} ontouchend={endNavigationPress} ontouchcancel={endNavigationPress} ontouchmove={endNavigationPress} onclick={() => { if (!navigationPressWasConsumed(`channel:${channel.kind}:${channel.id}`)) void selectChannel(channel); }}><span aria-hidden="true">#</span><span>{channel.name}</span></button>
               {:else}
-                <button class="cubic-channel-row cubic-voice-channel-row" type="button" aria-label={`Join voice channel ${channel.name}`} aria-current={activeServerVoiceId === channel.id ? 'true' : undefined} onclick={() => joinServerVoice(channel)}><span aria-hidden="true">🔊</span><span>{channel.name}</span></button>
+                <button class="cubic-channel-row cubic-voice-channel-row" type="button" aria-label={`Join voice channel ${channel.name}`} aria-current={activeServerVoiceId === channel.id ? 'true' : undefined} oncontextmenu={(event) => activeServer?.ownerUserId === currentUser.id && openNavigationContext(event, `channel:${channel.kind}:${channel.id}`)} ontouchstart={() => activeServer?.ownerUserId === currentUser.id && startNavigationPress(`channel:${channel.kind}:${channel.id}`)} ontouchend={endNavigationPress} ontouchcancel={endNavigationPress} ontouchmove={endNavigationPress} onclick={() => { if (!navigationPressWasConsumed(`channel:${channel.kind}:${channel.id}`)) void joinServerVoice(channel); }}><Icon name="headphones" size={17} /><span>{channel.name}</span></button>
               {/if}
               {#if activeServer.ownerUserId === currentUser.id}
-                <button type="button" aria-label={`Move ${channel.name} up`} title="Move up" disabled={layoutBusy || index === 0} onclick={() => shiftChannel(channel, -1)}>↑</button>
-                <button type="button" aria-label={`Move ${channel.name} down`} title="Move down" disabled={layoutBusy || index === channelsInScope(null).length - 1} onclick={() => shiftChannel(channel, 1)}>↓</button>
-                {#if channel.kind === 'voice'}<button type="button" aria-label={`Rename voice channel ${channel.name}`} onclick={(event) => { editingVoiceChannelId = channel.id; voiceChannelName = channel.name; openServerDialog('rename-voice-channel', event); }}>Edit</button>{/if}
-                <button type="button" aria-label={`Move ${channel.name} to category`} title="Move to category" disabled={layoutBusy} onclick={(event) => { movingChannelId = channel.id; movingChannelKind = channel.kind; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}>⋯</button>
+                <button class="cubic-navigation-more" type="button" aria-label={`Actions for ${channel.kind} channel ${channel.name}`} aria-expanded={navigationMenu === `channel:${channel.kind}:${channel.id}`} title="Channel actions" onclick={() => toggleNavigationMenu(`channel:${channel.kind}:${channel.id}`)}><Icon name="more" size={17} /></button>
               {/if}
             </div>
+            {#if navigationMenu === `channel:${channel.kind}:${channel.id}` && activeServer.ownerUserId === currentUser.id}
+              <div class="cubic-navigation-actions" role="group" aria-label={`Actions for ${channel.name}`}>
+                <button type="button" disabled={layoutBusy || index === 0} onclick={() => { navigationMenu = null; void shiftChannel(channel, -1); }}>Move {channel.name} up</button>
+                <button type="button" disabled={layoutBusy || index === channelsInScope(null).length - 1} onclick={() => { navigationMenu = null; void shiftChannel(channel, 1); }}>Move {channel.name} down</button>
+                {#if channel.kind === 'voice'}<button type="button" onclick={(event) => { navigationMenu = null; editingVoiceChannelId = channel.id; voiceChannelName = channel.name; openServerDialog('rename-voice-channel', event); }}>Rename voice channel {channel.name}</button>{/if}
+                <button type="button" disabled={layoutBusy} onclick={(event) => { navigationMenu = null; movingChannelId = channel.id; movingChannelKind = channel.kind; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}>Move {channel.name} to category</button>
+              </div>
+            {/if}
             {#if channel.kind === 'voice' && serverVoicePresence[channel.id]?.length}
               <ul class="cubic-voice-occupants" aria-label={`People in ${channel.name}`}>
                 {#each serverVoicePresence[channel.id] as occupant (occupant.userId)}<li>{occupant.displayName}</li>{/each}
@@ -4107,26 +4184,36 @@
             <section class="cubic-layout-category" aria-label={`Category ${category.name}`}>
               <div class="cubic-layout-category-head"><strong>{category.name}</strong>
                 {#if activeServer.ownerUserId === currentUser.id}
-                  <button type="button" aria-label={`Move category ${category.name} up`} disabled={layoutBusy || categoryIndex === 0} onclick={() => shiftCategory(category.id, -1)}>↑</button>
-                  <button type="button" aria-label={`Move category ${category.name} down`} disabled={layoutBusy || categoryIndex === serverCategories.length - 1} onclick={() => shiftCategory(category.id, 1)}>↓</button>
-                  <button type="button" aria-label={`Rename category ${category.name}`} onclick={(event) => { editingCategoryId = category.id; categoryName = category.name; openServerDialog('rename-category', event); }}>Edit</button>
-                  <button type="button" aria-label={`Delete category ${category.name}`} disabled={layoutBusy} onclick={() => deleteSelectedCategory(category.id)}>×</button>
+                  <button class="cubic-navigation-more" type="button" aria-label={`Actions for category ${category.name}`} aria-expanded={navigationMenu === `category:${category.id}`} title="Category actions" onclick={() => toggleNavigationMenu(`category:${category.id}`)}><Icon name="more" size={17} /></button>
                 {/if}
               </div>
+              {#if navigationMenu === `category:${category.id}` && activeServer.ownerUserId === currentUser.id}
+                <div class="cubic-navigation-actions" role="group" aria-label={`Actions for category ${category.name}`}>
+                  <button type="button" disabled={layoutBusy || categoryIndex === 0} onclick={() => { navigationMenu = null; void shiftCategory(category.id, -1); }}>Move category {category.name} up</button>
+                  <button type="button" disabled={layoutBusy || categoryIndex === serverCategories.length - 1} onclick={() => { navigationMenu = null; void shiftCategory(category.id, 1); }}>Move category {category.name} down</button>
+                  <button type="button" onclick={(event) => { navigationMenu = null; editingCategoryId = category.id; categoryName = category.name; openServerDialog('rename-category', event); }}>Rename category {category.name}</button>
+                  <button type="button" class="cubic-navigation-danger" disabled={layoutBusy} onclick={() => { navigationMenu = null; void deleteSelectedCategory(category.id); }}>Delete category {category.name}</button>
+                </div>
+              {/if}
               {#each channelsInScope(category.id) as channel, index (`${channel.kind}:${channel.id}`)}
                 <div class="cubic-layout-channel-line">
                   {#if channel.kind === 'text'}
-                    <button class="cubic-channel-row" type="button" aria-label={`Text channel ${channel.name}`} aria-current={activeChannel?.id === channel.id ? 'page' : undefined} onclick={() => selectChannel(channel)}><span aria-hidden="true">#</span><span>{channel.name}</span></button>
+                    <button class="cubic-channel-row" type="button" aria-label={`Text channel ${channel.name}`} aria-current={activeChannel?.id === channel.id ? 'page' : undefined} oncontextmenu={(event) => activeServer?.ownerUserId === currentUser.id && openNavigationContext(event, `channel:${channel.kind}:${channel.id}`)} ontouchstart={() => activeServer?.ownerUserId === currentUser.id && startNavigationPress(`channel:${channel.kind}:${channel.id}`)} ontouchend={endNavigationPress} ontouchcancel={endNavigationPress} ontouchmove={endNavigationPress} onclick={() => { if (!navigationPressWasConsumed(`channel:${channel.kind}:${channel.id}`)) void selectChannel(channel); }}><span aria-hidden="true">#</span><span>{channel.name}</span></button>
                   {:else}
-                    <button class="cubic-channel-row cubic-voice-channel-row" type="button" aria-label={`Join voice channel ${channel.name}`} aria-current={activeServerVoiceId === channel.id ? 'true' : undefined} onclick={() => joinServerVoice(channel)}><span aria-hidden="true">🔊</span><span>{channel.name}</span></button>
+                    <button class="cubic-channel-row cubic-voice-channel-row" type="button" aria-label={`Join voice channel ${channel.name}`} aria-current={activeServerVoiceId === channel.id ? 'true' : undefined} oncontextmenu={(event) => activeServer?.ownerUserId === currentUser.id && openNavigationContext(event, `channel:${channel.kind}:${channel.id}`)} ontouchstart={() => activeServer?.ownerUserId === currentUser.id && startNavigationPress(`channel:${channel.kind}:${channel.id}`)} ontouchend={endNavigationPress} ontouchcancel={endNavigationPress} ontouchmove={endNavigationPress} onclick={() => { if (!navigationPressWasConsumed(`channel:${channel.kind}:${channel.id}`)) void joinServerVoice(channel); }}><Icon name="headphones" size={17} /><span>{channel.name}</span></button>
                   {/if}
                   {#if activeServer.ownerUserId === currentUser.id}
-                    <button type="button" aria-label={`Move ${channel.name} up`} disabled={layoutBusy || index === 0} onclick={() => shiftChannel(channel, -1)}>↑</button>
-                    <button type="button" aria-label={`Move ${channel.name} down`} disabled={layoutBusy || index === channelsInScope(category.id).length - 1} onclick={() => shiftChannel(channel, 1)}>↓</button>
-                    {#if channel.kind === 'voice'}<button type="button" aria-label={`Rename voice channel ${channel.name}`} onclick={(event) => { editingVoiceChannelId = channel.id; voiceChannelName = channel.name; openServerDialog('rename-voice-channel', event); }}>Edit</button>{/if}
-                    <button type="button" aria-label={`Move ${channel.name} to category`} disabled={layoutBusy} onclick={(event) => { movingChannelId = channel.id; movingChannelKind = channel.kind; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}>⋯</button>
+                    <button class="cubic-navigation-more" type="button" aria-label={`Actions for ${channel.kind} channel ${channel.name}`} aria-expanded={navigationMenu === `channel:${channel.kind}:${channel.id}`} title="Channel actions" onclick={() => toggleNavigationMenu(`channel:${channel.kind}:${channel.id}`)}><Icon name="more" size={17} /></button>
                   {/if}
                 </div>
+                {#if navigationMenu === `channel:${channel.kind}:${channel.id}` && activeServer.ownerUserId === currentUser.id}
+                  <div class="cubic-navigation-actions" role="group" aria-label={`Actions for ${channel.name}`}>
+                    <button type="button" disabled={layoutBusy || index === 0} onclick={() => { navigationMenu = null; void shiftChannel(channel, -1); }}>Move {channel.name} up</button>
+                    <button type="button" disabled={layoutBusy || index === channelsInScope(category.id).length - 1} onclick={() => { navigationMenu = null; void shiftChannel(channel, 1); }}>Move {channel.name} down</button>
+                    {#if channel.kind === 'voice'}<button type="button" onclick={(event) => { navigationMenu = null; editingVoiceChannelId = channel.id; voiceChannelName = channel.name; openServerDialog('rename-voice-channel', event); }}>Rename voice channel {channel.name}</button>{/if}
+                    <button type="button" disabled={layoutBusy} onclick={(event) => { navigationMenu = null; movingChannelId = channel.id; movingChannelKind = channel.kind; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}>Move {channel.name} to category</button>
+                  </div>
+                {/if}
                 {#if channel.kind === 'voice' && serverVoicePresence[channel.id]?.length}
                   <ul class="cubic-voice-occupants" aria-label={`People in ${channel.name}`}>
                     {#each serverVoicePresence[channel.id] as occupant (occupant.userId)}<li>{occupant.displayName}</li>{/each}

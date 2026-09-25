@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { chooseServerCreate, isCompactNavigation } from './navigation';
 
 test.beforeEach(async ({ page, context, request }) => {
   await request.post('http://127.0.0.1:3198/__test/reset');
@@ -42,24 +43,24 @@ test('primary rail, user bar, and contextual navigation retain existing actions'
   await server.click();
   await expect(server).toHaveAttribute('aria-current', 'page');
 
-  await page.getByRole('button', { name: 'Create text channel' }).click();
+  await chooseServerCreate(page, 'Create text channel');
   const channel = page.getByRole('dialog', { name: 'Create text channel' });
   await channel.getByRole('textbox', { name: 'Channel name' }).fill('general');
   await channel.getByRole('button', { name: 'Create text channel' }).click();
   await expect(page.locator('.chat-heading')).toContainText('general');
-  if (testInfo.project.name.includes('phone')) {
+  if (isCompactNavigation(page)) {
     await expect(page.getByRole('button', { name: 'Back to server' })).toBeVisible();
   } else {
     await expect(page.getByRole('button', { name: 'Back to server' })).toBeHidden();
   }
-  if (testInfo.project.name.includes('phone')) {
+  if (isCompactNavigation(page)) {
     await page.getByRole('button', { name: 'Back to server' }).click();
     await expect(page.locator('.cubic-server-sidebar-head')).toBeVisible();
   }
   await messages.click();
   await page.locator('.conversation-row').filter({ hasText: 'Fixture DM' }).click();
   await expect(page.locator('.chat-heading')).toContainText('Fixture DM');
-  if (testInfo.project.name.includes('phone')) {
+  if (isCompactNavigation(page)) {
     await expect(page.getByRole('button', { name: 'Back to conversations' })).toBeVisible();
   } else {
     await expect(page.getByRole('button', { name: 'Back to conversations' })).toBeHidden();

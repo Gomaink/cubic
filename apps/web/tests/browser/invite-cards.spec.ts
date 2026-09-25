@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { openMessages, openServers } from './navigation';
+import { chooseServerCreate, openMessages, openServers } from './navigation';
 
 async function createLink(page: Page) {
   await openServers(page);
@@ -104,7 +104,7 @@ test('group gets only the first trusted card; server text remains plain and mobi
   await expect(groupMessage.locator('.discord-message-body')).toContainText('No invite after edit');
   await openServers(page);
   await page.locator('.cubic-server-row').filter({ hasText: 'Card destination' }).click();
-  await page.getByRole('button', { name: 'Create text channel' }).click();
+  await chooseServerCreate(page, 'Create text channel');
   const channelDialog = page.getByRole('dialog', { name: 'Create text channel' });
   await channelDialog.getByRole('textbox', { name: 'Channel name' }).fill('general');
   await channelDialog.getByRole('button', { name: 'Create text channel' }).click();
