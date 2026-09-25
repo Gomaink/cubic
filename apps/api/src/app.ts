@@ -14,6 +14,7 @@ import { groupRoutes } from './routes/groups.js';
 import { serverRoutes } from './routes/servers.js';
 import { serverInviteLinkRoutes } from './routes/server-invite-links.js';
 import { voiceRoutes } from './routes/voice.js';
+import { serverVoiceRoutes, serverVoiceWebhookRoutes } from './routes/server-voice.js';
 import { callHistoryRoutes } from './routes/call-history.js';
 import { attachmentRoutes } from './routes/attachments.js';
 import { createRealtimeEvents, type RealtimeEvents } from './realtime/events.js';
@@ -35,6 +36,7 @@ import {
 import { ATTACHMENT_DEFAULTS } from './config/env.js';
 import type { SessionService } from './security/session.js';
 import type { LiveKitAuthorizationService } from './voice/authorization.js';
+import type { ServerVoiceService } from './server-voice/service.js';
 import { browserCorsOptions, createBrowserMutationProtection } from './security/browser-request.js';
 import { securityRoutes } from './routes/security.js';
 import { ServerIconStore } from './server-icons/storage.js';
@@ -70,6 +72,7 @@ export interface CreateAppOptions {
   attachmentReconciliationScanBatchSize?: number;
   attachmentReconciliationMissingBatchSize?: number;
   livekitAuthorization: LiveKitAuthorizationService;
+  serverVoice?: ServerVoiceService;
   livekitPublicUrl: string;
   logger?: boolean;
   realtimeEvents?: RealtimeEvents;
@@ -179,7 +182,8 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     cookieName: options.cookieName,
     sessionService: options.sessionService,
     realtimeEvents,
-    iconStore
+    iconStore,
+    ...(options.serverVoice ? { serverVoice: options.serverVoice } : {})
   });
 
   const iconReconciler = new ServerIconReconciler({ database: options.database, store: iconStore, logger: app.log });
@@ -298,6 +302,18 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     sessionService: options.sessionService,
     livekitAuthorization: options.livekitAuthorization
   });
+
+  if (options.serverVoice) {
+    await app.register(serverVoiceRoutes, {
+      prefix: '/api/v1/server-voice', cookieName: options.cookieName,
+      sessionService: options.sessionService, service: options.serverVoice
+    });
+    await app.register(serverVoiceWebhookRoutes, {
+      prefix: '/api/v1/server-voice', service: options.serverVoice
+    });
+    app.addHook('onReady', async () => options.serverVoice?.start());
+    app.addHook('onClose', async () => options.serverVoice?.stop());
+  }
 
   app.addHook('onReady', async () => options.livekitAuthorization.start());
   app.addHook('onClose', async () => options.livekitAuthorization.stop());

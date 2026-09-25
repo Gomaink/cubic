@@ -264,6 +264,16 @@ and reconciliation removes it if it appears after Cubic authorization has
 changed. Eliminating that residual admission window requires additional
 LiveKit admission/custom-server integration and is outside this slice.
 
+Persistent server voice is a separate audio-only authorization domain. The API
+derives the room from a canonical voice-channel row, locks the server and
+revalidates current membership/session before issuing a 60-second room-scoped
+microphone capability. A pre-issued token can still enter during its remaining
+TTL after removal; immediate participant eviction plus 30-second reconciliation
+bound established access when LiveKit administration is available. Signed
+LiveKit webhook input and periodic room inspection update only transient
+occupancy; Socket.IO presence is restricted to current server members. Presence
+is not authorization, and no call invitation or call-history state is reused.
+
 If the LiveKit administrative control plane is known to be unavailable, Cubic
 denies new media tickets with a generic temporary-unavailability response.
 Established media may continue until bounded in-memory retries or reconciliation

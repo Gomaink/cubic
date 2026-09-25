@@ -14,6 +14,7 @@ import {
   type SessionRepository
 } from '../security/session.js';
 import { createRealtimeEvents, type RealtimeEvents } from './events.js';
+import type { ServerVoiceService } from '../server-voice/service.js';
 import {
   attachRealtime,
   isSameOriginRequest,
@@ -259,6 +260,8 @@ class RealtimeDatabase {
   readonly selectResults: any[][] = [];
   readonly conversationMemberships = new Map<string, Set<string>>();
   readonly serverChannelMemberships = new Map<string, Set<string>>();
+  readonly voiceServerMemberships = new Map<string, Set<string>>();
+  voiceMembershipReadGate: ((rows: any[]) => Promise<void>) | null = null;
   readonly directPairs = new Map<string, { lowId: string; highId: string }>();
   readonly blockedConversations = new Set<string>();
   autoJoinReadGate: ((rows: any[]) => Promise<void>) | null = null;
@@ -319,6 +322,11 @@ class RealtimeDatabase {
     },
     query: async (sql: string, params: any[] = []) => {
       const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (normalized === 'select 1 from server_members where server_id = $1 and user_id = $2') {
+        const rows = this.voiceServerMemberships.get(params[0])?.has(params[1]) ? [{ '?column?': 1 }] : [];
+        await this.voiceMembershipReadGate?.(rows);
+        return { rows, rowCount: rows.length };
+      }
       if (normalized === 'select conversation_id from conversation_members where user_id = $1') {
         if (this.failPresenceReads) throw new Error('temporary database failure');
         const rows = [...this.conversationMemberships]
@@ -390,6 +398,7 @@ async function startRealtimeHarness(options: {
   idleTimeoutMs?: number;
   revalidateIntervalMs?: number;
   pingIntervalMs?: number;
+  serverVoice?: ServerVoiceService;
 } = {}): Promise<RealtimeHarness> {
   const app = Fastify({ logger: false });
   await app.register(cookie);
@@ -428,7 +437,8 @@ async function startRealtimeHarness(options: {
       : { pingIntervalMs: options.pingIntervalMs, pingTimeoutMs: 50 }),
     trustedProxyCidrs: ['127.0.0.1/32', '::1/128'],
     browserOrigin: url,
-    events
+    events,
+    ...(options.serverVoice ? { serverVoice: options.serverVoice } : {})
   });
   return { app, database, events, repository, realtime, url };
 }
@@ -475,6 +485,14 @@ function serverSocketIsInRoom(
   };
   return [...(registry.socketsBySession.get(sessionId)?.values() ?? [])]
     .some((socket) => socket.rooms.has(`conversation:${roomId}`));
+}
+
+function serverSocketHasRoom(harness: RealtimeHarness, sessionId: string, room: string): boolean {
+  const registry = harness.realtime.registry as unknown as {
+    socketsBySession: Map<string, Map<string, { rooms: Set<string> }>>;
+  };
+  return [...(registry.socketsBySession.get(sessionId)?.values() ?? [])]
+    .some((socket) => socket.rooms.has(room));
 }
 
 function socketAck<T>(socket: ClientSocket, event: string, payload: unknown): Promise<T> {
@@ -1198,6 +1216,48 @@ test('a removal invalidates an in-flight explicit join without evicting another 
   assert.equal(serverSocketIsInRoom(harness, removedSession.session.id, conversationId), true);
   removed.close();
   other.close();
+});
+
+test('server voice presence subscription is member-scoped and removal cancels in-flight admission', async (context) => {
+  const serverId = randomUUID();
+  const channelId = randomUUID();
+  const memberId = randomUUID();
+  const outsiderId = randomUUID();
+  const voice = { snapshot: () => [{ serverId, channelId, occupants: [] }] } as unknown as ServerVoiceService;
+  const harness = await startRealtimeHarness({ serverVoice: voice });
+  context.after(() => closeRealtimeHarness(harness));
+  const memberSession = harness.repository.add('voice-member', memberId);
+  harness.repository.add('voice-outsider', outsiderId);
+  harness.database.voiceServerMemberships.set(serverId, new Set([memberId]));
+  const member = await connectClient(harness, 'voice-member');
+  const outsider = await connectClient(harness, 'voice-outsider');
+  const room = `server-voice-presence:${serverId}`;
+
+  assert.deepEqual(await socketAck(outsider, 'server:voice:subscribe', { serverId }), { ok: false });
+  assert.equal(serverSocketHasRoom(harness, memberSession.session.id, room), false);
+  assert.deepEqual(await socketAck(member, 'server:voice:subscribe', { serverId }), {
+    ok: true, presence: [{ serverId, channelId, occupants: [] }]
+  });
+  assert.equal(serverSocketHasRoom(harness, memberSession.session.id, room), true);
+  const published = waitForEvent(member, 'server:voice:presence');
+  harness.events.emitServerVoicePresence({ serverId, channelId, occupants: [{ userId: memberId, displayName: 'Member' }] });
+  await published;
+  const removed = waitForEvent(member, 'server:removed');
+  harness.database.voiceServerMemberships.get(serverId)!.delete(memberId);
+  harness.events.emitServerMemberRemoved({ serverId, userId: memberId });
+  await removed;
+  assert.equal(serverSocketHasRoom(harness, memberSession.session.id, room), false);
+
+  harness.database.voiceServerMemberships.get(serverId)!.add(memberId);
+  const gate = readBarrier();
+  harness.database.voiceMembershipReadGate = gate.gate;
+  const pending = socketAck(member, 'server:voice:subscribe', { serverId });
+  await gate.entered;
+  harness.database.voiceServerMemberships.get(serverId)!.delete(memberId);
+  harness.events.emitServerMemberRemoved({ serverId, userId: memberId });
+  gate.release();
+  assert.deepEqual(await pending, { ok: false });
+  assert.equal(serverSocketHasRoom(harness, memberSession.session.id, room), false);
 });
 
 test('a removal invalidates an in-flight initial auto-join', async (context) => {

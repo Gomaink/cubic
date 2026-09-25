@@ -234,6 +234,23 @@ export const serverTextChannels = pgTable(
   ]
 );
 
+export const serverVoiceChannels = pgTable(
+  'server_voice_channels',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
+    categoryId: uuid('category_id').references(() => serverChannelCategories.id, { onDelete: 'set null' }),
+    name: varchar('name', { length: 96 }).notNull(),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
+  },
+  (table) => [
+    index('server_voice_channels_layout_idx').on(table.serverId, table.categoryId, table.position, table.createdAt, table.id),
+    check('server_voice_channels_position_ck', sql`${table.position} >= 0`)
+  ]
+);
+
 export const conversationMembers = pgTable(
   'conversation_members',
   {

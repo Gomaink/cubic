@@ -22,7 +22,7 @@ function categoryRecord(row: {
   };
 }
 
-async function withOwnerLock<T>(
+export async function withOwnerLock<T>(
   database: Database, serverId: string, actorId: string,
   action: (client: Client) => Promise<T | Denied>
 ): Promise<T | Denied> {
@@ -65,13 +65,19 @@ async function categories(client: Client, serverId: string) {
   return result.rows;
 }
 
-async function channels(client: Client, serverId: string, categoryId: string | null) {
-  const result = await client.query<{ id: string }>(
-    `select id from server_text_channels
-      where server_id = $1 and category_id is not distinct from $2::uuid
-      order by position, created_at, id`, [serverId, categoryId]
+export type LayoutChannel = { kind: 'text' | 'voice'; id: string };
+
+async function channels(client: Client, serverId: string, categoryId: string | null): Promise<LayoutChannel[]> {
+  const result = await client.query<LayoutChannel>(
+    `select kind, id from (
+       select 'text'::text as kind, id, position, created_at from server_text_channels
+        where server_id = $1 and category_id is not distinct from $2::uuid
+       union all
+       select 'voice'::text as kind, id, position, created_at from server_voice_channels
+        where server_id = $1 and category_id is not distinct from $2::uuid
+     ) layout order by position, created_at, id, kind`, [serverId, categoryId]
   );
-  return result.rows.map((row) => row.id);
+  return result.rows;
 }
 
 async function compactCategories(client: Client, ids: string[]) {
@@ -83,13 +89,21 @@ async function compactCategories(client: Client, ids: string[]) {
   }
 }
 
-async function compactChannels(client: Client, ids: string[], categoryId: string | null) {
+async function compactChannels(client: Client, ids: LayoutChannel[], categoryId: string | null) {
   for (let position = 0; position < ids.length; position += 1) {
+    const channel = ids[position]!;
     await client.query(
-      `update server_text_channels set category_id = $2, position = $3, updated_at = now() where id = $1`,
-      [ids[position], categoryId, position]
+      `update ${channel.kind === 'text' ? 'server_text_channels' : 'server_voice_channels'}
+          set category_id = $2, position = $3, updated_at = now() where id = $1`,
+      [channel.id, categoryId, position]
     );
   }
+}
+
+export async function compactLayoutScope(client: Client, serverId: string, categoryId: string | null): Promise<number> {
+  const ordered = await channels(client, serverId, categoryId);
+  await compactChannels(client, ordered, categoryId);
+  return ordered.length;
 }
 
 export async function listMemberCategories(database: Database, serverId: string, actorId: string): Promise<CategoryRecord[] | Denied> {
@@ -131,7 +145,10 @@ export async function deleteCategory(database: Database, serverId: string, actor
     const ordered = await categories(client, serverId);
     if (!ordered.some((row) => row.id === categoryId)) return { denied: 'not_found' as const };
     const malformed = await client.query(
-      `select 1 from server_text_channels where category_id = $1 and server_id <> $2 limit 1`,
+      `select 1 from (
+         select server_id from server_text_channels where category_id = $1
+         union all select server_id from server_voice_channels where category_id = $1
+       ) assigned where server_id <> $2 limit 1`,
       [categoryId, serverId]
     );
     if (malformed.rowCount) return { denied: 'not_found' as const };
@@ -157,13 +174,14 @@ export async function moveCategory(database: Database, serverId: string, actorId
   });
 }
 
-export async function moveChannel(
+export async function moveTypedChannel(
   database: Database, serverId: string, actorId: string,
-  channelId: string, targetCategoryId: string | null, targetIndex: number
+  kind: 'text' | 'voice', channelId: string, targetCategoryId: string | null, targetIndex: number
 ) {
   return withOwnerLock(database, serverId, actorId, async (client) => {
     const channel = await client.query<{ category_id: string | null }>(
-      `select category_id from server_text_channels where id = $1 and server_id = $2`, [channelId, serverId]
+      `select category_id from ${kind === 'text' ? 'server_text_channels' : 'server_voice_channels'}
+        where id = $1 and server_id = $2`, [channelId, serverId]
     );
     if (!channel.rows[0]) return { denied: 'not_found' as const };
     const sourceCategoryId = channel.rows[0].category_id;
@@ -175,13 +193,20 @@ export async function moveChannel(
       const target = await client.query(`select 1 from server_channel_categories where id = $1 and server_id = $2`, [targetCategoryId, serverId]);
       if (!target.rowCount) return { denied: 'not_found' as const };
     }
-    const sourceIds = (await channels(client, serverId, sourceCategoryId)).filter((id) => id !== channelId);
+    const sourceIds = (await channels(client, serverId, sourceCategoryId)).filter((item) => item.kind !== kind || item.id !== channelId);
     const sameScope = sourceCategoryId === targetCategoryId;
     const targetIds = sameScope ? sourceIds : await channels(client, serverId, targetCategoryId);
     if (targetIndex < 0 || targetIndex > targetIds.length) return { denied: 'invalid_index' as const };
-    targetIds.splice(targetIndex, 0, channelId);
+    targetIds.splice(targetIndex, 0, { kind, id: channelId });
     if (!sameScope) await compactChannels(client, sourceIds, sourceCategoryId);
     await compactChannels(client, targetIds, targetCategoryId);
     return { moved: true };
   });
+}
+
+export function moveChannel(
+  database: Database, serverId: string, actorId: string,
+  channelId: string, targetCategoryId: string | null, targetIndex: number
+) {
+  return moveTypedChannel(database, serverId, actorId, 'text', channelId, targetCategoryId, targetIndex);
 }

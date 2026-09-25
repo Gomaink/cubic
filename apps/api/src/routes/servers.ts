@@ -5,7 +5,8 @@ import { createRequireAuth } from '../auth/guard.js';
 import type { SessionService } from '../security/session.js';
 import { createOwnedServer, listMemberServers, resolveMemberServer } from '../servers/store.js';
 import { createOwnedTextChannel, listMemberTextChannels } from '../servers/channels.js';
-import { createCategory, deleteCategory, listMemberCategories, moveCategory, moveChannel, renameCategory } from '../servers/layout.js';
+import { createCategory, deleteCategory, listMemberCategories, moveCategory, moveTypedChannel, renameCategory } from '../servers/layout.js';
+import { createVoiceChannel, listMemberVoiceChannels, renameVoiceChannel } from '../servers/voice-channels.js';
 import {
   acceptServerInvite, cancelServerInvite, createServerInvite, leaveServer, removeServerMember,
   listOwnedServerInvites, listReceivedServerInvites, listServerMembers
@@ -14,6 +15,7 @@ import type { RealtimeEvents } from '../realtime/events.js';
 import { createServerInviteLink, listOwnedServerInviteLinks, revokeServerInviteLink } from '../servers/invite-links.js';
 import { ServerIconStore, SERVER_ICON_MAX_BYTES, InvalidServerIconError } from '../server-icons/storage.js';
 import { checkIconOwner, replaceServerIcon, removeServerIcon } from '../server-icons/service.js';
+import type { ServerVoiceService } from '../server-voice/service.js';
 
 export interface ServerRoutesOptions {
   database: Database;
@@ -21,6 +23,7 @@ export interface ServerRoutesOptions {
   sessionService: SessionService;
   realtimeEvents?: RealtimeEvents;
   iconStore?: ServerIconStore;
+  serverVoice?: ServerVoiceService;
 }
 
 const createServerSchema = z.object({ name: z.string().trim().min(1).max(96) });
@@ -29,6 +32,7 @@ const createChannelSchema = z.object({ name: z.string().trim().min(1).max(96), c
 const categoryNameSchema = z.object({ name: z.string().trim().min(1).max(96) });
 const categoryParamsSchema = serverParamsSchema.extend({ categoryId: z.string().uuid() });
 const channelParamsSchema = serverParamsSchema.extend({ channelId: z.string().uuid() });
+const typedChannelParamsSchema = channelParamsSchema.extend({ kind: z.enum(['text', 'voice']) });
 const moveCategorySchema = z.object({ targetIndex: z.number().int().nonnegative() });
 const moveChannelSchema = z.object({ targetCategoryId: z.string().uuid().nullable(), targetIndex: z.number().int().nonnegative() });
 const inviteParamsSchema = z.object({ inviteId: z.string().uuid() });
@@ -154,6 +158,37 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     return reply.code(201).send({ channel: result.channel });
   });
 
+  app.get('/:serverId/voice-channels', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = serverParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid server.' });
+    const server = await resolveMemberServer(options.database, params.data.serverId, request.auth.user.id);
+    if (!server) return reply.code(404).send({ error: 'Server not found.' });
+    return { channels: await listMemberVoiceChannels(options.database, server.id, request.auth.user.id) };
+  });
+
+  app.post('/:serverId/voice-channels', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = serverParamsSchema.safeParse(request.params);
+    const body = createChannelSchema.safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid voice channel.' });
+    const result = await createVoiceChannel(options.database, params.data.serverId, request.auth.user.id,
+      body.data.name, body.data.categoryId ?? null);
+    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: 'Voice channel creation denied.' });
+    return reply.code(201).send(result);
+  });
+
+  app.patch('/:serverId/voice-channels/:channelId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = channelParamsSchema.safeParse(request.params);
+    const body = categoryNameSchema.safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid voice channel.' });
+    const result = await renameVoiceChannel(options.database, params.data.serverId, request.auth.user.id,
+      params.data.channelId, body.data.name);
+    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: 'Voice channel rename denied.' });
+    return result;
+  });
+
   app.get('/:serverId/categories', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
     const params = serverParamsSchema.safeParse(request.params);
@@ -207,7 +242,18 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     const params = channelParamsSchema.safeParse(request.params);
     const body = moveChannelSchema.safeParse(request.body);
     if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid channel move.' });
-    const result = await moveChannel(options.database, params.data.serverId, request.auth.user.id, params.data.channelId, body.data.targetCategoryId, body.data.targetIndex);
+    const result = await moveTypedChannel(options.database, params.data.serverId, request.auth.user.id, 'text', params.data.channelId, body.data.targetCategoryId, body.data.targetIndex);
+    if ('denied' in result) return reply.code(result.denied === 'invalid_index' ? 400 : result.denied === 'not_owner' ? 403 : 404).send({ error: 'Channel move not allowed.' });
+    return result;
+  });
+
+  app.post('/:serverId/layout/:kind/:channelId/move', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = typedChannelParamsSchema.safeParse(request.params);
+    const body = moveChannelSchema.safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid channel move.' });
+    const result = await moveTypedChannel(options.database, params.data.serverId, request.auth.user.id,
+      params.data.kind, params.data.channelId, body.data.targetCategoryId, body.data.targetIndex);
     if ('denied' in result) return reply.code(result.denied === 'invalid_index' ? 400 : result.denied === 'not_owner' ? 403 : 404).send({ error: 'Channel move not allowed.' });
     return result;
   });
@@ -276,6 +322,11 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
       return reply.code(404).send({ error: 'Server member not found.' });
     }
     revokeChannelRooms(result.value, params.data.userId);
+    options.realtimeEvents?.emitServerMemberRemoved({ serverId: params.data.serverId, userId: params.data.userId });
+    if (options.serverVoice) {
+      try { await options.serverVoice.revokeMember(params.data.serverId, params.data.userId); }
+      catch { return reply.code(503).send({ error: 'Membership removed; voice revocation is retrying.' }); }
+    }
     return reply.code(204).send();
   });
 
@@ -322,6 +373,11 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     const result = await leaveServer(options.database, params.data.serverId, actorId);
     if ('denied' in result) return reply.code(result.denied === 'owner' ? 403 : 404).send({ error: result.denied === 'owner' ? 'The server owner cannot leave.' : 'Server not found.' });
     revokeChannelRooms(result.value, actorId);
+    options.realtimeEvents?.emitServerMemberRemoved({ serverId: params.data.serverId, userId: actorId });
+    if (options.serverVoice) {
+      try { await options.serverVoice.revokeMember(params.data.serverId, actorId); }
+      catch { return reply.code(503).send({ error: 'Membership removed; voice revocation is retrying.' }); }
+    }
     return reply.code(204).send();
   });
 };

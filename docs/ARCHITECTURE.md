@@ -162,3 +162,17 @@ commit. A bounded startup/periodic sweep removes icon files unreferenced by
 `servers.icon_key` and stale temp files after a one-hour grace period, with a
 fresh DB reference check before canonical deletion. This does not use the
 attachment deletion queue or add a realtime protocol.
+
+Alpha 10 Slice 1 adds dedicated `server_voice_channels` without changing text
+channels or DM/group calls. Text and voice channels share a visible position
+sequence within each category; owner mutations compact both tables in one
+server-row-locked transaction. A voice channel is persistent, directly joinable,
+and audio-only: it has no ringing, call-history row, camera, or screen share.
+The API derives its LiveKit room from the canonical channel ID and issues a
+60-second, microphone-only room capability after server-membership and session
+revalidation under the server lock. Member removal revokes text rooms and evicts
+known voice participants; periodic LiveKit reconciliation repairs missed events
+and evicts sessions that have lost authorization. Signed LiveKit webhooks feed a
+bounded in-memory occupancy view, delivered only to authenticated server members
+over a focused Socket.IO subscription. Occupancy is not persisted; separate
+client instances may each connect, while one client keeps one voice context.
