@@ -36,9 +36,12 @@ test('own profile edits display name and preserves member role and presence', as
   const panel = page.getByRole('complementary', { name: 'Group members' });
   await expect(panel.getByRole('button', { name: 'Updated Tester, owner, online' })).toBeVisible();
   if ((page.viewportSize()?.width ?? 1000) <= 680) {
+    await panel.getByRole('button', { name: 'Close member panel' }).click();
+    await page.getByRole('button', { name: 'Back to conversations' }).click();
     await page.getByRole('button', { name: 'Open your profile' }).click();
     await expect(profile.getByRole('heading', { name: 'Updated Tester' })).toBeVisible();
     await profile.getByRole('button', { name: 'Close profile' }).click();
+    await page.locator('.conversation-row').filter({ hasText: 'Fixture group' }).click();
     await expect(page.locator('.messages-wrap')).toBeVisible();
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

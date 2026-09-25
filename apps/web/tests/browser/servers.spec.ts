@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openMessages, openPeople, openServers } from './navigation';
 
 async function createServer(page: import('@playwright/test').Page, name: string) {
   await page.getByRole('button', { name: 'Create server' }).first().click();
@@ -26,14 +27,14 @@ test('creates and selects an empty server while existing DM and group chats rema
   await expect(page.locator('.conversation-row').filter({ hasText: 'Fixture DM' })).toBeVisible();
   await expect(page.locator('.conversation-row').filter({ hasText: 'Fixture group' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await expect(page.getByText('No servers yet. Create one to get started.')).toBeVisible();
   await createServer(page, 'Aurora');
   await expect(page.locator('.cubic-server-sidebar-head')).toContainText('Aurora');
   await expect(page.locator('.cubic-channel-list')).toContainText('This server does not have channels yet.');
   if ((page.viewportSize()?.width ?? 1000) > 680) await expect(page.getByRole('button', { name: 'Open server Aurora' })).toHaveAttribute('aria-current', 'page');
 
-  await page.getByRole('button', { name: 'Chats', exact: true }).click();
+  await openMessages(page);
   await page.locator('.conversation-row').filter({ hasText: 'Fixture group' }).click();
   await expect(page.locator('.chat-heading')).toContainText('Fixture group');
   if ((page.viewportSize()?.width ?? 1000) <= 680) {
@@ -47,21 +48,21 @@ test('creates and selects an empty server while existing DM and group chats rema
 
 test('server selection and return controls remain reachable on narrow viewports', async ({ page }, testInfo) => {
   test.skip(!['phone-portrait', 'phone-landscape', 'small-phone'].includes(testInfo.project.name), 'Mobile navigation coverage.');
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await createServer(page, 'Mobile server');
   await expect(page.locator('.cubic-server-sidebar-head')).toContainText('Mobile server');
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await expect(page.locator('.cubic-server-row')).toBeVisible();
-  await page.getByRole('button', { name: 'Chats', exact: true }).click();
+  await openMessages(page);
   await expect(page.locator('.conversation-row').filter({ hasText: 'Fixture DM' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  expect(await page.locator('.messenger-nav').evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  expect(await page.getByRole('navigation', { name: 'Primary navigation' }).evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
 });
 
 test('owner creates a text channel, messages with an attachment, and returns to legacy chats', async ({ page }, testInfo) => {
   await expect(page.locator('.conversation-row').filter({ hasText: 'Fixture DM' })).toBeVisible();
   await expect(page.locator('.conversation-row').filter({ hasText: 'Fixture group' })).toBeVisible();
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await createServer(page, 'Workshop');
   await expect(page.locator('.cubic-channel-list')).toContainText('This server does not have channels yet.');
   await createChannel(page, 'general');
@@ -80,7 +81,7 @@ test('owner creates a text channel, messages with an attachment, and returns to 
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect(page.locator('.cubic-message-attachments img[alt="channel.png"]')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Chats', exact: true }).click();
+  await openMessages(page);
   await page.locator('.conversation-row').filter({ hasText: 'Fixture DM' }).click();
   await expect(page.locator('.chat-heading')).toContainText('Fixture DM');
   if (['phone-portrait', 'phone-landscape', 'small-phone'].includes(testInfo.project.name)) {
@@ -88,7 +89,7 @@ test('owner creates a text channel, messages with an attachment, and returns to 
   }
   await page.locator('.conversation-row').filter({ hasText: 'Fixture group' }).click();
   await expect(page.locator('.chat-heading')).toContainText('Fixture group');
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await page.locator('.cubic-server-row').filter({ hasText: 'Workshop' }).click();
   await page.getByRole('button', { name: 'Text channel general' }).click();
   await expect(page.getByText('Channel hello')).toBeVisible();
@@ -98,7 +99,7 @@ test('owner creates a text channel, messages with an attachment, and returns to 
 test('targeted friend joins existing text channel, sends a message, then leaves without affecting owner', async ({ page, browser, request }) => {
   await request.post('http://127.0.0.1:3198/__test/server-friends');
   await page.reload();
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await createServer(page, 'Shared space');
   await page.getByRole('button', { name: 'Create category' }).click();
   const categoryDialog = page.getByRole('dialog', { name: 'Create category' });
@@ -109,7 +110,7 @@ test('targeted friend joins existing text channel, sends a message, then leaves 
   await channelDialog.getByRole('textbox', { name: 'Channel name' }).fill('general');
   await channelDialog.getByRole('combobox', { name: 'Category' }).selectOption({ label: 'Projects' });
   await channelDialog.getByRole('button', { name: 'Create text channel' }).click();
-  await page.getByRole('button', { name: 'Back to server' }).click();
+  if ((page.viewportSize()?.width ?? 1000) <= 680) await page.getByRole('button', { name: 'Back to server' }).click();
   await page.getByRole('button', { name: 'Options for Shared space' }).click();
   await expect(page.getByRole('button', { name: 'Leave server' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Invite people' }).click();
@@ -126,7 +127,7 @@ test('targeted friend joins existing text channel, sends a message, then leaves 
     await friendContext.addCookies([{ name: 'cubic_session', value: 'browser-peer', domain: '127.0.0.1', path: '/' }]);
     const friendPage = await friendContext.newPage();
     await friendPage.goto('/app');
-    await friendPage.getByRole('button', { name: 'People', exact: false }).click();
+    await openPeople(friendPage);
     await expect(friendPage.getByText('Pending invitation from @tester')).toBeVisible();
     await friendPage.getByRole('button', { name: 'Accept invitation to Shared space' }).click();
     await expect(friendPage.locator('.cubic-server-sidebar-head')).toContainText('Shared space');
@@ -145,7 +146,7 @@ test('targeted friend joins existing text channel, sends a message, then leaves 
     await page.getByRole('button', { name: 'Refresh members' }).click();
     await expect(page.getByRole('complementary', { name: 'Members of Shared space' })).toContainText('Fixture DM');
     await page.getByRole('button', { name: 'Close server members' }).click();
-    await friendPage.getByRole('button', { name: 'Back to server' }).click();
+    if ((friendPage.viewportSize()?.width ?? 1000) <= 680) await friendPage.getByRole('button', { name: 'Back to server' }).click();
     await expect(friendPage.getByRole('button', { name: 'Create text channel' })).toHaveCount(0);
     await friendPage.getByRole('button', { name: 'Options for Shared space' }).click();
     await friendPage.getByRole('button', { name: 'Leave server' }).click();
@@ -153,7 +154,7 @@ test('targeted friend joins existing text channel, sends a message, then leaves 
     expect(await friendPage.evaluate(async (id) => (await fetch(`/api/v1/conversations/${id}/messages`)).status, conversationId)).toBe(404);
     await expect(friendPage.locator('.conversation-row').filter({ hasText: 'Tester' })).toBeVisible();
     expect(await friendPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.getByRole('button', { name: 'Servers', exact: true }).click();
+    await openServers(page);
     await expect(page.locator('.cubic-server-row').filter({ hasText: 'Shared space' })).toBeVisible();
     await page.locator('.cubic-server-row').filter({ hasText: 'Shared space' }).click();
     await page.getByRole('button', { name: 'Text channel general' }).click();
@@ -166,12 +167,12 @@ test('targeted friend joins existing text channel, sends a message, then leaves 
 test('owner confirms ordinary member removal without changing chats or server content', async ({ page, browser, request }) => {
   await request.post('http://127.0.0.1:3198/__test/server-friends');
   await page.reload();
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await createServer(page, 'Removal space');
   await createChannel(page, 'general');
   const serverId = await page.evaluate(async () => (await (await fetch('/api/v1/servers')).json()).servers[0].id as string);
   const conversationId = await page.evaluate(async (id) => (await (await fetch(`/api/v1/servers/${id}/channels`)).json()).channels[0].conversationId as string, serverId);
-  await page.getByRole('button', { name: 'Back to server' }).click();
+  if ((page.viewportSize()?.width ?? 1000) <= 680) await page.getByRole('button', { name: 'Back to server' }).click();
   await page.getByRole('button', { name: 'Options for Removal space' }).click();
   await page.getByRole('button', { name: 'Invite people' }).click();
   const inviteDialog = page.getByRole('dialog', { name: 'Invite people' });
@@ -184,7 +185,7 @@ test('owner confirms ordinary member removal without changing chats or server co
     await friendContext.addCookies([{ name: 'cubic_session', value: 'browser-peer', domain: '127.0.0.1', path: '/' }]);
     const friendPage = await friendContext.newPage();
     await friendPage.goto('/app');
-    await friendPage.getByRole('button', { name: 'People', exact: false }).click();
+    await openPeople(friendPage);
     await friendPage.getByRole('button', { name: 'Accept invitation to Removal space' }).click();
     await friendPage.getByRole('button', { name: 'Members · 2' }).click();
     await expect(friendPage.getByRole('button', { name: /Remove .* from server/ })).toHaveCount(0);
@@ -216,14 +217,14 @@ test('owner confirms ordinary member removal without changing chats or server co
     await expect(friendPage.locator('.cubic-server-sidebar-head')).toHaveCount(0);
     await expect(friendPage.locator('.cubic-server-row')).toHaveCount(0);
     await friendPage.reload();
-    await friendPage.getByRole('button', { name: 'Servers', exact: true }).click();
+    await openServers(friendPage);
     await expect(friendPage.locator('.cubic-server-row')).toHaveCount(0);
     const denied = await friendPage.evaluate(async ({ serverId, conversationId }) => ({
       server: (await fetch(`/api/v1/servers/${serverId}`)).status,
       messages: (await fetch(`/api/v1/conversations/${conversationId}/messages`)).status
     }), { serverId, conversationId });
     expect(denied).toEqual({ server: 404, messages: 404 });
-    await friendPage.getByRole('button', { name: 'Chats', exact: true }).click();
+    await openMessages(friendPage);
     await expect(friendPage.locator('.conversation-row').filter({ hasText: 'Fixture group' })).toBeVisible();
     await expect(friendPage.locator('.conversation-row').filter({ hasText: 'Tester' })).toBeVisible();
 
@@ -240,11 +241,10 @@ test('server shell keeps channel, member and DM/group contexts separate', async 
   await page.locator('.conversation-row').filter({ hasText: 'Fixture DM' }).click();
   await expect(page.locator('.chat-heading')).toContainText('Fixture DM');
   await expect(page.getByRole('button', { name: 'Start voice call' })).toBeVisible();
-  await page.getByRole('button', { name: 'Chats', exact: true }).click();
-  if ((page.viewportSize()?.width ?? 1000) <= 680) await page.getByRole('button', { name: 'Back to conversations' }).click();
+  await openMessages(page);
   await page.locator('.conversation-row').filter({ hasText: 'Fixture group' }).click();
   await expect(page.getByRole('button', { name: 'Join group voice' })).toBeVisible();
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await createServer(page, 'First place');
   await page.getByRole('button', { name: 'Create text channel' }).click();
   await expect(page.getByRole('dialog', { name: 'Create text channel' })).toBeVisible();
@@ -260,22 +260,22 @@ test('server shell keeps channel, member and DM/group contexts separate', async 
   await expect(page.getByRole('complementary', { name: 'Members of First place' })).toContainText('Owner');
   await page.getByRole('button', { name: 'Close server members' }).click();
   await expect(page.getByRole('complementary', { name: 'Members of First place' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Back to server' }).click();
+  if ((page.viewportSize()?.width ?? 1000) <= 680) await page.getByRole('button', { name: 'Back to server' }).click();
   await createChannel(page, 'beta');
   await expect(page.locator('.chat-heading')).toContainText('beta');
   await expect(page.getByText('First channel message')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Back to server' }).click();
+  if ((page.viewportSize()?.width ?? 1000) <= 680) await page.getByRole('button', { name: 'Back to server' }).click();
   await page.getByRole('button', { name: 'Text channel alpha' }).click();
   await expect(page.getByText('First channel message')).toBeVisible();
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await createServer(page, 'Second place');
   await createChannel(page, 'other');
   await expect(page.getByText('First channel message')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Chats', exact: true }).click();
+  await openMessages(page);
   await page.locator('.conversation-row').filter({ hasText: 'Fixture DM' }).click();
   await expect(page.locator('.chat-heading')).toContainText('Fixture DM');
   await expect(page.locator('.cubic-server-sidebar-head')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await page.locator('.cubic-server-row').filter({ hasText: 'First place' }).click();
   await page.getByRole('button', { name: 'Text channel alpha' }).click();
   await expect(page.getByText('First channel message')).toBeVisible();
@@ -286,10 +286,10 @@ test('server shell keeps channel, member and DM/group contexts separate', async 
 
 test('a late channel-list response cannot replace a newer server selection', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'One deterministic request-order regression is sufficient.');
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await createServer(page, 'Older server');
   await createChannel(page, 'old-channel');
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await createServer(page, 'Newer server');
   const oldId = await page.evaluate(async () => (await (await fetch('/api/v1/servers')).json()).servers.find((server: { name: string }) => server.name === 'Older server').id as string);
   let release!: () => void;
@@ -313,7 +313,7 @@ test('a late channel-list response cannot replace a newer server selection', asy
 });
 
 test('owner organizes channels into categories without losing messages or legacy chats', async ({ page }, testInfo) => {
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await createServer(page, 'Organized');
   await page.getByRole('button', { name: 'Create category' }).click();
   let dialog = page.getByRole('dialog', { name: 'Create category' });
@@ -368,7 +368,7 @@ test('owner organizes channels into categories without losing messages or legacy
   await expect(page.getByRole('region', { name: 'Category Archive' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Text channel build' }).click();
   await expect(page.getByText('Category message survives')).toBeVisible();
-  await page.getByRole('button', { name: 'Chats', exact: true }).click();
+  await openMessages(page);
   await page.locator('.conversation-row').filter({ hasText: 'Fixture DM' }).click();
   await expect(page.locator('.chat-heading')).toContainText('Fixture DM');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

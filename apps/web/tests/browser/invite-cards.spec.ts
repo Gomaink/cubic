@@ -1,7 +1,8 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { openMessages, openServers } from './navigation';
 
 async function createLink(page: Page) {
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await page.getByRole('button', { name: 'Create server' }).first().click();
   const create = page.getByRole('dialog', { name: 'Create server' });
   await create.getByRole('textbox', { name: 'Server name' }).fill('Card destination');
@@ -44,7 +45,7 @@ test.beforeEach(async ({ page, context, request }) => {
 test('DM card preserves text, joins through existing API, rejects lookalikes, and becomes unavailable after revoke', async ({ page, browser }) => {
   test.setTimeout(60_000);
   const url = await createLink(page);
-  await page.getByRole('button', { name: 'Chats', exact: true }).click();
+  await openMessages(page);
   await page.locator('.conversation-row').filter({ hasText: 'Fixture DM' }).click();
   let previews = 0;
   page.on('request', (request) => { if (request.url().endsWith('/api/v1/server-invite-links/preview')) previews += 1; });
@@ -73,12 +74,12 @@ test('DM card preserves text, joins through existing API, rejects lookalikes, an
     await card.getByRole('button', { name: 'Go to server' }).click();
     await expect(peer.locator('.cubic-server-sidebar-head')).toContainText('Card destination');
 
-    await page.getByRole('button', { name: 'Servers', exact: true }).click();
+    await openServers(page);
     await page.locator('.cubic-server-row').filter({ hasText: 'Card destination' }).click();
     await page.getByRole('button', { name: 'Options for Card destination' }).click();
     await page.getByRole('button', { name: 'Invite people' }).click();
     await page.getByRole('dialog', { name: 'Invite people' }).getByRole('button', { name: /Revoke link created/ }).click();
-    await peer.getByRole('button', { name: 'Chats', exact: true }).click();
+    await openMessages(peer);
     await peer.locator('.conversation-row').filter({ hasText: 'Tester' }).click();
     const staleCard = peer.locator(`#${messageId}`).getByRole('group', { name: 'Server invite' });
     await staleCard.scrollIntoViewIfNeeded();
@@ -90,7 +91,7 @@ test('DM card preserves text, joins through existing API, rejects lookalikes, an
 
 test('group gets only the first trusted card; server text remains plain and mobile composer stays reachable', async ({ page }) => {
   const url = await createLink(page);
-  await page.getByRole('button', { name: 'Chats', exact: true }).click();
+  await openMessages(page);
   await page.locator('.conversation-row').filter({ hasText: 'Fixture group' }).click();
   const body = `First ${url} second ${url} ordinary https://example.com`;
   const groupMessage = await send(page, body);
@@ -101,7 +102,7 @@ test('group gets only the first trusted card; server text remains plain and mobi
   await page.getByRole('button', { name: 'Save message' }).click();
   await expect(groupMessage.getByRole('group', { name: 'Server invite' })).toHaveCount(0);
   await expect(groupMessage.locator('.discord-message-body')).toContainText('No invite after edit');
-  await page.getByRole('button', { name: 'Servers', exact: true }).click();
+  await openServers(page);
   await page.locator('.cubic-server-row').filter({ hasText: 'Card destination' }).click();
   await page.getByRole('button', { name: 'Create text channel' }).click();
   const channelDialog = page.getByRole('dialog', { name: 'Create text channel' });

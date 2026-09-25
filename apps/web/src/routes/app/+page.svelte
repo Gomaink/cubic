@@ -5,6 +5,8 @@
   import { Room, RoomEvent, Track } from 'livekit-client';
   import { mediaDeviceErrorMessage, microphoneCaptureOptions, missingSelectedCameraNotice, screenShareFailure } from '$lib/media-ux';
   import Icon from '$lib/ui/Icon.svelte';
+  import PrimaryRail from '$lib/ui/PrimaryRail.svelte';
+  import UserBar from '$lib/ui/UserBar.svelte';
   import VideoTile from '$lib/ui/VideoTile.svelte';
   import ScreenShareTile from '$lib/ui/ScreenShareTile.svelte';
   import MessageAttachments from '$lib/ui/MessageAttachments.svelte';
@@ -23,6 +25,37 @@
   let loggingOut = $state(false);
   let sessionSettingsOpen = $state(false);
   let tab = $state<'chats' | 'people' | 'servers'>('chats');
+  function showMessages() {
+    if (activeConversation?.kind === 'server_text') closeConversation();
+    closeServerDialog();
+    serverMembersOpen = false;
+    serverMenuOpen = false;
+    channelLoadSequence += 1;
+    serverDetailSequence += 1;
+    tab = 'chats';
+    activeServer = null;
+  }
+  function showPeople() {
+    closeConversation();
+    closeServerDialog();
+    serverMembersOpen = false;
+    serverMenuOpen = false;
+    activeServer = null;
+    channelLoadSequence += 1;
+    serverDetailSequence += 1;
+    tab = 'people';
+    void refreshServerInvites();
+  }
+  function showServerBrowser() {
+    closeConversation();
+    closeServerDialog();
+    serverMembersOpen = false;
+    serverMenuOpen = false;
+    activeServer = null;
+    channelLoadSequence += 1;
+    serverDetailSequence += 1;
+    tab = 'servers';
+  }
   let query = $state('');
   let searchResults = $state<any[]>([]);
   let friends = $state<any[]>([]);
@@ -3869,43 +3902,8 @@
 <svelte:head><title>Cubic — {currentUser.displayName}</title></svelte:head>
 <svelte:window onkeydown={(event) => { if (event.key === 'Escape') { serverMenuOpen = false; if (serverMembersOpen) closeServerMembers(); } }} />
 
-<main class="messenger-shell">
-  <aside class="messenger-nav">
-    <div class="messenger-brand"><img src="/images/cubic-w-nobg.png" alt="" /><strong>Cubic</strong><span title={realtimeConnected ? 'Realtime connected' : 'Realtime reconnecting'}>{realtimeConnected ? 'LIVE' : 'SYNC'}</span></div>
-    <button class="nav-action" class:active={tab === 'chats'} title="Chats" onclick={() => { if (activeConversation?.kind === 'server_text') closeConversation(); closeServerDialog(); serverMembersOpen = false; serverMenuOpen = false; channelLoadSequence += 1; serverDetailSequence += 1; tab = 'chats'; activeServer = null; }}>
-      <Icon name="message" size={20} /><span>Chats</span>
-    </button>
-    <button class="nav-action cubic-server-nav" class:active={tab === 'servers'} title="Servers" onclick={() => { tab = 'servers'; closeConversation(); closeServerDialog(); serverMembersOpen = false; serverMenuOpen = false; activeServer = null; channelLoadSequence += 1; serverDetailSequence += 1; }}>
-      <Icon name="server" size={20} /><span>Servers</span>
-    </button>
-    <div class="cubic-server-rail" aria-label="Your servers">
-      {#if serversLoading}<span class="cubic-server-rail-status">Loading…</span>{/if}
-      {#if !serversLoading && servers.length === 0}<span class="cubic-server-rail-status">No servers</span>{/if}
-      {#each servers as server (server.id)}
-        <button class="cubic-server-rail-item" class:active={activeServer?.id === server.id} type="button" aria-label={`Open server ${server.name}`} aria-current={activeServer?.id === server.id ? 'page' : undefined} title={server.name} onclick={() => selectServer(server)}><span class="cubic-server-icon-shell">{server.name.slice(0, 1).toUpperCase()}{#if server.iconUrl}{#key server.iconUrl}<img src={server.iconUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span></button>
-      {/each}
-      <button class="cubic-server-rail-create" type="button" aria-label="Create server" title="Create server" onclick={(event) => openServerDialog('server', event)}><Icon name="plus" size={20} /></button>
-    </div>
-    <button class="nav-action" class:active={tab === 'people'} title="People" onclick={() => { tab = 'people'; closeConversation(); closeServerDialog(); serverMembersOpen = false; serverMenuOpen = false; activeServer = null; channelLoadSequence += 1; serverDetailSequence += 1; void refreshServerInvites(); }}>
-      <Icon name="users" size={20} />
-      <span>People{(requests.filter((r) => r.direction === 'incoming').length + groupInvites.length + serverInvites.length) ? ` · ${requests.filter((r) => r.direction === 'incoming').length + groupInvites.length + serverInvites.length}` : ''}</span>
-    </button>
-    <button class="cubic-profile-mobile" type="button" aria-label="Open your profile" title="Your profile" onclick={() => openProfile(currentUser)}>
-      {currentUser.displayName.slice(0, 1).toUpperCase()}
-      {#if currentUser.avatarUrl}{#key currentUser.avatarUrl}<img src={currentUser.avatarUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}
-    </button>
-    <div class="messenger-nav-spacer"></div>
-    <button class="mini-profile cubic-profile-opener" type="button" aria-label="Open your profile" onclick={() => openProfile(currentUser)}>
-      <span class="cubic-user-avatar-shell">{currentUser.displayName.slice(0, 1).toUpperCase()}{#if currentUser.avatarUrl}{#key currentUser.avatarUrl}<img src={currentUser.avatarUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span>
-      <div><strong>{currentUser.displayName}</strong><small>@{currentUser.username}</small></div>
-    </button>
-    <button class="cubic-session-settings-trigger" title="Active sessions" aria-label="Active sessions" onclick={() => sessionSettingsOpen = true}>
-      <Icon name="settings" size={20} /><span>Sessions</span>
-    </button>
-    <button class="logout-action" title="Log out" aria-label="Log out" onclick={logout} disabled={loggingOut}>
-      <Icon name="logout" size={20} /><span>{loggingOut ? 'Wait…' : 'Log out'}</span>
-    </button>
-  </aside>
+<main class="messenger-shell cubic-app-shell">
+  <PrimaryRail servers={servers} selectedServerId={activeServer?.id ?? null} messagesSelected={tab !== 'servers'} serverBrowserSelected={tab === 'servers' && activeServer === null} loading={serversLoading} onmessages={showMessages} onbrowse={showServerBrowser} onserver={selectServer} oncreate={(event) => openServerDialog('server', event)} />
 
   {#if sessionSettingsOpen}
     <SessionSettings onclose={() => sessionSettingsOpen = false} />
@@ -4033,11 +4031,12 @@
     </dialog>
   {/if}
 
+  <div class="cubic-context-column">
   <section class="conversation-list" class:cubic-server-sidebar={tab === 'servers' && activeServer !== null}>
     {#if tab === 'chats'}
       <header class="conversation-list-header">
         <div><small>MESSAGES</small><h1>Conversations</h1></div>
-        <button class="icon-action" type="button" aria-label="New group" title="New group" onclick={openNewGroup}><Icon name="plus" size={19} /></button>
+        <div class="cubic-messages-header-actions"><button class="icon-action" type="button" aria-label="People and friends" title="People and friends" onclick={showPeople}><Icon name="users" size={19} /></button><button class="icon-action" type="button" aria-label="New group" title="New group" onclick={openNewGroup}><Icon name="plus" size={19} /></button></div>
       </header>
       {#if conversations.length === 0}<div class="empty-state">No conversations yet.<br />Add a friend or create a group.</div>{/if}
       {#each conversations as conversation}
@@ -4155,7 +4154,7 @@
         {#if serversError}<div class="inline-error cubic-server-error" role="alert">{serversError} <button type="button" onclick={refreshServers}>Retry list</button></div>{/if}
       {/if}
     {:else}
-      <header><div><small>SOCIAL</small><h1>People</h1></div></header>
+      <header class="conversation-list-header"><div><small>SOCIAL</small><h1>People</h1></div><button class="icon-action" type="button" aria-label="Back to Messages" title="Back to Messages" onclick={showMessages}><Icon name="back" size={19} /></button></header>
       <div class="people-search"><input bind:value={query} oninput={search} placeholder="Search username or name" /></div>
       {#if error}<div class="inline-error">{error}</div>{/if}
       {#if serverInvites.length}<h2 class="section-label">Server invitations</h2>{/if}
@@ -4188,6 +4187,8 @@
       {/each}
     {/if}
   </section>
+  <UserBar displayName={currentUser.displayName} username={currentUser.username} avatarUrl={currentUser.avatarUrl} loggingOut={loggingOut} voiceAvailable={voiceStatus !== 'idle'} onprofile={() => openProfile(currentUser)} onsessions={() => sessionSettingsOpen = true} onmedia={showMediaSettings} onlogout={() => void logout()} />
+  </div>
 
   <section class="chat-panel" class:open={activeConversation !== null || activeServer !== null} class:cubic-members-open={memberPanelOpen} class:cubic-server-members-open={serverMembersOpen && activeServer !== null} class:cubic-server-empty={activeServer !== null && activeConversation === null}>
     {#if activeConversation}
