@@ -44,7 +44,12 @@ export async function createServerVoiceToken(input: {
     canPublish: true,
     canPublishData: false,
     canUpdateOwnMetadata: false,
-    canPublishSources: [TrackSource.MICROPHONE]
+    canPublishSources: [
+      TrackSource.MICROPHONE,
+      TrackSource.CAMERA,
+      TrackSource.SCREEN_SHARE,
+      TrackSource.SCREEN_SHARE_AUDIO
+    ]
   });
   return { url: input.publicUrl, token: await accessToken.toJwt(), identity };
 }

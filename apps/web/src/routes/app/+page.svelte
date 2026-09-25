@@ -3,7 +3,7 @@
   import { io, type Socket } from 'socket.io-client';
   import { recoverAfterServerDisconnect } from '$lib/realtime/server-disconnect.js';
   import { Room, RoomEvent, Track } from 'livekit-client';
-  import { mediaDeviceErrorMessage, microphoneCaptureOptions, screenShareFailure } from '$lib/media-ux';
+  import { mediaDeviceErrorMessage, microphoneCaptureOptions, missingSelectedCameraNotice, screenShareFailure } from '$lib/media-ux';
   import Icon from '$lib/ui/Icon.svelte';
   import VideoTile from '$lib/ui/VideoTile.svelte';
   import ScreenShareTile from '$lib/ui/ScreenShareTile.svelte';
@@ -198,7 +198,9 @@
   let voiceDeafened = $state(false);
   let voiceMutedBeforeDeafen = false;
   let voiceCameraEnabled = $state(false);
+  let voiceCameraExpected = false;
   let voiceScreenShareEnabled = $state(false);
+  let serverVoiceStageCollapsed = $state(false);
 
   type CameraQualityPreset = 'data-saver' | 'balanced' | 'smooth' | 'high';
   type ScreenShareQualityPreset = 'text' | 'balanced' | 'smooth' | 'motion';
@@ -2634,6 +2636,7 @@
           cameraStartCaptureOptions(mediaPreflightResolution, mediaPreflightFps),
           cameraStartPublishOptions(mediaPreflightResolution, mediaPreflightFps)
         );
+        voiceCameraExpected = true;
 
         saveMediaPreference('cubic.cameraStartResolution', String(mediaPreflightResolution));
         saveMediaPreference('cubic.cameraStartFps', String(mediaPreflightFps));
@@ -2854,9 +2857,13 @@
         voiceMediaNotice = 'The selected microphone disconnected. Choose another in Voice & Video settings; the browser default will be tried next time the microphone starts.';
       }
       if (selectedVideoInput && !videoInputDevices.some((device) => device.deviceId === selectedVideoInput)) {
+        const cameraWasActive = voiceCameraExpected || voiceCameraEnabled || Boolean(
+          room?.localParticipant.getTrackPublication(Track.Source.Camera)?.track
+        );
         selectedVideoInput = '';
         saveMediaPreference('cubic.videoInput', '');
-        voiceMediaNotice = 'The selected camera disconnected. Choose another in Voice & Video settings.';
+        const cameraNotice = missingSelectedCameraNotice(cameraWasActive);
+        if (cameraNotice) voiceMediaNotice = cameraNotice;
       }
       if (
         selectedAudioOutput &&
@@ -2990,7 +2997,7 @@
   }
 
   function mediaStageVisible(): boolean {
-    if (!activeConversation || voiceConversationId !== activeConversation.id) return false;
+    if (!activeServerVoiceId && (!activeConversation || voiceConversationId !== activeConversation.id)) return false;
     return voiceParticipants.some((participant) => participant.cameraEnabled) ||
       activeScreenShares().length > 0;
   }
@@ -3075,6 +3082,9 @@
     }
 
     const activeShares = nextParticipants.filter((participant) => participant.screenShareEnabled);
+    if (activeServerVoiceId && activeShares.length === 0 && !nextParticipants.some((participant) => participant.cameraEnabled)) {
+      serverVoiceStageCollapsed = false;
+    }
     if (activeShares.length === 0) {
       focusedScreenShareIdentity = null;
       screenShareFocusDismissed = false;
@@ -3170,7 +3180,9 @@
     voiceDeafened = false;
     voiceMutedBeforeDeafen = false;
     voiceCameraEnabled = false;
+    voiceCameraExpected = false;
     voiceScreenShareEnabled = false;
+    serverVoiceStageCollapsed = false;
     focusedVideoIdentity = null;
     focusedScreenShareIdentity = null;
     screenShareFocusDismissed = false;
@@ -3297,6 +3309,7 @@
           voiceDeafened = false;
           voiceMutedBeforeDeafen = false;
           voiceCameraEnabled = false;
+          voiceCameraExpected = false;
           voiceScreenShareEnabled = false;
           focusedVideoIdentity = null;
           focusedScreenShareIdentity = null;
@@ -3383,6 +3396,7 @@
     voiceStatus = 'connecting';
     activeServerVoiceId = channel.id;
     activeServerVoiceServerId = channel.serverId;
+    serverVoiceStageCollapsed = false;
     voiceConversationId = null;
     voiceConversationTitle = channel.name;
     voiceRetryServerChannel = null;
@@ -3401,6 +3415,16 @@
       room.on(RoomEvent.ParticipantDisconnected, resync);
       room.on(RoomEvent.TrackMuted, resync);
       room.on(RoomEvent.TrackUnmuted, resync);
+      room.on(RoomEvent.TrackPublished, (publication) => {
+        if (publication.source === Track.Source.ScreenShare) screenShareFocusDismissed = false;
+        resync();
+      });
+      room.on(RoomEvent.TrackUnpublished, resync);
+      room.on(RoomEvent.LocalTrackPublished, (publication) => {
+        if (publication.source === Track.Source.ScreenShare) screenShareFocusDismissed = false;
+        resync();
+      });
+      room.on(RoomEvent.LocalTrackUnpublished, resync);
       room.on(RoomEvent.ActiveSpeakersChanged, resync);
       room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
         if (voiceRoom !== room) return;
@@ -3409,6 +3433,11 @@
       });
       room.on(RoomEvent.TrackUnsubscribed, (track) => { detachVoiceAudio(track); resync(); });
       room.on(RoomEvent.Reconnecting, () => { if (voiceRoom === room) voiceStatus = 'reconnecting'; });
+      room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
+        if (voiceRoom !== room) return;
+        if (!room.canPlaybackAudio) voiceMediaNotice = 'Browser audio playback is paused. Enable audio to hear this channel.';
+        else if (voiceMediaNotice.startsWith('Browser audio playback is paused')) voiceMediaNotice = '';
+      });
       room.on(RoomEvent.Reconnected, () => {
         if (voiceRoom !== room) return;
         voiceStatus = 'connected';
@@ -3512,6 +3541,7 @@
     try {
       voiceError = '';
       await room.localParticipant.setCameraEnabled(false);
+      voiceCameraExpected = false;
       syncVoiceParticipants();
     } catch (error) {
       voiceError = mediaDeviceErrorMessage(error, 'camera');
@@ -3553,6 +3583,13 @@
     focusedScreenShareIdentity = identity;
     focusedVideoIdentity = null;
     screenShareFocusDismissed = false;
+  }
+
+  function focusNextScreenShare() {
+    const shares = activeScreenShares();
+    if (shares.length < 2) return;
+    const current = shares.findIndex((participant) => participant.identity === focusedScreenShareIdentity);
+    focusScreenShare(shares[(current + 1) % shares.length].identity);
   }
 
   function returnToMediaGrid() {
@@ -4209,7 +4246,7 @@
         {/if}
       </header>
 
-      {#if voiceStatus !== 'idle' && mediaStageVisible()}
+      {#if voiceStatus !== 'idle' && !activeServerVoiceId && mediaStageVisible()}
         <section
           class="video-stage"
           class:presentation-mode={Boolean(focusedScreenShareParticipant())}
@@ -4873,6 +4910,54 @@
     </section>
   {/if}
 
+  {#if activeServerVoiceId && voiceStatus !== 'idle' && mediaStageVisible() && !serverVoiceStageCollapsed}
+    <section class="video-stage cubic-server-voice-stage" class:presentation-mode={Boolean(focusedScreenShareParticipant())} bind:this={videoStageElement} aria-label="Server voice media">
+      <header class="video-stage-head">
+        <Icon name={focusedScreenShareParticipant() ? 'screen-share' : 'camera'} size={18} />
+        <div>
+          <strong>{focusedScreenShareParticipant() ? `${focusedScreenShareParticipant()?.name} is sharing` : voiceConversationTitle}</strong>
+          <small>{voiceParticipants.length} connected · {voiceParticipants.filter((participant) => participant.cameraEnabled).length} cameras · {activeScreenShares().length} shares</small>
+        </div>
+        {#if focusedVideoIdentity || focusedScreenShareIdentity}
+          <button class="video-stage-action" type="button" aria-label="Return to grid" onclick={returnToMediaGrid}><Icon name="users" size={18} /></button>
+        {/if}
+        {#if activeScreenShares().length > 1}
+          <button class="video-stage-action" type="button" aria-label="Next screen share" onclick={focusNextScreenShare}><Icon name="screen-share" size={18} /></button>
+        {/if}
+        <button class="video-stage-action" type="button" aria-label="Minimize media stage" onclick={() => serverVoiceStageCollapsed = true}><Icon name="chevron-down" size={18} /></button>
+        <button class="video-stage-action" type="button" aria-label="Voice and video settings" onclick={showMediaSettings}><Icon name="settings" size={18} /></button>
+        <button class="video-stage-action" type="button" aria-label="Fullscreen media" onclick={fullscreenVideoStage}><Icon name="maximize" size={18} /></button>
+      </header>
+      {#if focusedScreenShareParticipant()}
+        <div class="presentation-layout">
+          <div class="presentation-main">
+            <ScreenShareTile track={focusedScreenShareParticipant()?.screenShareTrack} name={focusedScreenShareParticipant()?.name ?? 'Member'} local={focusedScreenShareParticipant()?.local ?? false} focused={true} onclick={returnToMediaGrid} oncontextmenu={(event) => {
+              const participant = focusedScreenShareParticipant();
+              if (participant) openStreamVolumeMenu(event, participant);
+            }} />
+          </div>
+          <div class="presentation-filmstrip" aria-label="Voice participants">
+            {#each activeScreenShares().filter((participant) => participant.identity !== focusedScreenShareIdentity) as participant (`share-${participant.identity}`)}
+              <ScreenShareTile track={participant.screenShareTrack} name={participant.name} local={participant.local} focused={false} onclick={() => focusScreenShare(participant.identity)} oncontextmenu={(event) => openStreamVolumeMenu(event, participant)} />
+            {/each}
+            {#each voiceParticipants as participant (participant.identity)}
+              <VideoTile track={participant.videoTrack} name={participant.name} local={participant.local} speaking={participant.speaking} cameraEnabled={participant.cameraEnabled} focused={false} onclick={() => toggleVideoFocus(participant.identity)} />
+            {/each}
+          </div>
+        </div>
+      {:else}
+        <div class="video-grid" class:has-focus={Boolean(focusedVideoIdentity)} class:participants-1={voiceParticipants.length === 1 && activeScreenShares().length === 0} class:participants-2={voiceParticipants.length + activeScreenShares().length === 2}>
+          {#each activeScreenShares() as participant (`share-${participant.identity}`)}
+            <ScreenShareTile track={participant.screenShareTrack} name={participant.name} local={participant.local} focused={false} onclick={() => focusScreenShare(participant.identity)} oncontextmenu={(event) => openStreamVolumeMenu(event, participant)} />
+          {/each}
+          {#each voiceParticipants as participant (participant.identity)}
+            <VideoTile track={participant.videoTrack} name={participant.name} local={participant.local} speaking={participant.speaking} cameraEnabled={participant.cameraEnabled} focused={focusedVideoIdentity === participant.identity} onclick={() => toggleVideoFocus(participant.identity)} />
+          {/each}
+        </div>
+      {/if}
+    </section>
+  {/if}
+
   {#if callNotice}
     <div class="call-notice" role="status">{callNotice}</div>
   {/if}
@@ -4893,7 +4978,10 @@
                   : 'Voice unavailable'}
           </small>
         </div>
-        {#if voiceStatus !== 'idle' && !activeServerVoiceId}
+        {#if voiceStatus !== 'idle'}
+          {#if activeServerVoiceId && serverVoiceStageCollapsed && mediaStageVisible()}
+            <button class="voice-settings-button" type="button" aria-label="Show media stage" onclick={() => serverVoiceStageCollapsed = false}><Icon name="camera" size={17} /></button>
+          {/if}
           <button
             class="voice-settings-button"
             class:active={mediaSettingsOpen}
@@ -5120,7 +5208,7 @@
             <Icon name={voiceDeafened ? 'headphones-off' : 'headphones'} size={18} />
             <span>{voiceDeafened ? 'Undeafen' : 'Deafen'}</span>
           </button>
-          {#if !activeServerVoiceId}<button
+          <button
             type="button"
             class:camera-active={voiceCameraEnabled}
             title={voiceCameraEnabled ? 'Turn camera off' : 'Turn camera on'}
@@ -5145,7 +5233,7 @@
           >
             <Icon name={voiceScreenShareEnabled ? 'screen-share-off' : 'screen-share'} size={18} />
             <span>{voiceScreenShareEnabled ? 'Stop share' : 'Share'}</span>
-          </button>{/if}
+          </button>
           <button class="voice-leave" type="button" title="Disconnect" aria-label={activeServerVoiceId ? 'Leave voice channel' : 'Disconnect from call'} onclick={() => leaveVoice()}>
             <Icon name="phone-off" size={18} /><span>Leave</span>
           </button>

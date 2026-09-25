@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { microphoneCaptureOptions, mediaDeviceErrorMessage, screenShareFailure } from './src/lib/media-ux.ts';
+import { microphoneCaptureOptions, mediaDeviceErrorMessage, missingSelectedCameraNotice, screenShareFailure } from './src/lib/media-ux.ts';
 
 test('native microphone processing follows the saved choice without requiring unsupported constraints', () => {
   assert.deepEqual(microphoneCaptureOptions(true, ''), {
@@ -20,4 +20,9 @@ test('media errors are actionable and never expose raw exception text', () => {
   assert.deepEqual(screenShareFailure(new DOMException('user dismissed picker', 'AbortError')), { cancelled: true, message: '' });
   assert.equal(screenShareFailure(new DOMException('dismissed picker', 'NotAllowedError')).cancelled, true);
   assert.equal(screenShareFailure(new Error('secret internal failure')).message.includes('secret'), false);
+});
+
+test('a saved camera disappearing is silent in audio-only voice but announced while camera is active', () => {
+  assert.equal(missingSelectedCameraNotice(false), '');
+  assert.match(missingSelectedCameraNotice(true), /selected camera disconnected/);
 });

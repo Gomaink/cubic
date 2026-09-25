@@ -11,6 +11,12 @@ export function microphoneCaptureOptions(processing: boolean, deviceId: string):
   };
 }
 
+export function missingSelectedCameraNotice(cameraActive: boolean): string {
+  return cameraActive
+    ? 'The selected camera disconnected. Choose another in Voice & Video settings.'
+    : '';
+}
+
 function errorName(error: unknown): string {
   return error && typeof error === 'object' && 'name' in error
     ? String((error as { name?: unknown }).name ?? '')
