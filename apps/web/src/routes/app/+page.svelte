@@ -4507,9 +4507,44 @@
           <strong>{conversationName(activeConversation)}</strong>
           <small>{activeConversation.kind === 'server_text' ? `Text channel · ${activeServer?.name ?? 'Server'}` : activeConversation.kind === 'group' ? `${activeConversation.memberCount ?? groupDetails?.members?.length ?? 0} members` : `@${activeConversation.peer?.username ?? ''}`}</small>
         </div>
-        <button class="chat-meta-button cubic-mobile-user-settings-trigger" type="button" aria-label="User Settings" title="User Settings" onclick={() => userSettingsOpen = true}><Icon name="settings" size={19} /></button>
-        {#if activeConversation.kind === 'group'}
-          <button class="chat-meta-button" type="button" aria-label="Group settings" title="Group settings" onclick={() => { memberPanelOpen = false; groupPanelOpen = !groupPanelOpen; if (groupPanelOpen) refreshGroupDetails().catch(() => {}); }}>
+        <button
+          class="chat-meta-button cubic-mobile-user-settings-trigger"
+          type="button"
+          aria-label="User Settings"
+          title="User Settings"
+          onclick={() => userSettingsOpen = true}
+        >
+          <span class="cubic-mobile-user-settings-avatar cubic-user-avatar-shell" aria-hidden="true">
+            {currentUser.displayName.slice(0, 1).toUpperCase()}
+            {#if currentUser.avatarUrl}
+              {#key currentUser.avatarUrl}
+                <img src={currentUser.avatarUrl} alt="" onerror={hideFailedUserAvatar} />
+              {/key}
+            {/if}
+          </span>
+        </button>
+        {#if activeConversation.kind === 'server_text' && activeServer?.ownerUserId === currentUser.id && activeChannel}
+          <button
+            class="chat-meta-button"
+            type="button"
+            aria-label="Channel settings"
+            title={`Channel settings for ${activeChannel.name}`}
+            onclick={() => openChannelSettings(activeChannel!)}
+          >
+            <Icon name="settings" size={19} />
+          </button>
+        {:else if activeConversation.kind === 'group'}
+          <button
+            class="chat-meta-button"
+            type="button"
+            aria-label="Group settings"
+            title="Group settings"
+            onclick={() => {
+              memberPanelOpen = false;
+              groupPanelOpen = !groupPanelOpen;
+              if (groupPanelOpen) refreshGroupDetails().catch(() => {});
+            }}
+          >
             <Icon name="settings" size={19} />
           </button>
         {/if}
