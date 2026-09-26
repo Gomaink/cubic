@@ -188,7 +188,16 @@ test('member ticket joins the selected voice room, keeps text usable, and leaves
   if (testInfo.project.name === 'desktop') await page.screenshot({ path: '/tmp/cubic-alpha11-slice1/desktop-voice-in-messages.png' });
   await dock.getByRole('button', { name: 'Show media stage' }).click();
   await expect(stage).toBeVisible();
+  await stage.getByRole('button', { name: 'Minimize media stage' }).click();
   await openServers(page);
+  await expect(dock).toContainText('1 connected');
+  await page.locator('.cubic-server-row').filter({ hasText: 'Voice Hub' }).click();
+  await page.getByRole('button', { name: 'Options for Voice Hub' }).click();
+  await page.getByRole('button', { name: 'Server overview' }).click();
+  await expect(page.getByRole('region', { name: 'Voice Hub server settings' })).toBeVisible();
+  await expect(dock).toContainText('1 connected');
+  if (isCompactNavigation(page)) await page.getByRole('button', { name: 'Back to server', exact: true }).click();
+  else await page.getByRole('button', { name: 'Close server settings' }).click();
   await expect(dock).toContainText('1 connected');
   await dock.getByRole('button', { name: 'Stop sharing screen' }).click();
   await expect.poll(() => page.evaluate(() => (window as any).__cubicVoiceTest?.shareStops)).toBe(1);

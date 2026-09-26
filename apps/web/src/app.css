@@ -4583,6 +4583,105 @@ body { background: var(--cubic-onyx-0); }
   .cubic-server-dialog { width: 100%; max-height: calc(100dvh - 56px); margin: auto auto 0; border-radius: 14px 14px 0 0; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
 }
 
+/* Alpha 11.3 server and channel settings surfaces. */
+.cubic-server-settings-surface { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; flex-direction: column; background: #111217; }
+.cubic-server-settings-layout { display: grid; grid-template-columns: 184px minmax(0, 1fr); flex: 1 1 auto; min-width: 0; min-height: 0; }
+.cubic-settings-nav { display: flex; flex-direction: column; gap: 4px; min-height: 0; padding: 16px 10px; border-right: 1px solid var(--cubic-border); background: #15171d; }
+.cubic-settings-nav button { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 42px; padding: 8px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--cubic-muted); font: inherit; text-align: left; cursor: pointer; }
+.cubic-settings-nav button:hover, .cubic-settings-nav button:focus-visible { background: var(--cubic-bg-hover); color: var(--cubic-text); }
+.cubic-settings-nav button[aria-current="page"] { background: #272c38; color: #f3f5fb; box-shadow: inset 3px 0 0 #adb7ff; }
+.cubic-settings-nav button > span:last-child { margin-left: auto; color: var(--cubic-muted); font-size: .76rem; }
+.cubic-settings-content, .cubic-channel-settings-content { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px clamp(18px, 4vw, 42px) 40px; }
+.cubic-settings-section, .cubic-channel-settings-content { width: min(100%, 780px); margin: 0 auto; }
+.cubic-settings-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.cubic-settings-title h2 { margin: 3px 0 4px; font-size: 1.35rem; }
+.cubic-settings-title small { color: var(--cubic-muted); font-size: .72rem; font-weight: 800; letter-spacing: .08em; }
+.cubic-settings-title p { margin: 0; color: var(--cubic-muted); font-size: .86rem; line-height: 1.45; }
+.cubic-settings-server-identity { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.cubic-settings-server-icon { width: 64px; height: 64px; border-radius: 18px; background: #303441; font-size: 1.35rem; font-weight: 800; }
+.cubic-settings-secondary, .cubic-settings-actions button, .cubic-settings-order-actions button, .cubic-settings-inline-form button, .cubic-settings-form-card > button { min-height: 40px; padding: 7px 11px; border: 1px solid #454955; border-radius: 7px; background: #242730; color: var(--cubic-text); font: inherit; cursor: pointer; }
+.cubic-settings-secondary { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; }
+.cubic-settings-secondary:hover, .cubic-settings-actions button:hover, .cubic-settings-order-actions button:hover { background: #30343f; }
+.cubic-settings-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.cubic-settings-stats > div { display: grid; gap: 4px; padding: 14px; border: 1px solid #ffffff13; border-radius: 9px; background: #181a20; }
+.cubic-settings-stats strong { font-size: 1.2rem; }
+.cubic-settings-stats span { color: var(--cubic-muted); font-size: .78rem; }
+.cubic-settings-card { margin-bottom: 14px; overflow: hidden; border: 1px solid #ffffff16; border-radius: 10px; background: #181a20; }
+.cubic-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 64px; padding: 12px 14px; border-bottom: 1px solid #ffffff12; }
+.cubic-settings-row:last-child { border-bottom: 0; }
+.cubic-settings-row > div:first-child { min-width: 0; }
+.cubic-settings-row strong, .cubic-settings-row small { display: block; }
+.cubic-settings-row small { margin-top: 3px; color: var(--cubic-muted); font-size: .76rem; }
+.cubic-settings-row > span { max-width: 48%; color: #c6cad5; overflow-wrap: anywhere; text-align: right; }
+.cubic-settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.cubic-settings-actions button { display: inline-flex; align-items: center; gap: 7px; }
+.cubic-settings-danger { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 18px; padding: 14px; border: 1px solid #713b43; border-radius: 10px; background: #25181b; }
+.cubic-settings-danger p { margin: 3px 0 0; color: #c9a7ab; font-size: .8rem; }
+.cubic-settings-member-list { overflow: hidden; border: 1px solid #ffffff16; border-radius: 10px; background: #181a20; }
+.cubic-settings-member-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 8px; border-bottom: 1px solid #ffffff12; }
+.cubic-settings-member-row:last-child { border-bottom: 0; }
+.cubic-settings-member-row .cubic-server-member-entry { flex: 1 1 auto; min-width: 0; }
+.cubic-settings-empty { margin: 0; padding: 18px; color: var(--cubic-muted); text-align: center; }
+.cubic-settings-form-card { display: grid; gap: 10px; padding: 14px; }
+.cubic-settings-form-card h3 { margin: 0; font-size: .9rem; }
+.cubic-settings-form-card label { font-size: .8rem; font-weight: 700; }
+.cubic-settings-form-card input, .cubic-settings-form-card select { width: 100%; min-width: 0; min-height: 42px; padding: 8px 10px; border: 1px solid #474b58; border-radius: 7px; background: #101117; color: var(--cubic-text); font: inherit; }
+.cubic-settings-form-card .cubic-server-create { margin: 0; padding: 0; border: 0; }
+.cubic-settings-inline-form { display: flex; gap: 8px; align-items: center; }
+.cubic-settings-inline-form input { flex: 1 1 auto; }
+.cubic-settings-order-row { align-items: flex-start; }
+.cubic-settings-order-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.cubic-settings-order-actions button:disabled, .cubic-settings-secondary:disabled, .cubic-settings-form-card button:disabled, .cubic-settings-inline-form button:disabled { opacity: .48; cursor: default; }
+.cubic-channel-settings-content { padding-top: 24px; }
+.cubic-channel-settings-surface .chat-heading small { text-transform: none; }
+@media (max-width: 760px) {
+  .cubic-server-settings-layout { grid-template-columns: 148px minmax(0, 1fr); }
+  .cubic-settings-nav { padding: 12px 8px; }
+  .cubic-settings-nav button { padding: 8px; font-size: .82rem; }
+  .cubic-settings-content, .cubic-channel-settings-content { padding-left: 16px; padding-right: 16px; }
+}
+@media (max-width: 680px) {
+  .cubic-server-settings-layout { display: flex; flex-direction: column; }
+  .cubic-settings-nav { flex: 0 0 auto; flex-direction: row; gap: 6px; padding: 8px 10px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--cubic-border); }
+  .cubic-settings-nav button { flex: 0 0 auto; width: auto; min-height: 40px; padding: 7px 10px; white-space: nowrap; }
+  .cubic-settings-nav button[aria-current="page"] { box-shadow: inset 0 -3px 0 #adb7ff; }
+  .cubic-settings-nav button > span:last-child { margin-left: 3px; }
+  .cubic-settings-content, .cubic-channel-settings-content { padding-top: 16px; padding-bottom: max(28px, env(safe-area-inset-bottom)); }
+  .cubic-settings-title { align-items: stretch; flex-direction: column; }
+  .cubic-settings-title .cubic-settings-secondary { align-self: flex-start; }
+  .cubic-settings-stats { grid-template-columns: 1fr; }
+  .cubic-settings-row, .cubic-settings-danger { align-items: flex-start; flex-direction: column; }
+  .cubic-settings-row > span { max-width: 100%; text-align: left; }
+  .cubic-settings-inline-form { align-items: stretch; flex-direction: column; }
+  .cubic-settings-order-actions { justify-content: flex-start; }
+  .cubic-server-settings-surface .chat-meta-button[aria-label="Close server settings"],
+  .cubic-channel-settings-surface .chat-meta-button[aria-label="Close channel settings"] { display: none; }
+}
+
+/* Dedicated administration surfaces own the viewport on compact phones and
+   short touch layouts. This prevents the persistent rail/sidebar from
+   squeezing settings into a narrow sliver while preserving the normal shell
+   contract everywhere else. */
+@media (max-width: 680px), (max-width: 900px) and (max-height: 500px) {
+  .cubic-app-shell > .chat-panel.cubic-server-surface-open {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 60 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-width: none !important;
+    max-height: 100dvh !important;
+    transform: none !important;
+    pointer-events: auto !important;
+  }
+  .cubic-app-shell > .chat-panel.cubic-server-surface-open > .cubic-server-settings-surface {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+}
+
 /* Alpha 11.1 shell: the rail and sidebar are separate, persistent surfaces.
    These qualified rules supersede the legacy messenger grid without changing
    message, media, or server-management styling. */
