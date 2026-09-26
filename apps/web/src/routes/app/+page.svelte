@@ -11,7 +11,7 @@
   import ScreenShareTile from '$lib/ui/ScreenShareTile.svelte';
   import MessageAttachments from '$lib/ui/MessageAttachments.svelte';
   import MessageActions from '$lib/ui/MessageActions.svelte';
-  import SessionSettings from '$lib/ui/SessionSettings.svelte';
+  import UserSettings from '$lib/ui/UserSettings.svelte';
   import MemberPanel from '$lib/ui/MemberPanel.svelte';
   import ProfileCard from '$lib/ui/ProfileCard.svelte';
   import ServerInviteCard from '$lib/ui/ServerInviteCard.svelte';
@@ -23,7 +23,7 @@
   type ProfileIdentity = { id: string; username: string; displayName: string; avatarUrl: string | null };
   let selectedProfile = $state<ProfileIdentity | null>(null);
   let loggingOut = $state(false);
-  let sessionSettingsOpen = $state(false);
+  let userSettingsOpen = $state(false);
   let tab = $state<'chats' | 'people' | 'servers'>('chats');
   function showMessages() {
     navigationMenu = null;
@@ -1087,9 +1087,11 @@
   }
 
   function openProfile(user: ProfileIdentity) {
-    selectedProfile = user.id === currentUser.id
-      ? { id: currentUser.id, username: currentUser.username, displayName: currentUser.displayName, avatarUrl: currentUser.avatarUrl }
-      : { id: user.id, username: user.username, displayName: user.displayName, avatarUrl: user.avatarUrl };
+    if (user.id === currentUser.id) {
+      userSettingsOpen = true;
+      return;
+    }
+    selectedProfile = { id: user.id, username: user.username, displayName: user.displayName, avatarUrl: user.avatarUrl };
   }
 
   function hideFailedUserAvatar(event: Event) {
@@ -1131,6 +1133,16 @@
   async function removeOwnAvatar() {
     const result = await api('/api/v1/users/me/avatar', { method: 'DELETE' });
     applyProfileChanged(result.profile);
+  }
+
+  function closeUserSettings() {
+    userSettingsOpen = false;
+    void tick().then(() => {
+      const mobileTrigger = document.querySelector<HTMLButtonElement>('.cubic-mobile-user-settings-trigger');
+      const target = mobileTrigger && getComputedStyle(mobileTrigger).display !== 'none'
+        ? mobileTrigger : document.querySelector<HTMLButtonElement>('.cubic-user-menu-trigger');
+      target?.focus();
+    });
   }
 
   function requestPresenceSnapshot(socket: Socket) {
@@ -4067,13 +4079,13 @@
 </script>
 
 <svelte:head><title>Cubic — {currentUser.displayName}</title></svelte:head>
-<svelte:window onkeydown={(event) => { if (event.key === 'Escape') { navigationMenu = null; serverMenuOpen = false; if (serverMembersOpen) closeServerMembers(); else if (channelSettingsTarget) closeChannelSettings(); else if (serverSurface) closeServerSurface(); } }} />
+<svelte:window onkeydown={(event) => { if (event.key === 'Escape') { if (userSettingsOpen) closeUserSettings(); else { navigationMenu = null; serverMenuOpen = false; if (serverMembersOpen) closeServerMembers(); else if (channelSettingsTarget) closeChannelSettings(); else if (serverSurface) closeServerSurface(); } } }} />
 
 <main class="messenger-shell cubic-app-shell">
   <PrimaryRail servers={servers} selectedServerId={activeServer?.id ?? null} messagesSelected={tab !== 'servers'} serverBrowserSelected={tab === 'servers' && activeServer === null} loading={serversLoading} onmessages={showMessages} onbrowse={showServerBrowser} onserver={selectServer} oncreate={(event) => openServerDialog('server', event)} />
 
-  {#if sessionSettingsOpen}
-    <SessionSettings onclose={() => sessionSettingsOpen = false} />
+  {#if userSettingsOpen}
+    <UserSettings profile={currentUser} voiceAvailable={voiceStatus !== 'idle'} {loggingOut} onclose={closeUserSettings} onsave={saveOwnProfile} onupload={uploadOwnAvatar} onremove={removeOwnAvatar} onmedia={() => { userSettingsOpen = false; void showMediaSettings(); }} onlogout={() => void logout()} />
   {/if}
 
   {#if serverDialog}
@@ -4362,7 +4374,7 @@
       {/each}
     {/if}
   </section>
-  <UserBar displayName={currentUser.displayName} username={currentUser.username} avatarUrl={currentUser.avatarUrl} loggingOut={loggingOut} voiceAvailable={voiceStatus !== 'idle'} onprofile={() => openProfile(currentUser)} onsessions={() => sessionSettingsOpen = true} onmedia={showMediaSettings} onlogout={() => void logout()} />
+  <UserBar displayName={currentUser.displayName} username={currentUser.username} avatarUrl={currentUser.avatarUrl} onsettings={() => userSettingsOpen = true} />
   </div>
 
   <section class="chat-panel" class:open={activeConversation !== null || activeServer !== null} class:cubic-members-open={memberPanelOpen} class:cubic-server-members-open={serverMembersOpen && activeServer !== null} class:cubic-server-empty={activeServer !== null && activeConversation === null && serverSurface === null && channelSettingsTarget === null} class:cubic-server-surface-open={serverSurface !== null || channelSettingsTarget !== null}>
@@ -4495,6 +4507,7 @@
           <strong>{conversationName(activeConversation)}</strong>
           <small>{activeConversation.kind === 'server_text' ? `Text channel · ${activeServer?.name ?? 'Server'}` : activeConversation.kind === 'group' ? `${activeConversation.memberCount ?? groupDetails?.members?.length ?? 0} members` : `@${activeConversation.peer?.username ?? ''}`}</small>
         </div>
+        <button class="chat-meta-button cubic-mobile-user-settings-trigger" type="button" aria-label="User Settings" title="User Settings" onclick={() => userSettingsOpen = true}><Icon name="settings" size={19} /></button>
         {#if activeConversation.kind === 'group'}
           <button class="chat-meta-button" type="button" aria-label="Group settings" title="Group settings" onclick={() => { memberPanelOpen = false; groupPanelOpen = !groupPanelOpen; if (groupPanelOpen) refreshGroupDetails().catch(() => {}); }}>
             <Icon name="settings" size={19} />
@@ -5776,10 +5789,6 @@
 {#if selectedProfile}
   <ProfileCard
     profile={selectedProfile}
-    own={selectedProfile.id === currentUser.id}
     onclose={() => selectedProfile = null}
-    onsave={saveOwnProfile}
-    onupload={uploadOwnAvatar}
-    onremove={removeOwnAvatar}
   />
 {/if}

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { chooseChannelAction, chooseServerCreate, isCompactNavigation, openMessages, openServerSettings, openServers } from './navigation';
+import { chooseChannelAction, chooseServerCreate, isCompactNavigation, openMessages, openServerSettings, openServers, openUserSettings } from './navigation';
 
 test.beforeEach(async ({ page, context, request }) => {
   await request.post('http://127.0.0.1:3198/__test/reset');
@@ -194,6 +194,16 @@ test('member ticket joins the selected voice room, keeps text usable, and leaves
   await openMessages(page);
   await page.locator('.conversation-row').filter({ hasText: 'Fixture DM' }).click();
   await expect(dock).toContainText('1 connected');
+  await openUserSettings(page);
+  const userSettings = page.getByRole('region', { name: 'User Settings' });
+  await expect(userSettings.getByRole('heading', { name: 'Profile' })).toBeVisible();
+  await userSettings.getByRole('navigation', { name: 'User settings sections' }).getByRole('button', { name: 'Sessions' }).click();
+  await expect(userSettings.getByRole('heading', { name: 'Active sessions' })).toBeVisible();
+  await userSettings.getByRole('navigation', { name: 'User settings sections' }).getByRole('button', { name: 'Profile' }).click();
+  await userSettings.getByRole('button', { name: 'Close User Settings' }).click();
+  await expect(page.locator('.chat-heading')).toContainText('Fixture DM');
+  await expect(dock).toContainText('1 connected');
+  await expect.poll(() => page.evaluate(() => (window as any).__cubicVoiceTest?.disconnects)).toBe(0);
   if (testInfo.project.name === 'desktop') await page.screenshot({ path: '/tmp/cubic-alpha11-slice1/desktop-voice-in-messages.png' });
   await dock.getByRole('button', { name: 'Show media stage' }).click();
   await expect(stage).toBeVisible();
