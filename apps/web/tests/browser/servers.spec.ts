@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { chooseCategoryAction, chooseChannelAction, chooseServerCreate, isCompactNavigation, openMessages, openPeople, openServers } from './navigation';
+import { chooseCategoryAction, chooseChannelAction, chooseServerCreate, closeServerSettings, isCompactNavigation, openMessages, openPeople, openServerSettings, openServerSettingsSection, openServers } from './navigation';
 
 async function createServer(page: import('@playwright/test').Page, name: string) {
   await page.getByRole('button', { name: 'Create server' }).first().click();
@@ -111,14 +111,13 @@ test('targeted friend joins existing text channel, sends a message, then leaves 
   await channelDialog.getByRole('combobox', { name: 'Category' }).selectOption({ label: 'Projects' });
   await channelDialog.getByRole('button', { name: 'Create text channel' }).click();
   if (isCompactNavigation(page)) await page.getByRole('button', { name: 'Back to server' }).click();
-  await page.getByRole('button', { name: 'Options for Shared space' }).click();
-  await expect(page.getByRole('button', { name: 'Leave server' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Invite people' }).click();
-  const inviteDialog = page.getByRole('dialog', { name: 'Invite people' });
-  await inviteDialog.getByRole('combobox', { name: 'Invite a friend' }).selectOption('fixture-peer');
-  await inviteDialog.getByRole('button', { name: 'Invite friend' }).click();
-  await expect(inviteDialog).toContainText('Fixture DM · Pending');
-  await inviteDialog.getByRole('button', { name: 'Close server dialog' }).click();
+  await openServerSettingsSection(page, 'Invites');
+  const settings = page.getByRole('region', { name: 'Shared space server settings' });
+  await expect(settings.getByRole('button', { name: 'Leave server' })).toHaveCount(0);
+  await settings.getByRole('combobox', { name: 'Friend' }).selectOption('fixture-peer');
+  await settings.getByRole('button', { name: 'Invite friend' }).click();
+  await expect(settings).toContainText('Fixture DM · Pending');
+  await closeServerSettings(page);
   const serverId = (await page.evaluate(async () => (await (await fetch('/api/v1/servers')).json()).servers[0].id)) as string;
   const conversationId = (await page.evaluate(async (id) => (await (await fetch(`/api/v1/servers/${id}/channels`)).json()).channels[0].conversationId, serverId)) as string;
 
@@ -133,23 +132,23 @@ test('targeted friend joins existing text channel, sends a message, then leaves 
     await expect(friendPage.locator('.cubic-server-sidebar-head')).toContainText('Shared space');
     await expect(friendPage.getByRole('region', { name: 'Category Projects' })).toContainText('general');
     await expect(friendPage.getByRole('button', { name: 'Create category' })).toHaveCount(0);
-    await friendPage.getByRole('button', { name: 'Members · 2' }).click();
-    await expect(friendPage.getByRole('complementary', { name: 'Members of Shared space' })).toContainText('Tester');
-    await friendPage.getByRole('button', { name: 'Close server members' }).click();
+    await openServerSettingsSection(friendPage, 'Members');
+    await expect(friendPage.getByRole('region', { name: 'Shared space server settings' })).toContainText('Tester');
+    await closeServerSettings(friendPage);
     await friendPage.getByRole('button', { name: 'Text channel general', exact: true }).click();
     await expect(friendPage.getByRole('button', { name: 'Start voice call' })).toHaveCount(0);
     await expect(friendPage.getByRole('button', { name: 'Join group voice' })).toHaveCount(0);
     await friendPage.getByPlaceholder('Message…').fill('Hello from friend');
     await friendPage.getByRole('button', { name: 'Send message' }).click();
     await expect(friendPage.getByText('Hello from friend')).toBeVisible();
-    await page.getByRole('button', { name: 'Members · 1' }).click();
-    await page.getByRole('button', { name: 'Refresh members' }).click();
-    await expect(page.getByRole('complementary', { name: 'Members of Shared space' })).toContainText('Fixture DM');
-    await page.getByRole('button', { name: 'Close server members' }).click();
+    await openServerSettingsSection(page, 'Members');
+    await settings.getByRole('button', { name: 'Refresh' }).click();
+    await expect(settings).toContainText('Fixture DM');
+    await closeServerSettings(page);
     if (isCompactNavigation(friendPage)) await friendPage.getByRole('button', { name: 'Back to server' }).click();
     await expect(friendPage.getByRole('button', { name: 'Create text channel' })).toHaveCount(0);
-    await friendPage.getByRole('button', { name: 'Options for Shared space' }).click();
-    await friendPage.getByRole('button', { name: 'Leave server' }).click();
+    await openServerSettings(friendPage);
+    await friendPage.getByRole('region', { name: 'Shared space server settings' }).getByRole('button', { name: 'Leave server' }).click();
     await expect(friendPage.locator('.cubic-server-row')).toHaveCount(0);
     expect(await friendPage.evaluate(async (id) => (await fetch(`/api/v1/conversations/${id}/messages`)).status, conversationId)).toBe(404);
     await expect(friendPage.locator('.conversation-row').filter({ hasText: 'Tester' })).toBeVisible();
@@ -173,12 +172,11 @@ test('owner confirms ordinary member removal without changing chats or server co
   const serverId = await page.evaluate(async () => (await (await fetch('/api/v1/servers')).json()).servers[0].id as string);
   const conversationId = await page.evaluate(async (id) => (await (await fetch(`/api/v1/servers/${id}/channels`)).json()).channels[0].conversationId as string, serverId);
   if (isCompactNavigation(page)) await page.getByRole('button', { name: 'Back to server' }).click();
-  await page.getByRole('button', { name: 'Options for Removal space' }).click();
-  await page.getByRole('button', { name: 'Invite people' }).click();
-  const inviteDialog = page.getByRole('dialog', { name: 'Invite people' });
-  await inviteDialog.getByRole('combobox', { name: 'Invite a friend' }).selectOption('fixture-peer');
-  await inviteDialog.getByRole('button', { name: 'Invite friend' }).click();
-  await inviteDialog.getByRole('button', { name: 'Close server dialog' }).click();
+  await openServerSettingsSection(page, 'Invites');
+  const inviteSettings = page.getByRole('region', { name: 'Removal space server settings' });
+  await inviteSettings.getByRole('combobox', { name: 'Friend' }).selectOption('fixture-peer');
+  await inviteSettings.getByRole('button', { name: 'Invite friend' }).click();
+  await closeServerSettings(page);
 
   const friendContext = await browser.newContext();
   try {
@@ -187,17 +185,18 @@ test('owner confirms ordinary member removal without changing chats or server co
     await friendPage.goto('/app');
     await openPeople(friendPage);
     await friendPage.getByRole('button', { name: 'Accept invitation to Removal space' }).click();
-    await friendPage.getByRole('button', { name: 'Members · 2' }).click();
-    await expect(friendPage.getByRole('button', { name: /Remove .* from server/ })).toHaveCount(0);
+    await openServerSettingsSection(friendPage, 'Members');
+    const friendSettings = friendPage.getByRole('region', { name: 'Removal space server settings' });
+    await expect(friendSettings.getByRole('button', { name: /Remove .* from server/ })).toHaveCount(0);
     const directRemovalStatus = await friendPage.evaluate(async (id) => (await fetch(`/api/v1/servers/${id}/members/fixture-user`, { method: 'DELETE' })).status, serverId);
     expect(directRemovalStatus).toBe(403);
-    await friendPage.getByRole('button', { name: 'Close server members' }).click();
+    await closeServerSettings(friendPage);
     await friendPage.getByRole('button', { name: 'Text channel general', exact: true }).click();
 
     await page.getByRole('button', { name: 'Text channel general', exact: true }).click();
-    await page.getByRole('button', { name: 'Server members' }).click();
-    await page.getByRole('button', { name: 'Refresh members' }).click();
-    const pane = page.getByRole('complementary', { name: 'Members of Removal space' });
+    await openServerSettingsSection(page, 'Members');
+    const pane = page.getByRole('region', { name: 'Removal space server settings' });
+    await pane.getByRole('button', { name: 'Refresh' }).click();
     await expect(pane.getByRole('heading', { name: 'Members · 2' })).toBeVisible();
     await expect(pane.getByRole('button', { name: 'Remove Tester from server' })).toHaveCount(0);
     await pane.getByRole('button', { name: 'Remove Fixture DM from server' }).click();
@@ -228,7 +227,8 @@ test('owner confirms ordinary member removal without changing chats or server co
     await expect(friendPage.locator('.conversation-row').filter({ hasText: 'Fixture group' })).toBeVisible();
     await expect(friendPage.locator('.conversation-row').filter({ hasText: 'Tester' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'Close server members' }).click();
+    await closeServerSettings(page);
+    if (isCompactNavigation(page)) await page.getByRole('button', { name: 'Text channel general', exact: true }).click();
     await page.getByPlaceholder('Message…').fill('Content remains usable');
     await page.getByRole('button', { name: 'Send message' }).click();
     await expect(page.getByText('Content remains usable')).toBeVisible();
@@ -256,11 +256,10 @@ test('server shell keeps channel, member and DM/group contexts separate', async 
   await expect(page.getByText('First channel message')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Start voice call' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Join group voice' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Server members' }).click();
-  await expect(page.getByRole('complementary', { name: 'Members of First place' })).toContainText('Owner');
-  await page.getByRole('button', { name: 'Close server members' }).click();
-  await expect(page.getByRole('complementary', { name: 'Members of First place' })).toHaveCount(0);
-  if (isCompactNavigation(page)) await page.getByRole('button', { name: 'Back to server' }).click();
+  await openServerSettingsSection(page, 'Members');
+  await expect(page.getByRole('region', { name: 'First place server settings' })).toContainText('Owner');
+  await closeServerSettings(page);
+  await expect(page.getByRole('region', { name: 'First place server settings' })).toHaveCount(0);
   await createChannel(page, 'beta');
   await expect(page.locator('.chat-heading')).toContainText('beta');
   await expect(page.getByText('First channel message')).toHaveCount(0);

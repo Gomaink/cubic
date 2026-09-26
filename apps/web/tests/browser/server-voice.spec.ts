@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { chooseChannelAction, chooseServerCreate, isCompactNavigation, openMessages, openServers } from './navigation';
+import { chooseChannelAction, chooseServerCreate, isCompactNavigation, openMessages, openServerSettings, openServers } from './navigation';
 
 test.beforeEach(async ({ page, context, request }) => {
   await request.post('http://127.0.0.1:3198/__test/reset');
@@ -29,10 +29,19 @@ test('owner manages voice channels in mixed text/voice order and media outage pr
   await expect(category.getByRole('button', { name: 'Join voice channel Lounge' })).toBeVisible();
   await chooseChannelAction(page, 'voice', 'Lounge', 'Move Lounge up');
   await expect(category.locator('.cubic-channel-row').first()).toHaveAttribute('aria-label', 'Join voice channel Lounge');
-  await chooseChannelAction(page, 'voice', 'Lounge', 'Rename voice channel Lounge');
-  const rename = page.getByRole('dialog', { name: 'Rename voice channel' });
-  await rename.getByRole('textbox', { name: 'Voice channel name' }).fill('Gaming');
-  await rename.getByRole('button', { name: 'Save voice channel' }).click();
+  await chooseChannelAction(page, 'voice', 'Lounge', 'Channel settings for Lounge');
+  const settings = page.getByRole('region', { name: 'Lounge channel settings' });
+  await settings.getByRole('textbox', { name: 'Channel name' }).fill('Gaming');
+  await settings.getByRole('button', { name: 'Save name' }).click();
+
+  const renamedSettings = page.getByRole('region', { name: 'Gaming channel settings' });
+  await expect(renamedSettings).toBeVisible();
+
+  if (isCompactNavigation(page)) {
+    await renamedSettings.getByRole('button', { name: 'Back to server', exact: true }).click();
+  } else {
+    await renamedSettings.getByRole('button', { name: 'Close channel settings' }).click();
+  }
   await expect(category.getByRole('button', { name: 'Join voice channel Gaming' })).toBeVisible();
   await chooseChannelAction(page, 'voice', 'Gaming', 'Move Gaming to category');
   await page.getByRole('dialog', { name: 'Move channel' }).getByRole('combobox', { name: 'Move channel to' }).selectOption('');
@@ -192,12 +201,23 @@ test('member ticket joins the selected voice room, keeps text usable, and leaves
   await openServers(page);
   await expect(dock).toContainText('1 connected');
   await page.locator('.cubic-server-row').filter({ hasText: 'Voice Hub' }).click();
-  await page.getByRole('button', { name: 'Options for Voice Hub' }).click();
-  await page.getByRole('button', { name: 'Server overview' }).click();
-  await expect(page.getByRole('region', { name: 'Voice Hub server settings' })).toBeVisible();
+  await openServerSettings(page);
+  const serverSettings = page.getByRole('region', { name: 'Voice Hub server settings' });
+  await expect(serverSettings).toBeVisible();
+  await expect(dock).toContainText('1 connected');
+  await serverSettings.getByRole('navigation', { name: 'Server settings sections' }).getByRole('button', { name: /^Members/ }).click();
+  await expect(dock).toContainText('1 connected');
+  await serverSettings.getByRole('navigation', { name: 'Server settings sections' }).getByRole('button', { name: 'Invites' }).click();
   await expect(dock).toContainText('1 connected');
   if (isCompactNavigation(page)) await page.getByRole('button', { name: 'Back to server', exact: true }).click();
   else await page.getByRole('button', { name: 'Close server settings' }).click();
+  await expect(dock).toContainText('1 connected');
+  await page.getByRole('button', { name: 'Actions for voice channel Lounge' }).click();
+  await page.getByRole('button', { name: 'Channel settings for Lounge' }).click();
+  await expect(page.getByRole('region', { name: 'Lounge channel settings' })).toBeVisible();
+  await expect(dock).toContainText('1 connected');
+  if (isCompactNavigation(page)) await page.getByRole('button', { name: 'Back to server', exact: true }).click();
+  else await page.getByRole('button', { name: 'Close channel settings' }).click();
   await expect(dock).toContainText('1 connected');
   await dock.getByRole('button', { name: 'Stop sharing screen' }).click();
   await expect.poll(() => page.evaluate(() => (window as any).__cubicVoiceTest?.shareStops)).toBe(1);

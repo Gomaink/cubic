@@ -30,6 +30,21 @@ export async function openPeople(page: Page) {
   await page.getByRole('button', { name: 'People and friends' }).click();
 }
 
+export async function openServerSettings(page: Page) {
+  await closeMobileContent(page);
+  await page.locator('.cubic-server-sidebar-head').getByRole('button', { name: 'Settings', exact: true }).click();
+}
+
+export async function openServerSettingsSection(page: Page, name: 'Overview' | 'Members' | 'Invites') {
+  await openServerSettings(page);
+  await page.getByRole('navigation', { name: 'Server settings sections' }).getByRole('button', { name: new RegExp(`^${name}(?:\\s|$)`) }).click();
+}
+
+export async function closeServerSettings(page: Page) {
+  const name = isCompactNavigation(page) ? 'Back to server' : 'Close server settings';
+  await page.getByRole('button', { name, exact: true }).click();
+}
+
 export async function chooseServerCreate(page: Page, name: 'Create category' | 'Create text channel' | 'Create voice channel') {
   const back = page.getByRole('button', { name: 'Back to server', exact: true });
   if (await back.isVisible()) await back.click();

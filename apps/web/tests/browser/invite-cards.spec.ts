@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { chooseServerCreate, openMessages, openServers } from './navigation';
+import { chooseServerCreate, closeServerSettings, openMessages, openServerSettingsSection, openServers } from './navigation';
 
 async function createLink(page: Page) {
   await openServers(page);
@@ -7,13 +7,12 @@ async function createLink(page: Page) {
   const create = page.getByRole('dialog', { name: 'Create server' });
   await create.getByRole('textbox', { name: 'Server name' }).fill('Card destination');
   await create.getByRole('button', { name: 'Create server' }).click();
-  await page.getByRole('button', { name: 'Options for Card destination' }).click();
-  await page.getByRole('button', { name: 'Invite people' }).click();
-  const invite = page.getByRole('dialog', { name: 'Invite people' });
+  await openServerSettingsSection(page, 'Invites');
+  const invite = page.getByRole('region', { name: 'Card destination server settings' });
   await invite.getByRole('button', { name: 'Create shareable link' }).click();
   const url = await invite.getByRole('textbox', { name: 'New link — shown only once' }).inputValue();
   await invite.getByRole('button', { name: 'Done' }).click();
-  await page.getByRole('button', { name: 'Close server dialog' }).click();
+  await closeServerSettings(page);
   return url;
 }
 
@@ -76,9 +75,8 @@ test('DM card preserves text, joins through existing API, rejects lookalikes, an
 
     await openServers(page);
     await page.locator('.cubic-server-row').filter({ hasText: 'Card destination' }).click();
-    await page.getByRole('button', { name: 'Options for Card destination' }).click();
-    await page.getByRole('button', { name: 'Invite people' }).click();
-    await page.getByRole('dialog', { name: 'Invite people' }).getByRole('button', { name: /Revoke link created/ }).click();
+    await openServerSettingsSection(page, 'Invites');
+    await page.getByRole('region', { name: 'Card destination server settings' }).getByRole('button', { name: /Revoke link created/ }).click();
     await openMessages(peer);
     await peer.locator('.conversation-row').filter({ hasText: 'Tester' }).click();
     const staleCard = peer.locator(`#${messageId}`).getByRole('group', { name: 'Server invite' });

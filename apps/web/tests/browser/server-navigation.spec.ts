@@ -58,10 +58,11 @@ test('server navigation keeps mixed channels clean and contextual actions reacha
   } else {
     await voice.click({ button: 'right' });
   }
-  await expect(category.getByRole('button', { name: 'Rename voice channel Lounge' })).toBeVisible();
+  await expect(category.getByRole('button', { name: 'Channel settings for Lounge' })).toBeVisible();
+  await expect(category.getByRole('button', { name: 'Rename voice channel Lounge' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Leave voice' })).toHaveCount(0);
   await category.getByRole('button', { name: 'Actions for voice channel Lounge' }).click();
-  await expect(category.getByRole('button', { name: 'Rename voice channel Lounge' })).toHaveCount(0);
+  await expect(category.getByRole('button', { name: 'Channel settings for Lounge' })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   if (testInfo.project.name === 'desktop') await page.screenshot({ path: '/tmp/cubic-alpha11-slice2/desktop-server-navigation.png' });
