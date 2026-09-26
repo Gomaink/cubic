@@ -4726,3 +4726,9 @@ body { background: var(--cubic-onyx-0); }
   .cubic-app-shell > .chat-panel.cubic-server-empty:not(.cubic-server-members-open) { transform: translateX(100%) !important; pointer-events: none; }
   .cubic-app-shell .cubic-context-column > .conversation-list.cubic-server-sidebar { height: auto !important; }
 }
+
+/* Contextual server/channel menus must stay above the persistent voice dock. */
+.cubic-app-shell > .cubic-context-column:has(.cubic-navigation-actions) {
+  position: relative;
+  z-index: 70;
+}
