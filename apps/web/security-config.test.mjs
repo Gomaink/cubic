@@ -14,7 +14,7 @@ test('SvelteKit enforces the approved CSP without broad source allowances', asyn
     'style-src': ['self'],
     'style-src-attr': ['none'],
     'img-src': ['self', 'https:'],
-    'connect-src': ['self', 'wss://livekit.example:7443'],
+    'connect-src': ['self', 'wss://livekit.example:7443', 'https://livekit.example:7443'],
     'media-src': ['self'],
     'worker-src': ['self'],
     'font-src': ['self'],
