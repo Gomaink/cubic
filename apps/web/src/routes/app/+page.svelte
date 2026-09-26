@@ -24,6 +24,9 @@
   let selectedProfile = $state<ProfileIdentity | null>(null);
   let loggingOut = $state(false);
   let userSettingsOpen = $state(false);
+  type AppPreferences = { compactMode: boolean; reduceMotion: boolean };
+  let appPreferences = $state<AppPreferences | null>(null);
+  let appPreferencesError = $state('');
   let tab = $state<'chats' | 'people' | 'servers'>('chats');
   function showMessages() {
     navigationMenu = null;
@@ -1123,6 +1126,27 @@
     applyProfileChanged({ userId: currentUser.id, displayName: result.displayName, avatarUrl: currentUser.avatarUrl });
   }
 
+  async function loadAppPreferences() {
+    appPreferencesError = '';
+    try {
+      const result = await api('/api/v1/users/me/settings');
+      appPreferences = {
+        compactMode: result.settings.compactMode,
+        reduceMotion: result.settings.reduceMotion
+      };
+    } catch {
+      appPreferencesError = 'Could not load app preferences. Try again.';
+    }
+  }
+
+  async function saveAppPreference(change: Partial<AppPreferences>) {
+    const result = await api('/api/v1/users/me/settings', { method: 'PATCH', body: JSON.stringify(change) });
+    appPreferences = {
+      compactMode: result.settings.compactMode,
+      reduceMotion: result.settings.reduceMotion
+    };
+  }
+
   async function uploadOwnAvatar(file: File) {
     const body = new FormData();
     body.append('avatar', file, file.name);
@@ -1302,11 +1326,15 @@
     return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= LATEST_THRESHOLD;
   }
 
+  function preferredScrollBehavior(behavior: ScrollBehavior): ScrollBehavior {
+    return appPreferences?.reduceMotion || window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : behavior;
+  }
+
   async function scrollToLatest(behavior: ScrollBehavior = 'auto') {
     await tick();
     const viewport = messagesViewport;
     if (!viewport) return;
-    viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior: preferredScrollBehavior(behavior) });
     atLatest = true;
     unreadNewMessages = 0;
   }
@@ -1642,7 +1670,7 @@
       error = 'The replied-to message is not currently loaded.';
       return;
     }
-    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    target.scrollIntoView({ block: 'center', behavior: preferredScrollBehavior('smooth') });
     highlightedMessageId = messageId;
     if (highlightTimer) clearTimeout(highlightTimer);
     highlightTimer = setTimeout(() => {
@@ -3852,6 +3880,7 @@
   onMount(() => {
     trustedInviteOrigin = window.location.origin;
     loadMediaPreferences();
+    void loadAppPreferences();
     Promise.all([refreshSocial(), refreshGroupInvites(), refreshServerInvites(), refreshConversations()]).catch((e) => error = e.message);
     void refreshServers();
 
@@ -4081,11 +4110,11 @@
 <svelte:head><title>Cubic — {currentUser.displayName}</title></svelte:head>
 <svelte:window onkeydown={(event) => { if (event.key === 'Escape') { if (userSettingsOpen) closeUserSettings(); else { navigationMenu = null; serverMenuOpen = false; if (serverMembersOpen) closeServerMembers(); else if (channelSettingsTarget) closeChannelSettings(); else if (serverSurface) closeServerSurface(); } } }} />
 
-<main class="messenger-shell cubic-app-shell">
+<main class="messenger-shell cubic-app-shell" class:cubic-app-compact={appPreferences?.compactMode} class:cubic-app-reduce-motion={appPreferences?.reduceMotion}>
   <PrimaryRail servers={servers} selectedServerId={activeServer?.id ?? null} messagesSelected={tab !== 'servers'} serverBrowserSelected={tab === 'servers' && activeServer === null} loading={serversLoading} onmessages={showMessages} onbrowse={showServerBrowser} onserver={selectServer} oncreate={(event) => openServerDialog('server', event)} />
 
   {#if userSettingsOpen}
-    <UserSettings profile={currentUser} voiceAvailable={voiceStatus !== 'idle'} {loggingOut} onclose={closeUserSettings} onsave={saveOwnProfile} onupload={uploadOwnAvatar} onremove={removeOwnAvatar} onmedia={() => { userSettingsOpen = false; void showMediaSettings(); }} onlogout={() => void logout()} />
+    <UserSettings profile={currentUser} voiceAvailable={voiceStatus !== 'idle'} {loggingOut} preferences={appPreferences} preferencesError={appPreferencesError} onretry={loadAppPreferences} onpreference={saveAppPreference} onclose={closeUserSettings} onsave={saveOwnProfile} onupload={uploadOwnAvatar} onremove={removeOwnAvatar} onmedia={() => { userSettingsOpen = false; void showMediaSettings(); }} onlogout={() => void logout()} />
   {/if}
 
   {#if serverDialog}

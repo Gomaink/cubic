@@ -188,6 +188,12 @@ test('member ticket joins the selected voice room, keeps text usable, and leaves
   await page.getByRole('button', { name: 'Text channel chat', exact: true }).click();
   await expect(page.locator('.chat-heading')).toContainText('chat');
   await expect(dock).toContainText('1 connected');
+  await openUserSettings(page);
+  await page.getByRole('region', { name: 'User Settings' }).getByRole('navigation', { name: 'User settings sections' }).getByRole('button', { name: 'App', exact: true }).click();
+  await page.getByRole('region', { name: 'User Settings' }).getByRole('checkbox', { name: 'Compact mode' }).check();
+  await expect(dock).toContainText('1 connected');
+  await page.getByRole('button', { name: 'Close User Settings' }).click();
+  await expect(page.locator('.chat-heading')).toContainText('chat');
   await dock.getByRole('button', { name: 'Show media stage' }).click();
   await expect(stage).toBeVisible();
   await stage.getByRole('button', { name: 'Minimize media stage' }).click();
@@ -199,6 +205,9 @@ test('member ticket joins the selected voice room, keeps text usable, and leaves
   await expect(userSettings.getByRole('heading', { name: 'Profile' })).toBeVisible();
   await userSettings.getByRole('navigation', { name: 'User settings sections' }).getByRole('button', { name: 'Sessions' }).click();
   await expect(userSettings.getByRole('heading', { name: 'Active sessions' })).toBeVisible();
+  await userSettings.getByRole('navigation', { name: 'User settings sections' }).getByRole('button', { name: 'App', exact: true }).click();
+  await expect(userSettings.getByRole('checkbox', { name: 'Compact mode' })).toBeVisible();
+  await expect(dock).toContainText('1 connected');
   await userSettings.getByRole('navigation', { name: 'User settings sections' }).getByRole('button', { name: 'Profile' }).click();
   await userSettings.getByRole('button', { name: 'Close User Settings' }).click();
   await expect(page.locator('.chat-heading')).toContainText('Fixture DM');

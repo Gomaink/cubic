@@ -16,6 +16,8 @@ let messages;
 let staged;
 let videoBytes;
 let sessionMode;
+let fixtureSettings;
+let settingsFailNext;
 let activeSessions;
 let groupMembers;
 let fixtureServers;
@@ -40,6 +42,8 @@ function attachment(name, contentType = 'image/png', dimensions = { width: 800, 
 }
 
 function reset() {
+  fixtureSettings = { theme: 'dark', compactMode: false, reduceMotion: false, inputVolume: 100, outputVolume: 100 };
+  settingsFailNext = false;
   fixtureServers = [];
   fixtureIconCounter = 0;
   fixtureChannels = [];
@@ -117,6 +121,12 @@ const server = createServer(async (request, response) => {
     sessionMode = url.searchParams.get('value') ?? 'ok';
     return json({ ok: true });
   }
+  if (url.pathname === '/__test/settings' && request.method === 'POST') {
+    const update = JSON.parse((await body()).toString());
+    fixtureSettings = { ...fixtureSettings, ...update };
+    return json({ settings: fixtureSettings });
+  }
+  if (url.pathname === '/__test/settings-fail-next') { settingsFailNext = true; return json({ ok: true }); }
   if (url.pathname === '/__test/video') { videoBytes = await body(); return json({ ok: true }); }
   if (url.pathname === '/__test/presence') {
     const target = url.searchParams.get('userId');
@@ -184,6 +194,14 @@ const server = createServer(async (request, response) => {
   }
   if (!isPeer && !request.headers.cookie?.includes('cubic_session=browser-fixture')) return json({ error: 'Authentication required.' }, 401);
   const requestUser = isPeer ? peer : user;
+  if (url.pathname === '/api/v1/users/me/settings' && request.method === 'GET') return json({ settings: fixtureSettings });
+  if (url.pathname === '/api/v1/users/me/settings' && request.method === 'PATCH') {
+    const change = JSON.parse((await body()).toString());
+    if (settingsFailNext) { settingsFailNext = false; return json({ error: 'Temporary settings failure.' }, 503); }
+    if (Object.keys(change).some((key) => !['compactMode', 'reduceMotion', 'theme', 'inputVolume', 'outputVolume'].includes(key))) return json({ error: 'Invalid settings.' }, 400);
+    fixtureSettings = { ...fixtureSettings, ...change };
+    return json({ settings: fixtureSettings });
+  }
   if (url.pathname === '/api/v1/server-invite-links/join' && request.method === 'POST') {
     const payload = JSON.parse((await body()).toString());
     const link = fixtureShareInviteLinks.find((item) => item.token === payload.token && !item.revokedAt && Date.parse(item.expiresAt) > Date.now());
