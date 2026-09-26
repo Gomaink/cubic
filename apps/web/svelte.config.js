@@ -14,6 +14,7 @@ if (
   throw new Error('LIVEKIT_PUBLIC_URL must be one exact ws:// or wss:// origin for web CSP');
 }
 const livekitOrigin = livekitUrl.origin;
+const livekitHttpOrigin = `${livekitUrl.protocol === 'wss:' ? 'https:' : 'http:'}//${livekitUrl.host}`;
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
@@ -29,7 +30,7 @@ const config = {
         'style-src': ['self'],
         'style-src-attr': ['none'],
         'img-src': ['self', 'https:'],
-        'connect-src': ['self', livekitOrigin],
+        'connect-src': ['self', livekitOrigin, livekitHttpOrigin],
         'media-src': ['self'],
         'worker-src': ['self'],
         'font-src': ['self'],
