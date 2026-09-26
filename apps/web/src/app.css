@@ -4714,6 +4714,26 @@ body { background: var(--cubic-onyx-0); }
 }
 .cubic-app-shell > .chat-panel { grid-column: 3; }
 .cubic-mobile-user-settings-trigger { display: none; }
+.cubic-mobile-user-settings-avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #34363d;
+  color: #fff;
+  font-size: .7rem;
+  font-weight: 800;
+}
+.cubic-mobile-user-settings-avatar img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 .cubic-messages-header-actions { display: flex; align-items: center; gap: 2px; }
 @media (min-width: 681px) {
   .cubic-app-shell .chat-back { display: none; }
