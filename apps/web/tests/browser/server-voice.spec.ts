@@ -188,6 +188,7 @@ test('member ticket joins the selected voice room, keeps text usable, and leaves
   if (testInfo.project.name === 'desktop') await page.screenshot({ path: '/tmp/cubic-alpha11-slice1/desktop-voice-in-messages.png' });
   await dock.getByRole('button', { name: 'Show media stage' }).click();
   await expect(stage).toBeVisible();
+  await stage.getByRole('button', { name: 'Minimize media stage' }).click();
   await openServers(page);
   await expect(dock).toContainText('1 connected');
   await page.locator('.cubic-server-row').filter({ hasText: 'Voice Hub' }).click();
