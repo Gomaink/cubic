@@ -1,15 +1,14 @@
 import { expect, test } from '@playwright/test';
-import { openServers } from './navigation';
+import { closeServerSettings, openServerSettingsSection, openServers } from './navigation';
 
 async function createShareLink(page: import('@playwright/test').Page) {
   await page.getByRole('button', { name: 'Create server' }).first().click();
   const createServer = page.getByRole('dialog', { name: 'Create server' });
   await createServer.getByRole('textbox', { name: 'Server name' }).fill('Shareable home');
   await createServer.getByRole('button', { name: 'Create server' }).click();
-  await page.getByRole('button', { name: 'Options for Shareable home' }).click();
-  await page.getByRole('button', { name: 'Invite people' }).click();
-  const invite = page.getByRole('dialog', { name: 'Invite people' });
-  await expect(invite.getByRole('heading', { name: 'Targeted friend invitation' })).toBeVisible();
+  await openServerSettingsSection(page, 'Invites');
+  const invite = page.getByRole('region', { name: 'Shareable home server settings' });
+  await expect(invite.getByRole('heading', { name: 'Invites' })).toBeVisible();
   await invite.getByRole('button', { name: 'Create shareable link' }).click();
   const link = await invite.getByRole('textbox', { name: 'New link — shown only once' }).inputValue();
   expect(/^http:\/\/127\.0\.0\.1:3197\/invite#[A-Za-z0-9_-]{43}$/.test(link)).toBe(true);
@@ -45,7 +44,7 @@ test('owner displays a bearer once, manages metadata, and revoke makes the link 
 test('guest preview strips fragment, login continues in tab, join and remove/rejoin use normal membership', async ({ page, browser }) => {
   const { invite, link } = await createShareLink(page);
   await invite.getByRole('button', { name: 'Done' }).click();
-  await page.getByRole('button', { name: 'Close server dialog' }).click();
+  await closeServerSettings(page);
   const guest = await browser.newContext({ baseURL: 'http://127.0.0.1:3197' });
   try {
     const recipient = await guest.newPage();
@@ -62,9 +61,8 @@ test('guest preview strips fragment, login continues in tab, join and remove/rej
     await expect(recipient).toHaveURL('/app');
     await expect(recipient.locator('.cubic-server-sidebar-head')).toContainText('Shareable home');
 
-    await page.getByRole('button', { name: 'Options for Shareable home' }).click();
-    await page.getByRole('button', { name: 'Members', exact: true }).click();
-    await page.getByRole('button', { name: 'Refresh members' }).click();
+    await openServerSettingsSection(page, 'Members');
+    await page.getByRole('region', { name: 'Shareable home server settings' }).getByRole('button', { name: 'Refresh' }).click();
     await page.getByRole('button', { name: /Remove Fixture DM from server/ }).click();
     await page.getByRole('dialog', { name: 'Remove server member' }).getByRole('button', { name: 'Remove from server' }).click();
     await recipient.reload();

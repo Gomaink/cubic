@@ -4226,20 +4226,8 @@
       {#if activeServer}
         <header class="conversation-list-header cubic-server-sidebar-head">
           <div class="cubic-server-heading"><span class="cubic-server-icon-shell" aria-hidden="true">{activeServer.name.slice(0, 1).toUpperCase()}{#if activeServer.iconUrl}{#key activeServer.iconUrl}<img src={activeServer.iconUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span><span><small>SERVER</small><h1>{activeServer.name}</h1></span></div>
-          <button class="icon-action" type="button" aria-label={`Options for ${activeServer.name}`} aria-expanded={serverMenuOpen} onclick={() => { navigationMenu = null; serverMenuOpen = !serverMenuOpen; }}><Icon name="more" size={19} /></button>
+          <button class="icon-action" type="button" aria-label="Settings" title="Settings" onclick={() => openServerSurface('overview')}><Icon name="settings" size={19} /></button>
         </header>
-        {#if serverMenuOpen}
-          <div class="cubic-server-options" aria-label="Server options">
-            <button type="button" onclick={() => openServerSurface('overview')}>Server overview</button>
-            {#if activeServer.ownerUserId === currentUser.id}
-              <button type="button" onclick={(event) => openServerDialog('invite', event)}>Invite people</button>
-              <button type="button" onclick={(event) => openServerDialog('icon', event)}>Server icon</button>
-            {:else}
-              <button type="button" onclick={leaveSelectedServer} disabled={serverMembershipBusy}>Leave server</button>
-            {/if}
-            <button type="button" onclick={(event) => { serverMenuOpen = false; toggleServerMembers(event); }}>Members</button>
-          </div>
-        {/if}
         <div class="cubic-channel-sidebar-head">
           <strong>CHANNELS</strong>
           {#if activeServer.ownerUserId === currentUser.id}
@@ -4272,7 +4260,6 @@
                 <button type="button" disabled={layoutBusy || index === 0} onclick={() => { navigationMenu = null; void shiftChannel(channel, -1); }}>Move {channel.name} up</button>
                 <button type="button" disabled={layoutBusy || index === channelsInScope(null).length - 1} onclick={() => { navigationMenu = null; void shiftChannel(channel, 1); }}>Move {channel.name} down</button>
                 <button type="button" onclick={() => openChannelSettings(channel)}>Channel settings for {channel.name}</button>
-                {#if channel.kind === 'voice'}<button type="button" onclick={(event) => { navigationMenu = null; editingVoiceChannelId = channel.id; voiceChannelName = channel.name; openServerDialog('rename-voice-channel', event); }}>Rename voice channel {channel.name}</button>{/if}
                 <button type="button" disabled={layoutBusy} onclick={(event) => { navigationMenu = null; movingChannelId = channel.id; movingChannelKind = channel.kind; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}>Move {channel.name} to category</button>
               </div>
             {/if}
@@ -4313,7 +4300,6 @@
                     <button type="button" disabled={layoutBusy || index === 0} onclick={() => { navigationMenu = null; void shiftChannel(channel, -1); }}>Move {channel.name} up</button>
                     <button type="button" disabled={layoutBusy || index === channelsInScope(category.id).length - 1} onclick={() => { navigationMenu = null; void shiftChannel(channel, 1); }}>Move {channel.name} down</button>
                     <button type="button" onclick={() => openChannelSettings(channel)}>Channel settings for {channel.name}</button>
-                    {#if channel.kind === 'voice'}<button type="button" onclick={(event) => { navigationMenu = null; editingVoiceChannelId = channel.id; voiceChannelName = channel.name; openServerDialog('rename-voice-channel', event); }}>Rename voice channel {channel.name}</button>{/if}
                     <button type="button" disabled={layoutBusy} onclick={(event) => { navigationMenu = null; movingChannelId = channel.id; movingChannelKind = channel.kind; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}>Move {channel.name} to category</button>
                   </div>
                 {/if}
@@ -4328,7 +4314,6 @@
           {#if layoutError}<p class="inline-error" role="alert">{layoutError}</p>{/if}
           {#if channelsError}<div class="inline-error cubic-server-error" role="alert">{channelsError} <button type="button" onclick={() => refreshServerChannels(activeServer!)}>Retry list</button></div>{/if}
         </div>
-        <button class="cubic-server-sidebar-members" type="button" aria-expanded={serverMembersOpen} onclick={toggleServerMembers}><Icon name="users" size={17} /> Members · {serverMembers.length}</button>
       {:else}
         <header class="conversation-list-header"><div><small>SPACES</small><h1>Servers</h1></div><button class="icon-action" type="button" aria-label="Create server" onclick={(event) => openServerDialog('server', event)}><Icon name="plus" size={19} /></button></header>
         <div class="cubic-server-list" aria-label="Your servers">
@@ -4519,9 +4504,6 @@
           <button class="chat-meta-button" type="button" aria-label="Members" title="Members" aria-expanded={memberPanelOpen} onclick={() => { groupPanelOpen = false; memberPanelOpen = !memberPanelOpen; if (memberPanelOpen && realtimeSocket) requestPresenceSnapshot(realtimeSocket); }}>
             <Icon name="users" size={19} />
           </button>
-        {/if}
-        {#if activeConversation.kind === 'server_text' && activeServer}
-          <button class="chat-meta-button" type="button" aria-label="Server members" title="Server members" aria-expanded={serverMembersOpen} onclick={toggleServerMembers}><Icon name="users" size={19} /></button>
         {/if}
         {#if activeConversation.kind === 'direct'}
           <button
@@ -5138,7 +5120,6 @@
         <header class="chat-header">
           <button class="chat-back" type="button" aria-label="Back to servers" onclick={() => activeServer = null}><Icon name="back" size={24} /></button>
           <div class="chat-heading"><strong>{activeServer.name}</strong><small>Server</small></div>
-          <button class="chat-meta-button" type="button" aria-label="Server members" aria-expanded={serverMembersOpen} onclick={toggleServerMembers}><Icon name="users" size={19} /></button>
         </header>
         <div class="cubic-server-foundation-copy">
           <Icon name="message" size={30} />

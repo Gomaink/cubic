@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { chooseServerCreate, isCompactNavigation, openServers } from './navigation';
+import { chooseServerCreate, isCompactNavigation, openServerSettings, openServers } from './navigation';
 
 const fixture = 'http://127.0.0.1:3198';
 
@@ -70,10 +70,17 @@ test('server overview, members, invites, and channel settings use dedicated hone
     await page.getByRole('button', { name: 'Back to server', exact: true }).click();
   }
 
-  await page.getByRole('button', { name: 'Options for Surface Lab' }).click();
-  await page.getByRole('button', { name: 'Server overview' }).click();
+  const header = page.locator('.cubic-server-sidebar-head');
+  await expect(header.getByRole('button', { name: 'Settings', exact: true })).toHaveCount(1);
+  await expect(page.locator('.cubic-server-options')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Server overview' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Invite people' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Server icon', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Members', exact: true })).toHaveCount(0);
+  await openServerSettings(page);
   const settings = page.getByRole('region', { name: 'Surface Lab server settings' });
   await expect(settings).toBeVisible();
+  await expect(settings.getByRole('navigation', { name: 'Server settings sections' }).getByRole('button', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
   await expectDedicatedSurfaceOwnsViewport(page, settings);
   await expect(settings.getByRole('heading', { name: 'Surface Lab' })).toBeVisible();
   await expect(settings.getByText('Text channels').locator('..')).toContainText('1');
@@ -98,6 +105,10 @@ test('server overview, members, invites, and channel settings use dedicated hone
 
   const general = page.getByRole('region', { name: 'Category General' });
   await general.getByRole('button', { name: 'Actions for voice channel Lounge' }).click();
+  const voiceActions = general.getByRole('group', { name: 'Actions for Lounge' });
+  await expect(voiceActions.getByRole('button', { name: 'Channel settings for Lounge' })).toHaveCount(1);
+  await expect(voiceActions.getByRole('button', { name: 'Rename voice channel Lounge' })).toHaveCount(0);
+  await expect(voiceActions.getByRole('button', { name: 'Move Lounge up' })).toBeVisible();
   await general.getByRole('button', { name: 'Channel settings for Lounge' }).click();
   let channelSettings = page.getByRole('region', { name: 'Lounge channel settings' });
   await expect(channelSettings).toBeVisible();
@@ -116,6 +127,9 @@ test('server overview, members, invites, and channel settings use dedicated hone
   await expect(later.getByRole('button', { name: 'Join voice channel Stage', exact: true })).toBeVisible();
 
   await page.getByRole('region', { name: 'Category General' }).getByRole('button', { name: 'Actions for text channel chat' }).click();
+  const textActions = page.getByRole('region', { name: 'Category General' }).getByRole('group', { name: 'Actions for chat' });
+  await expect(textActions.getByRole('button', { name: 'Channel settings for chat' })).toHaveCount(1);
+  await expect(textActions.getByRole('button', { name: 'Move chat to category' })).toBeVisible();
   await page.getByRole('button', { name: 'Channel settings for chat' }).click();
   const textSettings = page.getByRole('region', { name: 'chat channel settings' });
   await expect(textSettings).toBeVisible();
@@ -143,8 +157,7 @@ test('ordinary members get read-only server surfaces without owner administratio
     await memberPage.goto('/app');
     await openServers(memberPage);
     await memberPage.locator('.cubic-server-row').filter({ hasText: 'Member Surface' }).click();
-    await memberPage.getByRole('button', { name: 'Options for Member Surface' }).click();
-    await memberPage.getByRole('button', { name: 'Server overview' }).click();
+    await openServerSettings(memberPage);
     const settings = memberPage.getByRole('region', { name: 'Member Surface server settings' });
     await expect(settings.getByText('You are a member of this server.')).toBeVisible();
     await expect(settings.getByRole('button', { name: 'Invites' })).toHaveCount(0);
