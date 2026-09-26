@@ -3802,6 +3802,12 @@ body { background: var(--cubic-onyx-0); }
 }
 .cubic-session-footer button { min-height: 38px; padding: 8px 13px; }
 
+/* The existing session manager now lives inside the User Settings content scroller. */
+.cubic-user-settings .cubic-session-panel { display: block; width: min(100%, 780px); max-height: none; margin-inline: auto; }
+.cubic-user-settings .cubic-session-header { padding: 0 0 16px; }
+.cubic-user-settings .cubic-session-content { overflow: visible; padding: 14px 0; }
+.cubic-user-settings .cubic-session-footer { padding: 14px 0; background: transparent; }
+
 @media (max-width: 680px) {
   .messenger-nav > .cubic-session-settings-trigger {
     width: 58px;
@@ -3827,6 +3833,9 @@ body { background: var(--cubic-onyx-0); }
   .cubic-session-row > button { min-height: 42px; width: 100%; }
   .cubic-session-footer { flex-direction: column; padding: 10px; }
   .cubic-session-footer button { min-height: 44px; width: 100%; }
+  .cubic-user-settings .cubic-session-header { padding: 0 0 14px; }
+  .cubic-user-settings .cubic-session-content { padding: 12px 0; }
+  .cubic-user-settings .cubic-session-footer { padding: 12px 0; }
 }
 
 .voice-dock-actions > button:has(svg) > span {
@@ -4704,12 +4713,14 @@ body { background: var(--cubic-onyx-0); }
   border-right: 0 !important;
 }
 .cubic-app-shell > .chat-panel { grid-column: 3; }
+.cubic-mobile-user-settings-trigger { display: none; }
 .cubic-messages-header-actions { display: flex; align-items: center; gap: 2px; }
 @media (min-width: 681px) {
   .cubic-app-shell .chat-back { display: none; }
 }
 
 @media (max-width: 680px) {
+  .cubic-app-shell .cubic-mobile-user-settings-trigger { display: grid; flex: 0 0 38px; width: 38px; }
   .messenger-shell.cubic-app-shell { grid-template-columns: 64px minmax(0, 1fr) !important; grid-template-rows: minmax(0, 1fr) !important; }
   .cubic-app-shell > .cubic-context-column { grid-column: 2; grid-row: 1; max-height: 100dvh; }
   .cubic-app-shell > .chat-panel {

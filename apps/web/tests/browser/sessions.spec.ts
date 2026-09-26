@@ -3,9 +3,9 @@ import { test, expect, type Page } from '@playwright/test';
 const fixture = 'http://127.0.0.1:3198';
 
 async function openSessions(page: Page) {
-  await page.getByRole('button', { name: 'Account actions' }).click();
-  await page.getByRole('button', { name: 'Sessions', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Active sessions' })).toBeVisible();
+  await page.getByRole('button', { name: 'User Settings' }).click();
+  await page.getByRole('navigation', { name: 'User settings sections' }).getByRole('button', { name: 'Sessions', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'User Settings' }).getByRole('heading', { name: 'Active sessions' })).toBeVisible();
 }
 
 test.beforeEach(async ({ page, context, request }) => {
@@ -19,23 +19,23 @@ test.beforeEach(async ({ page, context, request }) => {
   await page.goto('/app');
 });
 
-test('session dialog is responsive, keyboard accessible, and shows safe session metadata', async ({ page }) => {
+test('sessions workspace is responsive, keyboard accessible, and shows safe metadata', async ({ page }) => {
   await page.route('**/api/v1/auth/sessions', async (route) => {
     if (route.request().method() !== 'GET') return route.continue();
     await new Promise((resolve) => setTimeout(resolve, 150));
     return route.continue();
   });
 
-  await page.getByRole('button', { name: 'Account actions' }).click();
-  await page.getByRole('button', { name: 'Sessions', exact: true }).click();
+  await page.getByRole('button', { name: 'User Settings' }).click();
+  await page.getByRole('navigation', { name: 'User settings sections' }).getByRole('button', { name: 'Sessions' }).click();
   await expect(page.getByText('Loading active sessions…')).toBeVisible();
-  const dialog = page.getByRole('dialog', { name: 'Active sessions' });
-  await expect(dialog.getByText('Firefox on Linux')).toBeVisible();
-  await expect(dialog.getByText('Unknown client')).toBeVisible();
-  await expect(dialog.getByText('Current session')).toBeVisible();
-  await expect(dialog.getByText(/Approximately/).first()).toBeVisible();
+  const settings = page.getByRole('region', { name: 'User Settings' });
+  await expect(settings.getByText('Firefox on Linux')).toBeVisible();
+  await expect(settings.getByText('Unknown client')).toBeVisible();
+  await expect(settings.getByText('Current session')).toBeVisible();
+  await expect(settings.getByText(/Approximately/).first()).toBeVisible();
 
-  const bounds = await dialog.boundingBox();
+  const bounds = await settings.boundingBox();
   const viewport = page.viewportSize();
   expect(bounds).not.toBeNull();
   expect(viewport).not.toBeNull();
@@ -45,8 +45,8 @@ test('session dialog is responsive, keyboard accessible, and shows safe session 
   expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport!.height);
 
   await page.keyboard.press('Escape');
-  await expect(dialog).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Account actions' })).toBeVisible();
+  await expect(settings).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'User Settings' })).toBeVisible();
 });
 
 test('session dialog handles error, retry, and empty states', async ({ page, request }) => {
@@ -57,7 +57,7 @@ test('session dialog handles error, retry, and empty states', async ({ page, req
   await request.post(`${fixture}/__test/session-mode?value=ok`);
   await page.getByRole('button', { name: 'Retry' }).click();
   await expect(page.getByText('Firefox on Linux')).toBeVisible();
-  await page.getByRole('button', { name: 'Close active sessions' }).click();
+  await page.getByRole('button', { name: 'Close User Settings' }).click();
 
   await request.post(`${fixture}/__test/session-mode?value=empty`);
   await openSessions(page);
@@ -76,7 +76,7 @@ test('session revocation requires confirmation and refreshes or redirects approp
   await unknownRow.getByRole('button', { name: 'Revoke' }).click();
   await expect(unknownRow).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Close active sessions' }).click();
+  await page.getByRole('button', { name: 'Close User Settings' }).click();
   await request.post(`${fixture}/__test/reset`);
   await openSessions(page);
   page.once('dialog', (confirmation) => confirmation.accept());

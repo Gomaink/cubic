@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import Icon from './Icon.svelte';
 
   type SessionView = {
     id: string;
@@ -11,8 +10,6 @@
     expiresAt: string;
   };
 
-  let { onclose }: { onclose: () => void } = $props();
-  let dialog: HTMLDialogElement;
   let sessions = $state<SessionView[]>([]);
   let loading = $state(true);
   let error = $state('');
@@ -110,34 +107,18 @@
     }
   }
 
-  function closeDialog() {
-    dialog.close();
-    onclose();
-  }
-
   onMount(() => {
-    dialog.showModal();
     void loadSessions();
   });
 </script>
 
-<dialog
-  class="cubic-session-dialog"
-  bind:this={dialog}
-  aria-labelledby="cubic-session-title"
-  oncancel={(event) => { event.preventDefault(); closeDialog(); }}
-  onclick={(event) => { if (event.target === dialog) closeDialog(); }}
->
-  <section class="cubic-session-panel">
+<section class="cubic-session-panel" aria-labelledby="cubic-session-title">
     <header class="cubic-session-header">
       <div>
         <small>ACCOUNT SECURITY</small>
         <h2 id="cubic-session-title">Active sessions</h2>
         <p>Review the browsers and devices currently signed in to Cubic.</p>
       </div>
-      <button type="button" aria-label="Close active sessions" title="Close" onclick={closeDialog}>
-        <Icon name="x" size={18} />
-      </button>
     </header>
 
     <div class="cubic-session-content" aria-busy={loading}>
@@ -193,5 +174,4 @@
         {pendingAction === 'all' ? 'Working…' : 'Log out everywhere'}
       </button>
     </footer>
-  </section>
-</dialog>
+</section>

@@ -22,11 +22,12 @@ test('primary rail, user bar, and contextual navigation retain existing actions'
   await page.getByRole('button', { name: 'Back to Messages' }).click();
   await expect(page.getByRole('heading', { name: 'Conversations', exact: true })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Account actions' }).click();
-  await expect(page.getByRole('button', { name: 'Log out' })).toBeVisible();
-  await page.getByRole('button', { name: 'Sessions', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Active sessions' })).toBeVisible();
-  await page.getByRole('button', { name: 'Close active sessions' }).click();
+  await page.getByRole('button', { name: 'User Settings' }).click();
+  const userSettings = page.getByRole('region', { name: 'User Settings' });
+  await expect(userSettings.getByRole('button', { name: 'Log out' })).toBeVisible();
+  await userSettings.getByRole('navigation', { name: 'User settings sections' }).getByRole('button', { name: 'Sessions' }).click();
+  await expect(userSettings.getByRole('heading', { name: 'Active sessions' })).toBeVisible();
+  await userSettings.getByRole('button', { name: 'Close User Settings' }).click();
 
   await rail.getByRole('button', { name: 'Create server' }).click();
   const dialog = page.getByRole('dialog', { name: 'Create server' });

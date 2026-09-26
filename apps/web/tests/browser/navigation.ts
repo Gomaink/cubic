@@ -30,6 +30,12 @@ export async function openPeople(page: Page) {
   await page.getByRole('button', { name: 'People and friends' }).click();
 }
 
+export async function openUserSettings(page: Page) {
+  const compactHeader = page.locator('.chat-panel.open .cubic-mobile-user-settings-trigger');
+  if (isCompactNavigation(page) && await compactHeader.isVisible()) await compactHeader.click();
+  else await page.locator('.cubic-user-bar').getByRole('button', { name: 'User Settings' }).click();
+}
+
 export async function openServerSettings(page: Page) {
   await closeMobileContent(page);
   await page.locator('.cubic-server-sidebar-head').getByRole('button', { name: 'Settings', exact: true }).click();

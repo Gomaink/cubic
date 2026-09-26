@@ -204,8 +204,10 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === '/api/v1/users/me/avatar' && request.method === 'POST') {
     const uploaded = await body();
-    if (!uploaded.includes(Buffer.from('GIF89a'))) return json({ error: 'Use a GIF image.' }, 415);
-    requestUser.avatarUrl = `/api/v1/users/${requestUser.id}/avatar/test.gif`;
+    const kind = uploaded.includes(Buffer.from('GIF89a')) ? 'gif'
+      : uploaded.includes(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? 'png' : null;
+    if (!kind) return json({ error: 'Use a supported image.' }, 415);
+    requestUser.avatarUrl = `/api/v1/users/${requestUser.id}/avatar/test.${kind}`;
     groupMembers = groupMembers.map((member) => member.id === requestUser.id ? { ...member, avatarUrl: requestUser.avatarUrl } : member);
     const profile = { userId: requestUser.id, displayName: requestUser.displayName, avatarUrl: requestUser.avatarUrl };
     io.emit('profile:changed', profile);
@@ -218,10 +220,11 @@ const server = createServer(async (request, response) => {
     io.emit('profile:changed', profile);
     return json({ profile });
   }
-  const avatarOwner = [user, peer].find((candidate) => url.pathname === `/api/v1/users/${candidate.id}/avatar/test.gif` && candidate.avatarUrl);
+  const avatarOwner = [user, peer].find((candidate) => url.pathname === candidate.avatarUrl && candidate.avatarUrl);
   if (avatarOwner) {
-    response.writeHead(200, { 'content-type': 'image/gif', 'x-content-type-options': 'nosniff' });
-    response.end(animatedGif);
+    const staticImage = avatarOwner.avatarUrl.endsWith('.png');
+    response.writeHead(200, { 'content-type': staticImage ? 'image/png' : 'image/gif', 'x-content-type-options': 'nosniff' });
+    response.end(staticImage ? png : animatedGif);
     return;
   }
   if (url.pathname === '/api/v1/auth/me') return json({ user: requestUser });
