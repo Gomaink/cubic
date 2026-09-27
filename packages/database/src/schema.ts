@@ -26,6 +26,7 @@ export const users = pgTable(
     legacyId: text('legacy_id'),
     email: text('email').notNull(),
     emailNormalized: text('email_normalized').notNull(),
+    emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true, mode: 'date' }),
     username: varchar('username', { length: 32 }).notNull(),
     usernameNormalized: varchar('username_normalized', { length: 32 }).notNull(),
     displayName: varchar('display_name', { length: 64 }).notNull(),
@@ -40,6 +41,27 @@ export const users = pgTable(
     uniqueIndex('users_legacy_id_uq').on(table.legacyId),
     uniqueIndex('users_email_normalized_uq').on(table.emailNormalized),
     uniqueIndex('users_username_normalized_uq').on(table.usernameNormalized)
+  ]
+);
+
+export const emailVerificationTokens = pgTable(
+  'email_verification_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    purpose: varchar('purpose', { length: 16 }).notNull(),
+    tokenDigest: varchar('token_digest', { length: 64 }).notNull(),
+    targetEmailNormalized: text('target_email_normalized').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true, mode: 'date' }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex('email_verification_tokens_digest_uq').on(table.tokenDigest),
+    index('email_verification_tokens_user_purpose_idx').on(table.userId, table.purpose),
+    check('email_verification_tokens_purpose_ck', sql`${table.purpose} in ('verify_email', 'change_email')`),
+    check('email_verification_tokens_digest_ck', sql`${table.tokenDigest} ~ '^[0-9a-f]{64}$'`),
+    check('email_verification_tokens_expiry_ck', sql`${table.expiresAt} > ${table.createdAt}`)
   ]
 );
 

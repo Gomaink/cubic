@@ -85,6 +85,14 @@ const envSchema = z
       60 * 60 * 1000
     ),
     REGISTRATION_ENABLED: enabledString,
+    MAIL_TRANSPORT: z.enum(['disabled', 'smtp']).default('disabled'),
+    MAIL_FROM: z.string().default(''),
+    SMTP_HOST: z.string().default(''),
+    SMTP_PORT: z.string().default(''),
+    SMTP_SECURE: booleanString,
+    SMTP_USER: z.string().default(''),
+    SMTP_PASSWORD: z.string().default(''),
+    PUBLIC_APP_URL: z.string().default(''),
     MEDIA_ROOT: z.string().min(1).default('/data/media'),
     GROUP_AVATAR_MAX_BYTES: z.coerce.number().int().min(65536).max(8 * 1024 * 1024).default(2 * 1024 * 1024),
     ATTACHMENT_MAX_BYTES: z.coerce.number().int().min(1024 * 1024).max(250 * 1024 * 1024).default(ATTACHMENT_DEFAULTS.maxBytes),
@@ -187,6 +195,18 @@ const envSchema = z
     LIVEKIT_API_SECRET: z.string().min(32)
   })
   .superRefine((env, context) => {
+    if (env.MAIL_TRANSPORT === 'smtp') {
+      if (!z.email().safeParse(env.MAIL_FROM).success) context.addIssue({ code: 'custom', path: ['MAIL_FROM'], message: 'must be a valid sender email in SMTP mode' });
+      if (!env.SMTP_HOST.trim()) context.addIssue({ code: 'custom', path: ['SMTP_HOST'], message: 'is required in SMTP mode' });
+      if (!/^[1-9][0-9]*$/.test(env.SMTP_PORT) || Number(env.SMTP_PORT) > 65535) context.addIssue({ code: 'custom', path: ['SMTP_PORT'], message: 'must be a TCP port in SMTP mode' });
+      if (Boolean(env.SMTP_USER) !== Boolean(env.SMTP_PASSWORD)) context.addIssue({ code: 'custom', path: ['SMTP_USER'], message: 'SMTP_USER and SMTP_PASSWORD must be supplied together' });
+      try {
+        const publicOrigin = canonicalBrowserOrigin(env.PUBLIC_APP_URL);
+        if (env.NODE_ENV === 'production' && !publicOrigin.startsWith('https://')) throw new Error('HTTPS required');
+      } catch {
+        context.addIssue({ code: 'custom', path: ['PUBLIC_APP_URL'], message: 'must be one exact HTTPS origin in production (HTTP is allowed for local development)' });
+      }
+    }
     if (env.NODE_ENV === 'production' && !env.CORS_ORIGIN.startsWith('https://')) {
       context.addIssue({
         code: 'custom',
@@ -231,6 +251,9 @@ const envSchema = z
 export type AppEnv = z.infer<typeof envSchema>;
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
+  if (source.MAIL_TRANSPORT === 'smtp' && source.SMTP_SECURE === undefined) {
+    throw new Error('Invalid Cubic API environment: SMTP_SECURE: is required in SMTP mode');
+  }
   if (source.TRUST_PROXY_HOPS !== undefined) {
     throw new Error(
       'Invalid Cubic API environment: TRUST_PROXY_HOPS has been removed; use TRUST_PROXY_CIDRS with explicit IP CIDRs'

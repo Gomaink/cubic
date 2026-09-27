@@ -28,6 +28,20 @@ test('production requires secure session cookies', () => {
   );
 });
 
+test('mail is disabled by default and SMTP configuration is explicit and secret-safe', () => {
+  assert.equal(loadEnv(requiredEnvironment).MAIL_TRANSPORT, 'disabled');
+  const smtp = { ...requiredEnvironment, MAIL_TRANSPORT: 'smtp', MAIL_FROM: 'cubic@example.test', SMTP_HOST: 'smtp.example.test', SMTP_PORT: '587', SMTP_SECURE: 'false', PUBLIC_APP_URL: 'http://localhost:3010' };
+  assert.equal(loadEnv(smtp).SMTP_PORT, '587');
+  for (const missing of ['MAIL_FROM', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'PUBLIC_APP_URL']) {
+    assert.throws(() => loadEnv({ ...smtp, [missing]: undefined }), new RegExp(missing));
+  }
+  assert.throws(() => loadEnv({ ...smtp, SMTP_USER: 'cubic' }), /SMTP_USER and SMTP_PASSWORD/);
+  assert.throws(() => loadEnv({ ...smtp, SMTP_PASSWORD: 'test-only-secret' }), /SMTP_USER and SMTP_PASSWORD/);
+  assert.throws(() => loadEnv({ ...smtp, PUBLIC_APP_URL: 'https://example.test/path' }), /PUBLIC_APP_URL/);
+  assert.throws(() => loadEnv({ ...smtp, NODE_ENV: 'production', CORS_ORIGIN: 'https://cubic.example.test', SESSION_COOKIE_SECURE: 'true' }), /PUBLIC_APP_URL/);
+  assert.equal(loadEnv({ ...smtp, NODE_ENV: 'production', CORS_ORIGIN: 'https://cubic.example.test', SESSION_COOKIE_SECURE: 'true', PUBLIC_APP_URL: 'https://cubic.example.test' }).MAIL_TRANSPORT, 'smtp');
+});
+
 test('browser origin is explicit, canonical, and HTTPS in production', () => {
   assert.throws(
     () => loadEnv({ ...requiredEnvironment, CORS_ORIGIN: undefined }),

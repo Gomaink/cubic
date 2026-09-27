@@ -111,6 +111,7 @@ function sessionRecord(
       legacyId: null,
       email: `${userId}@example.test`,
       emailNormalized: `${userId}@example.test`,
+      emailVerifiedAt: null,
       username: `user-${userId.slice(-4)}`,
       usernameNormalized: `user-${userId.slice(-4)}`,
       displayName: `User ${userId.slice(-4)}`,

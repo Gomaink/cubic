@@ -8,6 +8,7 @@ import { createRequireAuth } from '../auth/guard.js';
 import { hashPassword, verifyPassword } from '../security/password.js';
 import { SessionPersistenceError, type SessionService } from '../security/session.js';
 import type { RealtimeEvents } from '../realtime/events.js';
+import type { EmailVerificationService } from '../mail/email-verification.js';
 
 const passwordPolicySchema = z.string().min(10).max(128);
 
@@ -46,6 +47,7 @@ export interface AuthRoutesOptions {
   registrationEnabled: boolean;
   sessionService: SessionService;
   realtimeEvents: RealtimeEvents;
+  emailVerification?: EmailVerificationService;
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -146,7 +148,15 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
           maxAge: options.sessionTtlDays * 24 * 60 * 60
         });
 
-        return reply.code(201).send({ user: toPublicUser(user) });
+        let verificationEmailSent = false;
+        if (options.emailVerification?.available) {
+          try {
+            verificationEmailSent = (await options.emailVerification.sendCurrent(user.id)) === 'sent';
+          } catch {
+            // Account/session creation is durable. The user can retry from Security.
+          }
+        }
+        return reply.code(201).send({ user: toPublicUser(user), verificationEmailSent });
       } catch (error) {
         if (isUniqueViolation(error)) {
           return reply.code(409).send({ error: 'E-mail or username is already in use.' });
