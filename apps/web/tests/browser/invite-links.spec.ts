@@ -30,8 +30,12 @@ test('owner displays a bearer once, manages metadata, and revoke makes the link 
   await expect(invite.getByRole('textbox', { name: 'New link — shown only once' })).toHaveCount(0);
   await expect(invite.getByRole('heading', { name: 'Existing links' })).toBeVisible();
   await expect(invite.getByRole('button', { name: 'Copy link' })).toHaveCount(0);
+  await expect(invite.locator('.cubic-share-link-row')).toContainText('Active');
   await invite.getByRole('button', { name: /Revoke link created/ }).click();
-  await expect(invite).toContainText('Revoked');
+  await expect(invite.getByRole('button', { name: 'Show 1 revoked link' })).toBeVisible();
+  await invite.getByRole('button', { name: 'Show 1 revoked link' }).click();
+  await expect(invite.locator('.cubic-share-link-inactive')).toContainText('Revoked');
+  await expect(invite.getByRole('button', { name: /Revoke link created/ })).toHaveCount(0);
   const guest = await browser.newContext({ baseURL: 'http://127.0.0.1:3197' });
   try {
     const pageGuest = await guest.newPage();

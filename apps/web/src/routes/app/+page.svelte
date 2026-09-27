@@ -114,6 +114,7 @@
   let serverMembers = $state<ProfileIdentity[]>([]);
   let pendingServerInvites = $state<any[]>([]);
   let shareInviteLinks = $state<ShareInviteLink[]>([]);
+  let showRevokedInviteLinks = $state(false);
   let oneTimeInviteUrl = $state('');
   let shareInviteBusy = $state(false);
   let shareInviteError = $state('');
@@ -4298,10 +4299,10 @@
             </div>
             {#if navigationMenu === `channel:${channel.kind}:${channel.id}` && activeServer.ownerUserId === currentUser.id}
               <div class="cubic-navigation-actions" role="group" aria-label={`Actions for ${channel.name}`}>
-                <button type="button" disabled={layoutBusy || index === 0} onclick={() => { navigationMenu = null; void shiftChannel(channel, -1); }}>Move {channel.name} up</button>
-                <button type="button" disabled={layoutBusy || index === channelsInScope(null).length - 1} onclick={() => { navigationMenu = null; void shiftChannel(channel, 1); }}>Move {channel.name} down</button>
-                <button type="button" onclick={() => openChannelSettings(channel)}>Channel settings for {channel.name}</button>
-                <button type="button" disabled={layoutBusy} onclick={(event) => { navigationMenu = null; movingChannelId = channel.id; movingChannelKind = channel.kind; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}>Move {channel.name} to category</button>
+                <button type="button" disabled={layoutBusy || index === 0} onclick={() => { navigationMenu = null; void shiftChannel(channel, -1); }}><Icon name="chevron-down" size={16} /><span>Move {channel.name} up</span></button>
+                <button type="button" disabled={layoutBusy || index === channelsInScope(null).length - 1} onclick={() => { navigationMenu = null; void shiftChannel(channel, 1); }}><Icon name="chevron-down" size={16} /><span>Move {channel.name} down</span></button>
+                <button type="button" onclick={() => openChannelSettings(channel)}><Icon name="settings" size={16} /><span>Channel settings for {channel.name}</span></button>
+                <button type="button" disabled={layoutBusy} onclick={(event) => { navigationMenu = null; movingChannelId = channel.id; movingChannelKind = channel.kind; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}><Icon name="server" size={16} /><span>Move {channel.name} to category</span></button>
               </div>
             {/if}
             {#if channel.kind === 'voice' && serverVoicePresence[channel.id]?.length}
@@ -4338,10 +4339,10 @@
                 </div>
                 {#if navigationMenu === `channel:${channel.kind}:${channel.id}` && activeServer.ownerUserId === currentUser.id}
                   <div class="cubic-navigation-actions" role="group" aria-label={`Actions for ${channel.name}`}>
-                    <button type="button" disabled={layoutBusy || index === 0} onclick={() => { navigationMenu = null; void shiftChannel(channel, -1); }}>Move {channel.name} up</button>
-                    <button type="button" disabled={layoutBusy || index === channelsInScope(category.id).length - 1} onclick={() => { navigationMenu = null; void shiftChannel(channel, 1); }}>Move {channel.name} down</button>
-                    <button type="button" onclick={() => openChannelSettings(channel)}>Channel settings for {channel.name}</button>
-                    <button type="button" disabled={layoutBusy} onclick={(event) => { navigationMenu = null; movingChannelId = channel.id; movingChannelKind = channel.kind; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}>Move {channel.name} to category</button>
+                    <button type="button" disabled={layoutBusy || index === 0} onclick={() => { navigationMenu = null; void shiftChannel(channel, -1); }}><Icon name="chevron-down" size={16} /><span>Move {channel.name} up</span></button>
+                    <button type="button" disabled={layoutBusy || index === channelsInScope(category.id).length - 1} onclick={() => { navigationMenu = null; void shiftChannel(channel, 1); }}><Icon name="chevron-down" size={16} /><span>Move {channel.name} down</span></button>
+                    <button type="button" onclick={() => openChannelSettings(channel)}><Icon name="settings" size={16} /><span>Channel settings for {channel.name}</span></button>
+                    <button type="button" disabled={layoutBusy} onclick={(event) => { navigationMenu = null; movingChannelId = channel.id; movingChannelKind = channel.kind; moveDestinationId = channel.categoryId ?? ''; openServerDialog('move-channel', event); }}><Icon name="server" size={16} /><span>Move {channel.name} to category</span></button>
                   </div>
                 {/if}
                 {#if channel.kind === 'voice' && serverVoicePresence[channel.id]?.length}
@@ -4427,10 +4428,9 @@
               <section class="cubic-settings-section" aria-labelledby="cubic-server-overview-title">
                 <div class="cubic-settings-title">
                   <div class="cubic-settings-server-identity">
-                    <span class="cubic-server-icon-shell cubic-settings-server-icon" aria-hidden="true">{activeServer.name.slice(0, 1).toUpperCase()}{#if activeServer.iconUrl}{#key activeServer.iconUrl}<img src={activeServer.iconUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span>
+                    <span class="cubic-settings-icon-edit"><span class="cubic-server-icon-shell cubic-settings-server-icon" aria-hidden="true">{activeServer.name.slice(0, 1).toUpperCase()}{#if activeServer.iconUrl}{#key activeServer.iconUrl}<img src={activeServer.iconUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span>{#if activeServer.ownerUserId === currentUser.id}<button type="button" class="cubic-settings-icon-edit-button" aria-label="Change icon" title="Change icon" onclick={(event) => openServerDialog('icon', event)}><Icon name="edit" size={15} /></button>{/if}</span>
                     <div><small>SERVER OVERVIEW</small><h2 id="cubic-server-overview-title">{activeServer.name}</h2><p>{activeServer.ownerUserId === currentUser.id ? 'You own this server.' : 'You are a member of this server.'}</p></div>
                   </div>
-                  {#if activeServer.ownerUserId === currentUser.id}<button type="button" class="cubic-settings-secondary" onclick={(event) => openServerDialog('icon', event)}><Icon name="upload" size={16} /> Change icon</button>{/if}
                 </div>
                 <div class="cubic-settings-stats" aria-label="Server summary">
                   <div><strong>{serverMembers.length}</strong><span>Members</span></div>
@@ -4442,9 +4442,7 @@
                   <div class="cubic-settings-row"><div><strong>Owner</strong><small>Server ownership is fixed in the current server model.</small></div><span>{serverMembers.find((member) => member.id === activeServer?.ownerUserId)?.displayName ?? 'Owner'}</span></div>
                   <div class="cubic-settings-row"><div><strong>Created</strong><small>Server creation date</small></div><span>{new Date(activeServer.createdAt).toLocaleDateString()}</span></div>
                 </div>
-                {#if activeServer.ownerUserId === currentUser.id}
-                  <div class="cubic-settings-actions"><button type="button" onclick={() => openServerSurface('members')}><Icon name="users" size={16} /> Manage members</button><button type="button" onclick={() => openServerSurface('invites')}><Icon name="user-plus" size={16} /> Manage invites</button></div>
-                {:else}
+                {#if activeServer.ownerUserId !== currentUser.id}
                   <div class="cubic-settings-danger"><div><strong>Leave server</strong><p>Your previous messages remain after you leave.</p></div><button type="button" class="danger-button" onclick={leaveSelectedServer} disabled={serverMembershipBusy}>Leave server</button></div>
                 {/if}
                 {#if serverMembershipError}<p class="inline-error" role="alert">{serverMembershipError}</p>{/if}
@@ -4477,18 +4475,27 @@
                       <option value="">Choose a friend</option>
                       {#each friends.filter((friend) => friend.id !== currentUser.id && !serverMembers.some((member) => member.id === friend.id) && !pendingServerInvites.some((invite) => invite.invitee.id === friend.id)) as friend (friend.id)}<option value={friend.id}>{friend.displayName} (@{friend.username})</option>{/each}
                     </select>
-                    <button type="submit" disabled={serverMembershipBusy || !serverInviteTarget}>Invite friend</button>
+                    <button class="cubic-control cubic-control-primary" type="submit" disabled={serverMembershipBusy || !serverInviteTarget}>Invite friend</button>
                   </form>
                   {#if pendingServerInvites.length}<h3>Pending invitations</h3>{/if}
-                  {#each pendingServerInvites as invite (invite.id)}<div class="cubic-server-member-row"><span>{invite.invitee.displayName} · Pending</span><button type="button" aria-label={`Cancel invitation for ${invite.invitee.displayName}`} onclick={() => cancelServerInvite(invite.id)} disabled={serverMembershipBusy}>Cancel</button></div>{/each}
+                  {#each pendingServerInvites as invite (invite.id)}<div class="cubic-pending-invite-row"><span><strong>{invite.invitee.displayName}</strong><small>Pending invitation</small></span><button class="cubic-control cubic-control-ghost" type="button" aria-label={`Cancel invitation for ${invite.invitee.displayName}`} onclick={() => cancelServerInvite(invite.id)} disabled={serverMembershipBusy}>Cancel</button></div>{/each}
                 </div>
                 <div class="cubic-settings-card cubic-share-invites" aria-label="Shareable invite links">
                   <h3>Share invite link</h3><p>Anyone with a link can join. Links expire after 7 days. Removing a member does not revoke a link.</p>
-                  <button type="button" onclick={createShareInviteLink} disabled={shareInviteBusy}>{shareInviteBusy ? 'Creating…' : 'Create shareable link'}</button>
-                  {#if oneTimeInviteUrl}<div class="cubic-share-once"><label for="cubic-settings-share-invite-url">New link — shown only once</label><input id="cubic-settings-share-invite-url" value={oneTimeInviteUrl} readonly onclick={(event) => event.currentTarget.select()} /><div class="cubic-share-actions"><button type="button" onclick={copyShareInviteLink}>Copy link</button>{#if typeof navigator !== 'undefined' && typeof navigator.share === 'function'}<button type="button" onclick={shareInviteLink}>Share link</button>{/if}<button type="button" onclick={() => { oneTimeInviteUrl = ''; shareInviteNotice = ''; }}>Done</button></div><small>After closing this link, it cannot be revealed again. Create a new one if needed.</small></div>{/if}
+                  <button class="cubic-control cubic-control-primary cubic-create-share-link" type="button" onclick={createShareInviteLink} disabled={shareInviteBusy}>{shareInviteBusy ? 'Creating…' : 'Create shareable link'}</button>
+                  {#if oneTimeInviteUrl}<div class="cubic-share-once"><label for="cubic-settings-share-invite-url">New link — shown only once</label><input id="cubic-settings-share-invite-url" value={oneTimeInviteUrl} readonly onclick={(event) => event.currentTarget.select()} /><div class="cubic-share-actions"><button class="cubic-control cubic-control-secondary" type="button" onclick={copyShareInviteLink}>Copy link</button>{#if typeof navigator !== 'undefined' && typeof navigator.share === 'function'}<button class="cubic-control cubic-control-secondary" type="button" onclick={shareInviteLink}>Share link</button>{/if}<button class="cubic-control cubic-control-ghost" type="button" onclick={() => { oneTimeInviteUrl = ''; shareInviteNotice = ''; }}>Done</button></div><small>After closing this link, it cannot be revealed again. Create a new one if needed.</small></div>{/if}
                   {#if shareInviteNotice}<p role="status">{shareInviteNotice}</p>{/if}
                   {#if shareInviteLinks.length}<h3>Existing links</h3>{/if}
-                  {#each shareInviteLinks as link (link.id)}<div class="cubic-share-link-row"><span>Created {new Date(link.createdAt).toLocaleDateString()} · {link.revokedAt ? 'Revoked' : Date.parse(link.expiresAt) <= Date.now() ? 'Expired' : `Expires ${new Date(link.expiresAt).toLocaleDateString()}`}</span>{#if !link.revokedAt && Date.parse(link.expiresAt) > Date.now()}<button type="button" aria-label={`Revoke link created ${new Date(link.createdAt).toLocaleDateString()}`} onclick={() => revokeShareInviteLink(link.id)} disabled={shareInviteBusy}>Revoke</button>{/if}</div>{/each}
+                  {#each shareInviteLinks.filter((link) => !link.revokedAt) as link (link.id)}
+                    <div class="cubic-share-link-row" class:cubic-share-link-inactive={Date.parse(link.expiresAt) <= Date.now()}>
+                      <span class="cubic-share-link-copy"><strong>Invite link <span class="cubic-share-link-status">{Date.parse(link.expiresAt) <= Date.now() ? 'Expired' : 'Active'}</span></strong><small>Created {new Date(link.createdAt).toLocaleDateString()} · Expires {new Date(link.expiresAt).toLocaleDateString()}</small></span>
+                      {#if Date.parse(link.expiresAt) > Date.now()}<button class="cubic-control cubic-control-danger" type="button" aria-label={`Revoke link created ${new Date(link.createdAt).toLocaleDateString()}`} onclick={() => revokeShareInviteLink(link.id)} disabled={shareInviteBusy}>Revoke</button>{/if}
+                    </div>
+                  {/each}
+                  {#if shareInviteLinks.some((link) => link.revokedAt)}
+                    <button class="cubic-control cubic-control-ghost cubic-revoked-toggle" type="button" aria-expanded={showRevokedInviteLinks} onclick={() => showRevokedInviteLinks = !showRevokedInviteLinks}>{showRevokedInviteLinks ? 'Hide' : 'Show'} {shareInviteLinks.filter((link) => link.revokedAt).length} revoked {shareInviteLinks.filter((link) => link.revokedAt).length === 1 ? 'link' : 'links'}</button>
+                    {#if showRevokedInviteLinks}{#each shareInviteLinks.filter((link) => link.revokedAt) as link (link.id)}<div class="cubic-share-link-row cubic-share-link-inactive"><span class="cubic-share-link-copy"><strong>Invite link <span class="cubic-share-link-status">Revoked</span></strong><small>Created {new Date(link.createdAt).toLocaleDateString()} · Expires {new Date(link.expiresAt).toLocaleDateString()}</small></span></div>{/each}{/if}
+                  {/if}
                   {#if shareInviteError}<p class="inline-error" role="alert">{shareInviteError} <button type="button" onclick={() => refreshShareInviteLinks(activeServer!)}>Retry</button></p>{/if}
                 </div>
                 {#if serverMembershipError}<p class="inline-error" role="alert">{serverMembershipError} <button type="button" onclick={() => refreshServerMembership(activeServer!)}>Retry</button></p>{/if}

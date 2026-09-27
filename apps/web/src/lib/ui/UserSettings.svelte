@@ -76,27 +76,24 @@
         <section class="cubic-user-profile-settings" aria-labelledby="cubic-user-profile-title">
           <div class="cubic-user-settings-title"><small>YOUR ACCOUNT</small><h2 id="cubic-user-profile-title">Profile</h2></div>
           <div class="cubic-user-profile-identity">
-            <span class="cubic-user-profile-avatar">
-              {#if profile.avatarUrl && failedAvatarUrl !== profile.avatarUrl}
-                <img src={profile.avatarUrl} alt={`${profile.displayName}'s avatar`} onerror={() => failedAvatarUrl = profile.avatarUrl} />
-              {:else}
-                <span aria-label={`${profile.displayName}'s initials`}>{profile.displayName.slice(0, 1).toUpperCase()}</span>
-              {/if}
-            </span>
-            <div><strong>{profile.displayName}</strong><span>@{profile.username}</span></div>
-          </div>
-          <div class="cubic-user-profile-field">
-            <strong>Avatar</strong>
-            <div class="cubic-user-profile-actions">
+            <span class="cubic-user-profile-avatar-edit">
+              <span class="cubic-user-profile-avatar">
+                {#if profile.avatarUrl && failedAvatarUrl !== profile.avatarUrl}
+                  <img src={profile.avatarUrl} alt={`${profile.displayName}'s avatar`} onerror={() => failedAvatarUrl = profile.avatarUrl} />
+                {:else}
+                  <span aria-label={`${profile.displayName}'s initials`}>{profile.displayName.slice(0, 1).toUpperCase()}</span>
+                {/if}
+              </span>
               <input bind:this={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" aria-label="Choose avatar image" onchange={(event) => {
                 const file = event.currentTarget.files?.[0];
                 if (file) void run(() => onupload(file));
                 event.currentTarget.value = '';
               }} />
-              <button type="button" disabled={busy} onclick={() => fileInput?.click()}>Change avatar</button>
-              {#if profile.avatarUrl}<button type="button" disabled={busy} onclick={() => void run(onremove)}>Remove avatar</button>{/if}
-            </div>
+              <button class="cubic-user-avatar-edit-button" type="button" aria-label="Change avatar" title="Change avatar" disabled={busy} onclick={() => fileInput?.click()}><Icon name="edit" size={15} /></button>
+            </span>
+            <div><strong>{profile.displayName}</strong><span>@{profile.username}</span></div>
           </div>
+          {#if profile.avatarUrl}<div class="cubic-user-profile-field cubic-user-avatar-remove-row"><strong>Avatar</strong><button class="cubic-control cubic-control-ghost cubic-user-avatar-remove" type="button" disabled={busy} onclick={() => void run(onremove)}>Remove avatar</button></div>{/if}
           <form class="cubic-user-profile-field" onsubmit={(event) => {
             event.preventDefault();
             const name = draft.trim();
@@ -105,7 +102,7 @@
             <label for="cubic-user-display-name">Display name</label>
             <div class="cubic-user-profile-actions">
               <input id="cubic-user-display-name" bind:value={draft} maxlength="64" required disabled={busy} />
-              <button type="submit" disabled={busy || !draft.trim() || draft.trim() === profile.displayName}>Save changes</button>
+              <button class="cubic-control cubic-control-primary" type="submit" disabled={busy || !draft.trim() || draft.trim() === profile.displayName}>Save changes</button>
             </div>
           </form>
           <div class="cubic-user-profile-field"><strong>Username</strong><p>@{profile.username}</p><small>Username changes are not supported yet.</small></div>
@@ -117,17 +114,17 @@
           {#if preferences}
             <div class="cubic-app-preference-row">
               <div><strong>Compact mode</strong><small>Reduce spacing in messages and navigation lists.</small></div>
-              <input type="checkbox" aria-label="Compact mode" checked={preferences.compactMode} disabled={preferenceBusy} onchange={(event) => void savePreference({ compactMode: event.currentTarget.checked }, event.currentTarget, 'compactMode')} />
+              <input class="cubic-preference-switch" type="checkbox" aria-label="Compact mode" checked={preferences.compactMode} disabled={preferenceBusy} onchange={(event) => void savePreference({ compactMode: event.currentTarget.checked }, event.currentTarget, 'compactMode')} />
             </div>
             <div class="cubic-app-preference-row">
               <div><strong>Reduced motion</strong><small>Minimize app animations and transitions.</small></div>
-              <input type="checkbox" aria-label="Reduced motion" checked={preferences.reduceMotion} disabled={preferenceBusy} onchange={(event) => void savePreference({ reduceMotion: event.currentTarget.checked }, event.currentTarget, 'reduceMotion')} />
+              <input class="cubic-preference-switch" type="checkbox" aria-label="Reduced motion" checked={preferences.reduceMotion} disabled={preferenceBusy} onchange={(event) => void savePreference({ reduceMotion: event.currentTarget.checked }, event.currentTarget, 'reduceMotion')} />
             </div>
             {#if preferenceBusy}<p role="status">Saving preferences…</p>{/if}
             {#if preferenceError}<p class="cubic-user-profile-error" role="alert">{preferenceError}</p>{/if}
           {:else if preferencesError}
             <p class="cubic-user-profile-error" role="alert">{preferencesError}</p>
-            <button class="cubic-app-preferences-retry" type="button" onclick={() => void onretry()}>Retry loading preferences</button>
+            <button class="cubic-control cubic-control-secondary cubic-app-preferences-retry" type="button" onclick={() => void onretry()}>Retry loading preferences</button>
           {:else}
             <p role="status">Loading preferences…</p>
           {/if}
@@ -150,7 +147,7 @@
   .cubic-user-settings-nav { display: flex; flex-direction: column; gap: 4px; padding: 16px 10px; border-right: 1px solid var(--cubic-border); background: #15171d; }
   .cubic-user-settings-nav button { min-height: 42px; padding: 8px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--cubic-muted); font: inherit; text-align: left; cursor: pointer; }
   .cubic-user-settings-nav button:hover, .cubic-user-settings-nav button:focus-visible { background: var(--cubic-bg-hover); color: var(--cubic-text); }
-  .cubic-user-settings-nav button[aria-current="page"] { background: #272c38; color: #f3f5fb; box-shadow: inset 3px 0 0 #adb7ff; }
+  .cubic-user-settings-nav button[aria-current="page"] { background: var(--cubic-brand-soft); color: var(--cubic-text); box-shadow: inset 3px 0 0 var(--cubic-brand-active); }
   .cubic-user-settings-utilities { display: flex; flex-direction: column; gap: 4px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--cubic-border); }
   .cubic-user-settings-utilities button:last-child { color: #f0b6bb; }
   .cubic-user-settings-content { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px clamp(18px, 4vw, 42px) max(36px, env(safe-area-inset-bottom)); }
@@ -158,8 +155,14 @@
   .cubic-user-settings-title { margin-bottom: 20px; }
   .cubic-user-settings-title h2 { margin: 4px 0 0; font-size: 1.35rem; }
   .cubic-user-profile-identity { display: flex; align-items: center; gap: 14px; min-width: 0; padding-bottom: 20px; border-bottom: 1px solid var(--cubic-border); }
-  .cubic-user-profile-avatar { position: relative; display: grid; flex: 0 0 72px; place-items: center; width: 72px; height: 72px; overflow: hidden; border-radius: 50%; background: #383d51; font-size: 1.5rem; font-weight: 800; }
+  .cubic-user-profile-avatar-edit { position: relative; display: block; flex: 0 0 72px; width: 72px; height: 72px; }
+  .cubic-user-profile-avatar { position: relative; display: grid; place-items: center; width: 72px; height: 72px; overflow: hidden; border-radius: 50%; background: #34363b; font-size: 1.5rem; font-weight: 800; }
+  .cubic-user-avatar-edit-button { position: absolute; right: -12px; bottom: -12px; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--cubic-bg-0); cursor: pointer; }
+  .cubic-user-avatar-edit-button::before { content: ''; position: absolute; inset: 6px; border: 1px solid var(--cubic-brand-border); border-radius: 50%; background: var(--cubic-brand-action); }
+  .cubic-user-avatar-edit-button :global(svg) { position: relative; }
+  .cubic-user-avatar-edit-button:hover::before { background: var(--cubic-brand-hover); }
   .cubic-user-profile-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .cubic-user-profile-avatar-edit input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
   .cubic-user-profile-identity > div { min-width: 0; overflow-wrap: anywhere; }
   .cubic-user-profile-identity strong, .cubic-user-profile-identity div span { display: block; }
   .cubic-user-profile-identity div span { margin-top: 4px; color: var(--cubic-muted); font-size: .83rem; }
@@ -168,9 +171,9 @@
   .cubic-user-profile-field p { margin: 0; }
   .cubic-user-profile-field small { color: var(--cubic-muted); }
   .cubic-user-profile-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
-  .cubic-user-profile-actions input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
   .cubic-user-profile-actions input:not([type="file"]) { flex: 1 1 230px; min-width: 0; min-height: 42px; padding: 8px 10px; border: 1px solid #474b58; border-radius: 7px; background: #101117; color: var(--cubic-text); font: inherit; }
-  .cubic-user-profile-actions button { min-height: 42px; padding: 8px 12px; border: 1px solid #454955; border-radius: 7px; background: #242730; color: var(--cubic-text); font: inherit; cursor: pointer; }
+  .cubic-user-profile-actions button { font: inherit; }
+  .cubic-user-avatar-remove-row .cubic-user-avatar-remove { color: #ffc0c3; }
   .cubic-user-profile-actions button:disabled { opacity: .5; cursor: default; }
   .cubic-user-profile-error { color: #ff9ca3; }
   .cubic-app-preferences { width: min(100%, 760px); margin: 0 auto; }
@@ -179,18 +182,22 @@
   .cubic-app-preference-row strong, .cubic-app-preference-row small { display: block; }
   .cubic-app-preference-row strong { font-size: .86rem; }
   .cubic-app-preference-row small { margin-top: 4px; color: var(--cubic-muted); line-height: 1.4; }
-  .cubic-app-preference-row input { flex: 0 0 auto; width: 22px; height: 22px; accent-color: #aeb3ff; cursor: pointer; }
-  .cubic-app-preference-row input:disabled { opacity: .5; cursor: default; }
-  .cubic-app-preferences-retry { min-height: 42px; padding: 8px 12px; border: 1px solid #454955; border-radius: 7px; background: #242730; color: var(--cubic-text); font: inherit; cursor: pointer; }
-  button:focus-visible, input:focus-visible { outline: 2px solid #aeb3ff; outline-offset: 2px; }
+  .cubic-preference-switch { position: relative; flex: 0 0 48px; width: 48px; height: 44px; margin: 0; appearance: none; cursor: pointer; }
+  .cubic-preference-switch::before { content: ''; position: absolute; inset: 9px 0; border: 1px solid var(--cubic-control-border); border-radius: 16px; background: var(--cubic-control-bg); }
+  .cubic-preference-switch::after { content: ''; position: absolute; top: 13px; left: 4px; width: 18px; height: 18px; border-radius: 50%; background: var(--cubic-muted); transition: transform 120ms ease; }
+  .cubic-preference-switch:checked::before { border-color: var(--cubic-brand-border); background: var(--cubic-logo-gray); }
+  .cubic-preference-switch:checked::after { transform: translateX(22px); background: var(--cubic-bg-0); }
+  .cubic-preference-switch:disabled { opacity: var(--cubic-control-disabled-opacity); cursor: default; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--cubic-brand-focus); outline-offset: 2px; }
   @media (max-width: 760px) { .cubic-user-settings-layout { grid-template-columns: 148px minmax(0, 1fr); } }
   @media (max-width: 680px), (max-width: 900px) and (max-height: 500px) {
     .cubic-user-settings { inset: 0; height: 100dvh; }
     .cubic-user-settings-layout { display: flex; flex-direction: column; }
     .cubic-user-settings-head { min-height: 54px; padding: 7px 12px; }
     .cubic-user-settings-nav { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px 10px; border-right: 0; border-bottom: 1px solid var(--cubic-border); }
-    .cubic-user-settings-nav button { min-height: 42px; }
-    .cubic-user-settings-nav button[aria-current="page"] { box-shadow: inset 0 -3px 0 #adb7ff; }
+    .cubic-user-settings-nav button { min-height: 44px; }
+    .cubic-user-settings-head button, .cubic-user-profile-actions input:not([type="file"]) { min-height: 44px; }
+    .cubic-user-settings-nav button[aria-current="page"] { box-shadow: inset 0 -3px 0 var(--cubic-brand-active); }
     .cubic-user-settings-utilities { flex-direction: row; gap: 2px; margin: 0 0 0 auto; padding: 0 0 0 5px; border: 0; }
     .cubic-user-settings-content { padding: 16px 14px max(24px, env(safe-area-inset-bottom)); }
   }
