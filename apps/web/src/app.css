@@ -3472,25 +3472,25 @@ body { background: var(--cubic-onyx-0); }
   gap: 9px;
   cursor: pointer;
 }
-.cubic-voice-processing-option input { margin: 2px 0 0; accent-color: var(--cubic-brand-action); }
+.cubic-voice-processing-option input { margin: 0; }
 .cubic-voice-processing-option small { display: block; margin-top: 3px; color: #949ba4; font-size: .65rem; font-weight: 400; line-height: 1.35; }
 
 .media-settings-section select {
   width: 100%;
   min-width: 0;
-  height: 36px;
+  min-height: 44px;
   padding: 0 34px 0 10px;
-  border: 1px solid #1e1f22;
-  border-radius: 4px;
-  background: #1e1f22;
+  border: 1px solid var(--cubic-control-border);
+  border-radius: var(--cubic-control-radius);
+  background: var(--cubic-control-bg);
   color: #dbdee1;
   font: inherit;
-  font-size: .72rem;
-  outline: none;
+  font-size: .78rem;
 }
 
-.media-settings-section select:focus {
-  border-color: var(--cubic-brand-action);
+.media-settings-section select:focus-visible {
+  outline: 2px solid var(--cubic-brand-focus);
+  outline-offset: 2px;
 }
 
 .media-settings-section select:disabled {
@@ -3565,7 +3565,7 @@ body { background: var(--cubic-onyx-0); }
   align-items: flex-start;
   gap: 9px;
   padding: 11px 12px;
-  color: #23a55a;
+  color: var(--cubic-brand-active);
 }
 
 .media-adaptive-row > div {
@@ -4814,6 +4814,28 @@ main.cubic-app-shell.cubic-app-reduce-motion *::after {
 }
 
 /* Onyx controls used by settings and invite actions. */
+.cubic-preference-switch { position: relative; flex: 0 0 48px; width: 48px; height: 44px; margin: 0; appearance: none; cursor: pointer; }
+.cubic-preference-switch::before { content: ''; position: absolute; inset: 9px 0; border: 1px solid var(--cubic-control-border); border-radius: 16px; background: var(--cubic-control-bg); }
+.cubic-preference-switch::after { content: ''; position: absolute; top: 13px; left: 4px; width: 18px; height: 18px; border-radius: 50%; background: var(--cubic-muted); transition: transform 120ms ease; }
+.cubic-preference-switch:checked::before { border-color: var(--cubic-brand-border); background: var(--cubic-logo-gray); }
+.cubic-preference-switch:checked::after { transform: translateX(22px); background: var(--cubic-bg-0); }
+.cubic-preference-switch:disabled { opacity: var(--cubic-control-disabled-opacity); cursor: default; }
+.cubic-preference-switch:focus-visible { outline: 2px solid var(--cubic-brand-focus); outline-offset: 2px; }
+.cubic-voice-video-settings .cubic-media-settings-controls { border: 1px solid var(--cubic-border); border-radius: var(--cubic-control-radius); background: var(--cubic-bg-2); overflow: hidden; }
+.cubic-voice-video-settings .media-settings-section { padding: 18px; border-bottom-color: var(--cubic-border); }
+.cubic-voice-video-settings .media-settings-section > label { gap: 7px; }
+.cubic-voice-video-settings .media-settings-section > label > span { font-size: .84rem; }
+.cubic-voice-video-settings .media-settings-label { font-size: .72rem; }
+.cubic-voice-video-settings .media-quality-options { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; gap: 8px; }
+.cubic-voice-video-settings .media-quality-options button { min-height: 52px; border-color: var(--cubic-control-border); border-radius: var(--cubic-control-radius); background: var(--cubic-control-bg); font-size: .78rem; }
+.cubic-voice-video-settings .media-quality-options button:hover:not(:disabled) { background: var(--cubic-control-hover); }
+.cubic-voice-video-settings .media-quality-options button.active { border-color: var(--cubic-brand-border); background: var(--cubic-brand-soft); color: var(--cubic-text); }
+.cubic-voice-video-settings .media-adaptive-row { padding: 16px 18px; }
+.cubic-voice-video-settings .media-settings-notice { margin: 0 18px 18px; }
+@media (max-width: 560px) { .cubic-voice-video-settings .media-quality-options { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+@media (min-width: 681px) and (max-height: 500px) {
+  .cubic-app-shell:has(.cubic-server-voice-stage) .voice-dock { max-height: calc(100dvh - 145px) !important; overflow-y: auto !important; }
+}
 .cubic-control {
   display: inline-flex;
   align-items: center;

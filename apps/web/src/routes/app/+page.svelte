@@ -3081,10 +3081,13 @@
 
       const room = voiceRoom;
       if (room) {
-        selectedAudioInput = room.getActiveDevice('audioinput') || selectedAudioInput;
-        selectedVideoInput = room.getActiveDevice('videoinput') || selectedVideoInput;
+        const activeInput = room.getActiveDevice('audioinput');
+        const activeCamera = room.getActiveDevice('videoinput');
+        if (activeInput && activeInput !== 'default') selectedAudioInput = activeInput;
+        if (activeCamera && activeCamera !== 'default') selectedVideoInput = activeCamera;
         if (audioOutputSupported) {
-          selectedAudioOutput = room.getActiveDevice('audiooutput') || selectedAudioOutput;
+          const activeOutput = room.getActiveDevice('audiooutput');
+          if (activeOutput && activeOutput !== 'default') selectedAudioOutput = activeOutput;
         }
       }
 
@@ -3130,11 +3133,24 @@
     kind: 'audioinput' | 'videoinput' | 'audiooutput',
     deviceId: string
   ) {
-    const room = voiceRoom;
-    if (!room || voiceStatus !== 'connected') return;
-
     if (kind === 'audiooutput' && !audioOutputSupported) {
       mediaSettingsNotice = 'Audio output selection is not supported by this browser.';
+      return;
+    }
+
+    const devices = kind === 'audioinput' ? audioInputDevices : kind === 'videoinput' ? videoInputDevices : audioOutputDevices;
+    if (deviceId && !devices.some((device) => device.deviceId === deviceId)) {
+      mediaSettingsNotice = 'That device is no longer available. Choose another device.';
+      return;
+    }
+
+    const room = voiceRoom;
+    if (!room || voiceStatus !== 'connected') {
+      if (kind === 'audioinput') selectedAudioInput = deviceId;
+      else if (kind === 'videoinput') selectedVideoInput = deviceId;
+      else selectedAudioOutput = deviceId;
+      saveMediaPreference(`cubic.${kind === 'audioinput' ? 'audioInput' : kind === 'videoinput' ? 'videoInput' : 'audioOutput'}`, deviceId);
+      mediaSettingsNotice = 'This choice will apply when you next use voice or video.';
       return;
     }
 
@@ -3142,7 +3158,7 @@
     mediaSettingsNotice = '';
 
     try {
-      const switched = await room.switchActiveDevice(kind, deviceId);
+      const switched = await room.switchActiveDevice(kind, deviceId || (kind === 'audiooutput' ? '' : 'default'), Boolean(deviceId));
       if (!switched) {
         throw new Error('The browser could not switch to that device.');
       }
@@ -3169,18 +3185,24 @@
   }
 
   async function onAudioInputChange(event: Event) {
-    const value = (event.currentTarget as HTMLSelectElement).value;
+    const input = event.currentTarget as HTMLSelectElement;
+    const value = input.value;
     await switchMediaDevice('audioinput', value);
+    input.value = selectedAudioInput;
   }
 
   async function onVideoInputChange(event: Event) {
-    const value = (event.currentTarget as HTMLSelectElement).value;
+    const input = event.currentTarget as HTMLSelectElement;
+    const value = input.value;
     await switchMediaDevice('videoinput', value);
+    input.value = selectedVideoInput;
   }
 
   async function onAudioOutputChange(event: Event) {
-    const value = (event.currentTarget as HTMLSelectElement).value;
+    const input = event.currentTarget as HTMLSelectElement;
+    const value = input.value;
     await switchMediaDevice('audiooutput', value);
+    input.value = selectedAudioOutput;
   }
 
   async function setCameraQualityPreset(next: CameraQualityPreset) {
@@ -4067,7 +4089,7 @@
     };
 
     const onMediaDeviceChange = () => {
-      if (mediaSettingsOpen || voiceRoom) void refreshMediaDevices();
+      if (mediaSettingsOpen || userSettingsOpen || voiceRoom) void refreshMediaDevices();
     };
 
     window.addEventListener('pageshow', resumeRealtime);
@@ -4111,11 +4133,186 @@
 <svelte:head><title>Cubic — {currentUser.displayName}</title></svelte:head>
 <svelte:window onkeydown={(event) => { if (event.key === 'Escape') { if (userSettingsOpen) closeUserSettings(); else { navigationMenu = null; serverMenuOpen = false; if (serverMembersOpen) closeServerMembers(); else if (channelSettingsTarget) closeChannelSettings(); else if (serverSurface) closeServerSurface(); } } }} />
 
+{#snippet mediaControls()}
+  <div class="cubic-media-settings-controls">
+    <div class="media-settings-section">
+      <span class="media-settings-label">Input devices</span>
+
+      <label>
+        <span>Microphone</span>
+        <select
+          value={selectedAudioInput}
+          onchange={onAudioInputChange}
+          disabled={mediaSettingsBusy || audioInputDevices.length === 0}
+        >
+          {#if audioInputDevices.length === 0}
+            <option value="">No microphone detected</option>
+          {:else}
+            <option value="">Browser default</option>
+          {/if}
+          {#each audioInputDevices as device, index}
+            <option value={device.deviceId}>{deviceLabel(device, index, 'Microphone')}</option>
+          {/each}
+        </select>
+      </label>
+
+      <label>
+        <span>Camera</span>
+        <select
+          value={selectedVideoInput}
+          onchange={onVideoInputChange}
+          disabled={mediaSettingsBusy || videoInputDevices.length === 0}
+        >
+          {#if videoInputDevices.length === 0}
+            <option value="">No camera detected</option>
+          {:else}
+            <option value="">Browser default</option>
+          {/if}
+          {#each videoInputDevices as device, index}
+            <option value={device.deviceId}>{deviceLabel(device, index, 'Camera')}</option>
+          {/each}
+        </select>
+      </label>
+
+      <label>
+        <span>Output device</span>
+        <select
+          value={selectedAudioOutput}
+          onchange={onAudioOutputChange}
+          disabled={mediaSettingsBusy || !audioOutputSupported || audioOutputDevices.length === 0}
+        >
+          {#if !audioOutputSupported}
+            <option value="">Browser default · selection unsupported</option>
+          {:else}
+            <option value="">Browser default</option>
+          {/if}
+          {#each audioOutputDevices as device, index}
+            <option value={device.deviceId}>{deviceLabel(device, index, 'Speaker')}</option>
+          {/each}
+        </select>
+      </label>
+    </div>
+
+    <div class="media-settings-section">
+      <label class="cubic-voice-processing-option">
+        <input class="cubic-preference-switch" type="checkbox" checked={browserVoiceProcessing} onchange={(event) => setBrowserVoiceProcessing(event.currentTarget.checked)} />
+        <span><strong>Browser voice processing</strong><small>Echo cancellation, noise suppression and automatic gain when supported.</small></span>
+      </label>
+    </div>
+
+    <div class="media-settings-section">
+      <div class="media-settings-section-head">
+        <span class="media-settings-label">Camera quality</span>
+        <small>{cameraQualityLabel()}</small>
+      </div>
+      <div class="media-quality-options" aria-label="Camera quality">
+        <button
+          type="button"
+          class:active={cameraQuality === 'data-saver'}
+          aria-pressed={cameraQuality === 'data-saver'}
+          onclick={() => setCameraQualityPreset('data-saver')}
+          disabled={mediaSettingsBusy}
+        >
+          Data saver
+          <small>360p · 24</small>
+        </button>
+        <button
+          type="button"
+          class:active={cameraQuality === 'balanced'}
+          aria-pressed={cameraQuality === 'balanced'}
+          onclick={() => setCameraQualityPreset('balanced')}
+          disabled={mediaSettingsBusy}
+        >
+          Balanced
+          <small>720p · 30</small>
+        </button>
+        <button
+          type="button"
+          class:active={cameraQuality === 'smooth'}
+          aria-pressed={cameraQuality === 'smooth'}
+          onclick={() => setCameraQualityPreset('smooth')}
+          disabled={mediaSettingsBusy}
+        >
+          Smooth
+          <small>720p · 60</small>
+        </button>
+        <button
+          type="button"
+          class:active={cameraQuality === 'high'}
+          aria-pressed={cameraQuality === 'high'}
+          onclick={() => setCameraQualityPreset('high')}
+          disabled={mediaSettingsBusy}
+        >
+          High
+          <small>1080p · 30</small>
+        </button>
+      </div>
+    </div>
+
+    <div class="media-settings-section">
+      <div class="media-settings-section-head">
+        <span class="media-settings-label">Screen share</span>
+        <small>{screenShareQualityLabel()}</small>
+      </div>
+      <div class="media-quality-options" aria-label="Screen share quality">
+        <button
+          type="button"
+          class:active={screenShareQuality === 'text'}
+          aria-pressed={screenShareQuality === 'text'}
+          onclick={() => setScreenShareQualityPreset('text')}
+        >
+          Text
+          <small>1080p · 15</small>
+        </button>
+        <button
+          type="button"
+          class:active={screenShareQuality === 'balanced'}
+          aria-pressed={screenShareQuality === 'balanced'}
+          onclick={() => setScreenShareQualityPreset('balanced')}
+        >
+          Balanced
+          <small>1080p · 30</small>
+        </button>
+        <button
+          type="button"
+          class:active={screenShareQuality === 'smooth'}
+          aria-pressed={screenShareQuality === 'smooth'}
+          onclick={() => setScreenShareQualityPreset('smooth')}
+        >
+          Smooth
+          <small>1080p · 60</small>
+        </button>
+        <button
+          type="button"
+          class:active={screenShareQuality === 'motion'}
+          aria-pressed={screenShareQuality === 'motion'}
+          onclick={() => setScreenShareQualityPreset('motion')}
+        >
+          Motion
+          <small>720p · 60</small>
+        </button>
+      </div>
+    </div>
+
+    <div class="media-adaptive-row">
+      <Icon name="check" size={16} />
+      <div>
+        <strong>Adaptive bandwidth</strong>
+        <small>Adaptive Stream and Dynacast are used during voice and video calls.</small>
+      </div>
+    </div>
+
+    {#if mediaSettingsNotice}
+      <div class="media-settings-notice" role="status">{mediaSettingsNotice}</div>
+    {/if}
+  </div>
+{/snippet}
+
 <main class="messenger-shell cubic-app-shell" class:cubic-app-compact={appPreferences?.compactMode} class:cubic-app-reduce-motion={appPreferences?.reduceMotion}>
   <PrimaryRail servers={servers} selectedServerId={activeServer?.id ?? null} messagesSelected={tab !== 'servers'} serverBrowserSelected={tab === 'servers' && activeServer === null} loading={serversLoading} onmessages={showMessages} onbrowse={showServerBrowser} onserver={selectServer} oncreate={(event) => openServerDialog('server', event)} />
 
   {#if userSettingsOpen}
-    <UserSettings profile={currentUser} voiceAvailable={voiceStatus !== 'idle'} {loggingOut} preferences={appPreferences} preferencesError={appPreferencesError} onretry={loadAppPreferences} onpreference={saveAppPreference} onclose={closeUserSettings} onsave={saveOwnProfile} onupload={uploadOwnAvatar} onremove={removeOwnAvatar} onmedia={() => { userSettingsOpen = false; void showMediaSettings(); }} onlogout={() => void logout()} />
+    <UserSettings profile={currentUser} {loggingOut} preferences={appPreferences} preferencesError={appPreferencesError} {mediaControls} onvoicevideo={() => void refreshMediaDevices()} onretry={loadAppPreferences} onpreference={saveAppPreference} onclose={closeUserSettings} onsave={saveOwnProfile} onupload={uploadOwnAvatar} onremove={removeOwnAvatar} onlogout={() => void logout()} />
   {/if}
 
   {#if serverDialog}
@@ -5376,164 +5573,7 @@
             </button>
           </header>
 
-          <div class="media-settings-section">
-            <span class="media-settings-label">Input devices</span>
-
-            <label>
-              <span>Microphone</span>
-              <select
-                value={selectedAudioInput}
-                onchange={onAudioInputChange}
-                disabled={mediaSettingsBusy || audioInputDevices.length === 0}
-              >
-                {#if audioInputDevices.length === 0}
-                  <option value="">No microphone detected</option>
-                {/if}
-                {#each audioInputDevices as device, index}
-                  <option value={device.deviceId}>{deviceLabel(device, index, 'Microphone')}</option>
-                {/each}
-              </select>
-            </label>
-
-            <label>
-              <span>Camera</span>
-              <select
-                value={selectedVideoInput}
-                onchange={onVideoInputChange}
-                disabled={mediaSettingsBusy || videoInputDevices.length === 0}
-              >
-                {#if videoInputDevices.length === 0}
-                  <option value="">No camera detected</option>
-                {/if}
-                {#each videoInputDevices as device, index}
-                  <option value={device.deviceId}>{deviceLabel(device, index, 'Camera')}</option>
-                {/each}
-              </select>
-            </label>
-
-            <label>
-              <span>Output device</span>
-              <select
-                value={selectedAudioOutput}
-                onchange={onAudioOutputChange}
-                disabled={mediaSettingsBusy || !audioOutputSupported || audioOutputDevices.length === 0}
-              >
-                {#if !audioOutputSupported}
-                  <option value="">Browser default · selection unsupported</option>
-                {:else if audioOutputDevices.length === 0}
-                  <option value="">Browser default</option>
-                {/if}
-                {#each audioOutputDevices as device, index}
-                  <option value={device.deviceId}>{deviceLabel(device, index, 'Speaker')}</option>
-                {/each}
-              </select>
-            </label>
-          </div>
-
-          <div class="media-settings-section">
-            <label class="cubic-voice-processing-option">
-              <input type="checkbox" checked={browserVoiceProcessing} onchange={(event) => setBrowserVoiceProcessing(event.currentTarget.checked)} />
-              <span><strong>Browser voice processing</strong><small>Echo cancellation, noise suppression and automatic gain when supported.</small></span>
-            </label>
-          </div>
-
-          <div class="media-settings-section">
-            <div class="media-settings-section-head">
-              <span class="media-settings-label">Camera quality</span>
-              <small>{cameraQualityLabel()}</small>
-            </div>
-            <div class="media-quality-options" aria-label="Camera quality">
-              <button
-                type="button"
-                class:active={cameraQuality === 'data-saver'}
-                onclick={() => setCameraQualityPreset('data-saver')}
-                disabled={mediaSettingsBusy}
-              >
-                Data saver
-                <small>360p · 24</small>
-              </button>
-              <button
-                type="button"
-                class:active={cameraQuality === 'balanced'}
-                onclick={() => setCameraQualityPreset('balanced')}
-                disabled={mediaSettingsBusy}
-              >
-                Balanced
-                <small>720p · 30</small>
-              </button>
-              <button
-                type="button"
-                class:active={cameraQuality === 'smooth'}
-                onclick={() => setCameraQualityPreset('smooth')}
-                disabled={mediaSettingsBusy}
-              >
-                Smooth
-                <small>720p · 60</small>
-              </button>
-              <button
-                type="button"
-                class:active={cameraQuality === 'high'}
-                onclick={() => setCameraQualityPreset('high')}
-                disabled={mediaSettingsBusy}
-              >
-                High
-                <small>1080p · 30</small>
-              </button>
-            </div>
-          </div>
-
-          <div class="media-settings-section">
-            <div class="media-settings-section-head">
-              <span class="media-settings-label">Screen share</span>
-              <small>{screenShareQualityLabel()}</small>
-            </div>
-            <div class="media-quality-options" aria-label="Screen share quality">
-              <button
-                type="button"
-                class:active={screenShareQuality === 'text'}
-                onclick={() => setScreenShareQualityPreset('text')}
-              >
-                Text
-                <small>1080p · 15</small>
-              </button>
-              <button
-                type="button"
-                class:active={screenShareQuality === 'balanced'}
-                onclick={() => setScreenShareQualityPreset('balanced')}
-              >
-                Balanced
-                <small>1080p · 30</small>
-              </button>
-              <button
-                type="button"
-                class:active={screenShareQuality === 'smooth'}
-                onclick={() => setScreenShareQualityPreset('smooth')}
-              >
-                Smooth
-                <small>1080p · 60</small>
-              </button>
-              <button
-                type="button"
-                class:active={screenShareQuality === 'motion'}
-                onclick={() => setScreenShareQualityPreset('motion')}
-              >
-                Motion
-                <small>720p · 60</small>
-              </button>
-            </div>
-          </div>
-
-          <div class="media-adaptive-row">
-            <Icon name="check" size={16} />
-            <div>
-              <strong>Adaptive bandwidth</strong>
-              <small>Adaptive Stream + Dynacast are enabled for this call.</small>
-            </div>
-          </div>
-
-          {#if mediaSettingsNotice}
-            <div class="media-settings-notice" role="status">{mediaSettingsNotice}</div>
-          {/if}
+          {@render mediaControls()}
         </section>
       {/if}
 
