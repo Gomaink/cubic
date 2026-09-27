@@ -203,6 +203,9 @@ test('member ticket joins the selected voice room, keeps text usable, and leaves
   await openUserSettings(page);
   const userSettings = page.getByRole('region', { name: 'User Settings' });
   await expect(userSettings.getByRole('heading', { name: 'Profile' })).toBeVisible();
+  await userSettings.getByRole('navigation', { name: 'User settings sections' }).getByRole('button', { name: 'Security' }).click();
+  await expect(userSettings.getByRole('heading', { name: 'Password' })).toBeVisible();
+  await expect(dock).toContainText('1 connected');
   await userSettings.getByRole('navigation', { name: 'User settings sections' }).getByRole('button', { name: 'Sessions' }).click();
   await expect(userSettings.getByRole('heading', { name: 'Active sessions' })).toBeVisible();
   await userSettings.getByRole('navigation', { name: 'User settings sections' }).getByRole('button', { name: 'App', exact: true }).click();
