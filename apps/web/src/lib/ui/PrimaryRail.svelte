@@ -44,13 +44,14 @@
   .cubic-primary-rail { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0; min-height: 0; height: 100%; padding: 14px 8px; border-right: 1px solid #ffffff14; background: var(--cubic-bg-0); }
   .cubic-primary-servers { display: flex; flex: 1 1 auto; min-height: 0; width: 100%; flex-direction: column; align-items: center; gap: 8px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
   button { display: grid; flex: 0 0 46px; place-items: center; width: 46px; height: 46px; padding: 0; border: 1px solid transparent; border-radius: 13px; background: transparent; color: var(--cubic-muted); cursor: pointer; }
-  button:hover, button:focus-visible { background: var(--cubic-bg-hover); color: var(--cubic-text); }
-  button:focus-visible { outline: 2px solid #aeb3ff; outline-offset: 2px; }
-  button.selected { background: #252936; color: #fff; box-shadow: inset 3px 0 0 #adb7ff; }
+  button:hover { background: var(--cubic-bg-hover); color: var(--cubic-text); }
+  button:focus-visible { outline: 2px solid var(--cubic-brand-focus); outline-offset: 2px; }
+  button.selected { border-color: var(--cubic-brand-border); border-radius: 13px; background: var(--cubic-brand-soft); color: var(--cubic-text); }
+  button.selected:hover { background: color-mix(in srgb, var(--cubic-brand) 30%, var(--cubic-bg-2)); }
   .cubic-primary-rule { flex: 0 0 1px; width: 30px; background: #ffffff1c; }
   .cubic-primary-server-icon { position: relative; display: grid; place-items: center; width: 42px; height: 42px; overflow: hidden; border-radius: 12px; background: #292c35; color: #eceef8; font-weight: 800; }
   .cubic-primary-server-icon img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-  .cubic-primary-create { border: 1px dashed #555b6b; }
+  .cubic-primary-create { border: 1px dashed var(--cubic-control-border); }
   .cubic-primary-status { max-width: 52px; color: var(--cubic-muted); font-size: .65rem; text-align: center; }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
   @media (max-width: 680px) { .cubic-primary-rail { padding: 9px 6px max(9px, env(safe-area-inset-bottom)); } button { width: 46px; min-height: 46px; } }

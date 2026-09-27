@@ -116,7 +116,8 @@ test('targeted friend joins existing text channel, sends a message, then leaves 
   await expect(settings.getByRole('button', { name: 'Leave server' })).toHaveCount(0);
   await settings.getByRole('combobox', { name: 'Friend' }).selectOption('fixture-peer');
   await settings.getByRole('button', { name: 'Invite friend' }).click();
-  await expect(settings).toContainText('Fixture DM · Pending');
+  await expect(settings.getByText('Fixture DM', { exact: true })).toBeVisible();
+  await expect(settings.getByText('Pending invitation', { exact: true })).toBeVisible();
   await closeServerSettings(page);
   const serverId = (await page.evaluate(async () => (await (await fetch('/api/v1/servers')).json()).servers[0].id)) as string;
   const conversationId = (await page.evaluate(async (id) => (await (await fetch(`/api/v1/servers/${id}/channels`)).json()).channels[0].conversationId, serverId)) as string;

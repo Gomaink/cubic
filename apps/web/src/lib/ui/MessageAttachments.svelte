@@ -228,7 +228,7 @@
     object-fit: cover;
   }
   .cubic-media-gallery.single img { object-fit: contain; }
-  .cubic-media-image:focus-visible { outline: 2px solid #b5baff; outline-offset: -3px; }
+  .cubic-media-image:focus-visible { outline: 2px solid var(--cubic-brand-focus); outline-offset: -3px; }
   .cubic-media-unavailable { display: block; padding: 12px; overflow-wrap: anywhere; font-size: .8rem; }
   .cubic-media-image > .cubic-media-unavailable { position: absolute; inset: 0; overflow: auto; }
   .cubic-media-video-card { min-width: 0; overflow: hidden; border-radius: 8px; background: #1e1f22; }
