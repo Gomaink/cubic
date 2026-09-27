@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import type { Snippet } from 'svelte';
   import Icon from './Icon.svelte';
+  import SecuritySettings from './SecuritySettings.svelte';
   import SessionSettings from './SessionSettings.svelte';
 
   type Identity = { username: string; displayName: string; avatarUrl: string | null };
@@ -24,7 +25,7 @@
     onlogout: () => void;
   } = $props();
 
-  let section = $state<'profile' | 'app' | 'voice-video' | 'sessions'>('profile');
+  let section = $state<'profile' | 'security' | 'sessions' | 'app' | 'voice-video'>('profile');
   let draft = $state('');
   let busy = $state(false);
   let error = $state('');
@@ -65,9 +66,10 @@
   <div class="cubic-user-settings-layout">
     <nav class="cubic-user-settings-nav" aria-label="User settings sections">
       <button type="button" aria-current={section === 'profile' ? 'page' : undefined} onclick={() => section = 'profile'}>Profile</button>
+      <button type="button" aria-current={section === 'security' ? 'page' : undefined} onclick={() => section = 'security'}>Security</button>
+      <button type="button" aria-current={section === 'sessions' ? 'page' : undefined} onclick={() => section = 'sessions'}>Sessions</button>
       <button type="button" aria-current={section === 'app' ? 'page' : undefined} onclick={() => section = 'app'}>App</button>
       <button type="button" aria-current={section === 'voice-video' ? 'page' : undefined} onclick={() => { section = 'voice-video'; onvoicevideo(); }}>Voice &amp; Video</button>
-      <button type="button" aria-current={section === 'sessions' ? 'page' : undefined} onclick={() => section = 'sessions'}>Sessions</button>
       <div class="cubic-user-settings-utilities">
         <button type="button" disabled={loggingOut} onclick={onlogout}>{loggingOut ? 'Logging out…' : 'Log out'}</button>
       </div>
@@ -109,6 +111,10 @@
           <div class="cubic-user-profile-field"><strong>Username</strong><p>@{profile.username}</p><small>Username changes are not supported yet.</small></div>
           {#if error}<p class="cubic-user-profile-error" role="alert">{error}</p>{/if}
         </section>
+      {:else if section === 'security'}
+        <SecuritySettings />
+      {:else if section === 'sessions'}
+        <SessionSettings />
       {:else if section === 'app'}
         <section class="cubic-app-preferences" aria-labelledby="cubic-app-preferences-title">
           <div class="cubic-user-settings-title"><small>PREFERENCES</small><h2 id="cubic-app-preferences-title">App</h2></div>
@@ -136,8 +142,6 @@
           <p class="cubic-voice-video-intro">Device and quality choices are saved on this browser. Available devices depend on browser permissions.</p>
           {@render mediaControls()}
         </section>
-      {:else}
-        <SessionSettings />
       {/if}
     </div>
   </div>

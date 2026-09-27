@@ -19,6 +19,7 @@ let sessionMode;
 let fixtureSettings;
 let settingsFailNext;
 let activeSessions;
+let fixturePassword;
 let groupMembers;
 let fixtureServers;
 let fixtureIconCounter;
@@ -42,6 +43,7 @@ function attachment(name, contentType = 'image/png', dimensions = { width: 800, 
 }
 
 function reset() {
+  fixturePassword = 'test-only-password';
   fixtureSettings = { theme: 'dark', compactMode: false, reduceMotion: false, inputVolume: 100, outputVolume: 100 };
   settingsFailNext = false;
   fixtureServers = [];
@@ -173,6 +175,7 @@ const server = createServer(async (request, response) => {
   const isPeer = request.headers.cookie?.includes('cubic_session=browser-peer');
   if (url.pathname === '/api/v1/auth/login' && request.method === 'POST') {
     const payload = JSON.parse((await body()).toString());
+    if (payload.password !== fixturePassword) return json({ error: 'Invalid credentials.' }, 401);
     const account = String(payload.identifier).toLowerCase().includes('peer') ? 'browser-peer' : 'browser-fixture';
     response.setHeader('set-cookie', `cubic_session=${account}; Path=/; HttpOnly; SameSite=Lax`);
     return json({ user: account === 'browser-peer' ? peer : user });
@@ -193,6 +196,14 @@ const server = createServer(async (request, response) => {
     return json(preview);
   }
   if (!isPeer && !request.headers.cookie?.includes('cubic_session=browser-fixture')) return json({ error: 'Authentication required.' }, 401);
+  if (url.pathname === '/api/v1/auth/password' && request.method === 'PATCH') {
+    const payload = JSON.parse((await body()).toString());
+    if (!payload.currentPassword || typeof payload.newPassword !== 'string' || payload.newPassword.length < 10 || payload.newPassword.length > 128 || payload.newPassword !== payload.confirmPassword) return json({ error: 'Invalid password change.' }, 400);
+    if (payload.currentPassword !== fixturePassword) return json({ error: 'Current password is incorrect.' }, 403);
+    fixturePassword = payload.newPassword;
+    activeSessions = activeSessions.filter((session) => session.current);
+    return json({ message: 'Password changed. Other sessions were signed out.' });
+  }
   const requestUser = isPeer ? peer : user;
   if (url.pathname === '/api/v1/users/me/settings' && request.method === 'GET') return json({ settings: fixtureSettings });
   if (url.pathname === '/api/v1/users/me/settings' && request.method === 'PATCH') {
