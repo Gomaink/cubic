@@ -37,6 +37,7 @@ function record(overrides: {
       legacyId: null,
       email: 'user@example.test',
       emailNormalized: 'user@example.test',
+      emailVerifiedAt: null,
       username: 'user',
       usernameNormalized: 'user',
       displayName: 'User',

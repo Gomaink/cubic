@@ -41,6 +41,9 @@ import { browserCorsOptions, createBrowserMutationProtection } from './security/
 import { securityRoutes } from './routes/security.js';
 import { ServerIconStore } from './server-icons/storage.js';
 import { ServerIconReconciler, ServerIconReconciliationScheduler } from './server-icons/reconciliation.js';
+import { accountEmailRoutes } from './routes/account-email.js';
+import { EmailVerificationService } from './mail/email-verification.js';
+import { disabledMailTransport, type MailTransport } from './mail/transport.js';
 
 export interface CreateAppOptions {
   database: Database;
@@ -76,10 +79,12 @@ export interface CreateAppOptions {
   livekitPublicUrl: string;
   logger?: boolean;
   realtimeEvents?: RealtimeEvents;
+  mailTransport?: MailTransport;
 }
 
 export async function createApp(options: CreateAppOptions): Promise<FastifyInstance> {
   const realtimeEvents = options.realtimeEvents ?? createRealtimeEvents();
+  const emailVerification = new EmailVerificationService(options.database, options.mailTransport ?? disabledMailTransport, realtimeEvents);
   const mediaStore = new LocalMediaStore(options.mediaRoot ?? '/data/media', options.groupAvatarMaxBytes ?? 2 * 1024 * 1024);
   const iconStore = new ServerIconStore(options.mediaRoot ?? '/data/media');
   await iconStore.prepare();
@@ -147,7 +152,15 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     sessionTtlDays: options.sessionTtlDays,
     sessionService: options.sessionService,
     realtimeEvents,
-    registrationEnabled: options.registrationEnabled
+    registrationEnabled: options.registrationEnabled,
+    emailVerification
+  });
+
+  await app.register(accountEmailRoutes, {
+    prefix: '/api/v1/auth',
+    cookieName: options.cookieName,
+    sessionService: options.sessionService,
+    emailVerification
   });
 
   await app.register(userRoutes, {

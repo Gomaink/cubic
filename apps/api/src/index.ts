@@ -9,6 +9,7 @@ import {
   createDatabaseVoiceAuthorizationStore
 } from './voice/authorization.js';
 import { ServerVoiceService } from './server-voice/service.js';
+import { createMailTransport } from './mail/transport.js';
 
 const env = loadEnv();
 const database = createDatabase(env.DATABASE_URL);
@@ -43,6 +44,7 @@ const app = await createApp({
   sessionTtlDays: env.SESSION_TTL_DAYS,
   sessionService,
   registrationEnabled: env.REGISTRATION_ENABLED,
+  mailTransport: createMailTransport(env),
   mediaRoot: env.MEDIA_ROOT,
   groupAvatarMaxBytes: env.GROUP_AVATAR_MAX_BYTES,
   attachmentMaxBytes: env.ATTACHMENT_MAX_BYTES,
