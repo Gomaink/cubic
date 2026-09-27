@@ -1,29 +1,30 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { Snippet } from 'svelte';
   import Icon from './Icon.svelte';
   import SessionSettings from './SessionSettings.svelte';
 
   type Identity = { username: string; displayName: string; avatarUrl: string | null };
   type AppPreferences = { compactMode: boolean; reduceMotion: boolean };
   let {
-    profile, voiceAvailable, loggingOut, preferences, preferencesError, onretry, onpreference, onclose, onsave, onupload, onremove, onmedia, onlogout
+    profile, loggingOut, preferences, preferencesError, mediaControls, onvoicevideo, onretry, onpreference, onclose, onsave, onupload, onremove, onlogout
   }: {
     profile: Identity;
-    voiceAvailable: boolean;
     loggingOut: boolean;
     preferences: AppPreferences | null;
     preferencesError: string;
+    mediaControls: Snippet;
+    onvoicevideo: () => void;
     onretry: () => Promise<void>;
     onpreference: (change: Partial<AppPreferences>) => Promise<void>;
     onclose: () => void;
     onsave: (displayName: string) => Promise<void>;
     onupload: (file: File) => Promise<void>;
     onremove: () => Promise<void>;
-    onmedia: () => void;
     onlogout: () => void;
   } = $props();
 
-  let section = $state<'profile' | 'app' | 'sessions'>('profile');
+  let section = $state<'profile' | 'app' | 'voice-video' | 'sessions'>('profile');
   let draft = $state('');
   let busy = $state(false);
   let error = $state('');
@@ -65,9 +66,9 @@
     <nav class="cubic-user-settings-nav" aria-label="User settings sections">
       <button type="button" aria-current={section === 'profile' ? 'page' : undefined} onclick={() => section = 'profile'}>Profile</button>
       <button type="button" aria-current={section === 'app' ? 'page' : undefined} onclick={() => section = 'app'}>App</button>
+      <button type="button" aria-current={section === 'voice-video' ? 'page' : undefined} onclick={() => { section = 'voice-video'; onvoicevideo(); }}>Voice &amp; Video</button>
       <button type="button" aria-current={section === 'sessions' ? 'page' : undefined} onclick={() => section = 'sessions'}>Sessions</button>
       <div class="cubic-user-settings-utilities">
-        {#if voiceAvailable}<button type="button" onclick={onmedia}>Voice &amp; Video</button>{/if}
         <button type="button" disabled={loggingOut} onclick={onlogout}>{loggingOut ? 'Logging out…' : 'Log out'}</button>
       </div>
     </nav>
@@ -129,6 +130,12 @@
             <p role="status">Loading preferences…</p>
           {/if}
         </section>
+      {:else if section === 'voice-video'}
+        <section class="cubic-voice-video-settings" aria-labelledby="cubic-voice-video-title">
+          <div class="cubic-user-settings-title"><small>THIS BROWSER</small><h2 id="cubic-voice-video-title">Voice &amp; Video</h2></div>
+          <p class="cubic-voice-video-intro">Device and quality choices are saved on this browser. Available devices depend on browser permissions.</p>
+          {@render mediaControls()}
+        </section>
       {:else}
         <SessionSettings />
       {/if}
@@ -177,17 +184,13 @@
   .cubic-user-profile-actions button:disabled { opacity: .5; cursor: default; }
   .cubic-user-profile-error { color: #ff9ca3; }
   .cubic-app-preferences { width: min(100%, 760px); margin: 0 auto; }
+  .cubic-voice-video-settings { width: min(100%, 760px); margin: 0 auto; }
+  .cubic-voice-video-intro { margin: -4px 0 18px; color: var(--cubic-muted); font-size: .84rem; line-height: 1.5; }
   .cubic-app-preference-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 66px; padding: 12px 0; border-bottom: 1px solid var(--cubic-border); }
   .cubic-app-preference-row > div { min-width: 0; }
   .cubic-app-preference-row strong, .cubic-app-preference-row small { display: block; }
   .cubic-app-preference-row strong { font-size: .86rem; }
   .cubic-app-preference-row small { margin-top: 4px; color: var(--cubic-muted); line-height: 1.4; }
-  .cubic-preference-switch { position: relative; flex: 0 0 48px; width: 48px; height: 44px; margin: 0; appearance: none; cursor: pointer; }
-  .cubic-preference-switch::before { content: ''; position: absolute; inset: 9px 0; border: 1px solid var(--cubic-control-border); border-radius: 16px; background: var(--cubic-control-bg); }
-  .cubic-preference-switch::after { content: ''; position: absolute; top: 13px; left: 4px; width: 18px; height: 18px; border-radius: 50%; background: var(--cubic-muted); transition: transform 120ms ease; }
-  .cubic-preference-switch:checked::before { border-color: var(--cubic-brand-border); background: var(--cubic-logo-gray); }
-  .cubic-preference-switch:checked::after { transform: translateX(22px); background: var(--cubic-bg-0); }
-  .cubic-preference-switch:disabled { opacity: var(--cubic-control-disabled-opacity); cursor: default; }
   button:focus-visible, input:focus-visible { outline: 2px solid var(--cubic-brand-focus); outline-offset: 2px; }
   @media (max-width: 760px) { .cubic-user-settings-layout { grid-template-columns: 148px minmax(0, 1fr); } }
   @media (max-width: 680px), (max-width: 900px) and (max-height: 500px) {

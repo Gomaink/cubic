@@ -207,6 +207,9 @@ test('member ticket joins the selected voice room, keeps text usable, and leaves
   await expect(userSettings.getByRole('heading', { name: 'Active sessions' })).toBeVisible();
   await userSettings.getByRole('navigation', { name: 'User settings sections' }).getByRole('button', { name: 'App', exact: true }).click();
   await expect(userSettings.getByRole('checkbox', { name: 'Compact mode' })).toBeVisible();
+  await userSettings.getByRole('navigation', { name: 'User settings sections' }).getByRole('button', { name: 'Voice & Video' }).click();
+  await expect(userSettings.getByRole('heading', { name: 'Voice & Video' })).toBeVisible();
+  await userSettings.getByRole('button', { name: /Data saver.*360p/ }).click();
   await expect(dock).toContainText('1 connected');
   await userSettings.getByRole('navigation', { name: 'User settings sections' }).getByRole('button', { name: 'Profile' }).click();
   await userSettings.getByRole('button', { name: 'Close User Settings' }).click();
