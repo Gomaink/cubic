@@ -40,6 +40,9 @@ test('mail is disabled by default and SMTP configuration is explicit and secret-
   assert.throws(() => loadEnv({ ...smtp, PUBLIC_APP_URL: 'https://example.test/path' }), /PUBLIC_APP_URL/);
   assert.throws(() => loadEnv({ ...smtp, NODE_ENV: 'production', CORS_ORIGIN: 'https://cubic.example.test', SESSION_COOKIE_SECURE: 'true' }), /PUBLIC_APP_URL/);
   assert.equal(loadEnv({ ...smtp, NODE_ENV: 'production', CORS_ORIGIN: 'https://cubic.example.test', SESSION_COOKIE_SECURE: 'true', PUBLIC_APP_URL: 'https://cubic.example.test' }).MAIL_TRANSPORT, 'smtp');
+  assert.equal(loadEnv({ ...requiredEnvironment }).WEBAUTHN_RP_ID, 'localhost');
+  assert.equal(loadEnv({ ...requiredEnvironment, WEBAUTHN_RP_ID: 'localhost' }).WEBAUTHN_RP_NAME, 'Cubic');
+  assert.throws(() => loadEnv({ ...requiredEnvironment, WEBAUTHN_RP_ID: 'elsewhere.example' }), /WEBAUTHN_RP_ID/);
 });
 
 test('browser origin is explicit, canonical, and HTTPS in production', () => {

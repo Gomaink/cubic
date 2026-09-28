@@ -93,6 +93,8 @@ const envSchema = z
     SMTP_USER: z.string().default(''),
     SMTP_PASSWORD: z.string().default(''),
     PUBLIC_APP_URL: z.string().default(''),
+    WEBAUTHN_RP_ID: z.string().default(''),
+    WEBAUTHN_RP_NAME: z.string().trim().min(1).max(64).default('Cubic'),
     MEDIA_ROOT: z.string().min(1).default('/data/media'),
     GROUP_AVATAR_MAX_BYTES: z.coerce.number().int().min(65536).max(8 * 1024 * 1024).default(2 * 1024 * 1024),
     ATTACHMENT_MAX_BYTES: z.coerce.number().int().min(1024 * 1024).max(250 * 1024 * 1024).default(ATTACHMENT_DEFAULTS.maxBytes),
@@ -195,6 +197,9 @@ const envSchema = z
     LIVEKIT_API_SECRET: z.string().min(32)
   })
   .superRefine((env, context) => {
+    if (env.WEBAUTHN_RP_ID && env.WEBAUTHN_RP_ID !== new URL(env.CORS_ORIGIN).hostname) {
+      context.addIssue({ code: 'custom', path: ['WEBAUTHN_RP_ID'], message: 'must exactly match the configured CORS_ORIGIN hostname' });
+    }
     if (env.MAIL_TRANSPORT === 'smtp') {
       if (!z.email().safeParse(env.MAIL_FROM).success) context.addIssue({ code: 'custom', path: ['MAIL_FROM'], message: 'must be a valid sender email in SMTP mode' });
       if (!env.SMTP_HOST.trim()) context.addIssue({ code: 'custom', path: ['SMTP_HOST'], message: 'is required in SMTP mode' });
@@ -269,5 +274,5 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     throw new Error(`Invalid Cubic API environment: ${details}`);
   }
 
-  return result.data;
+  return { ...result.data, WEBAUTHN_RP_ID: result.data.WEBAUTHN_RP_ID || new URL(result.data.CORS_ORIGIN).hostname };
 }

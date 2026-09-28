@@ -2,6 +2,7 @@
 import { createServer } from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID, randomBytes } from 'node:crypto';
+import { generateRegistrationOptions, verifyRegistrationResponse } from '@simplewebauthn/server';
 import { Server } from 'socket.io';
 import sharp from 'sharp';
 
@@ -26,6 +27,8 @@ let fixtureMailMode;
 let fixtureMail;
 let fixtureEmailTokens;
 let fixtureResetTokens;
+let fixturePasskeys;
+let fixturePasskeyChallenge;
 let fixtureSessionValid;
 let groupMembers;
 let fixtureServers;
@@ -57,6 +60,8 @@ function reset() {
   fixtureMail = [];
   fixtureEmailTokens = [];
   fixtureResetTokens = [];
+  fixturePasskeys = [];
+  fixturePasskeyChallenge = null;
   fixtureSessionValid = true;
   fixtureSettings = { theme: 'dark', compactMode: false, reduceMotion: false, inputVolume: 100, outputVolume: 100 };
   settingsFailNext = false;
@@ -264,6 +269,40 @@ const server = createServer(async (request, response) => {
     return true;
   };
   if (url.pathname === '/api/v1/auth/security' && request.method === 'GET') return json({ email: fixtureEmail, emailVerifiedAt: fixtureEmailVerifiedAt, mailDeliveryAvailable: fixtureMailMode !== 'disabled' });
+  if (url.pathname === '/api/v1/auth/passkeys' && request.method === 'GET') return json({ passkeys: fixturePasskeys.map(({ id, label, createdAt, lastUsedAt }) => ({ id, label, createdAt, lastUsedAt })) });
+  if (url.pathname === '/api/v1/auth/passkeys/options' && request.method === 'POST') {
+    const payload = JSON.parse((await body()).toString());
+    if (!fixtureEmailVerifiedAt) return json({ error: 'A verified email is required to add a passkey.' }, 409);
+    if (payload.currentPassword !== fixturePassword) return json({ error: 'Current password is incorrect.' }, 403);
+    const options = await generateRegistrationOptions({ rpName: 'Cubic', rpID: 'localhost', userName: user.username,
+      userDisplayName: user.displayName, userID: Buffer.from(user.id), attestationType: 'none',
+      authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
+      excludeCredentials: fixturePasskeys.map((entry) => ({ id: entry.credentialId, transports: entry.transports })) });
+    fixturePasskeyChallenge = { id: randomUUID(), challenge: options.challenge, used: false };
+    return json({ challengeId: fixturePasskeyChallenge.id, options });
+  }
+  if (url.pathname === '/api/v1/auth/passkeys/complete' && request.method === 'POST') {
+    const payload = JSON.parse((await body()).toString());
+    if (!fixturePasskeyChallenge || fixturePasskeyChallenge.id !== payload.challengeId || fixturePasskeyChallenge.used) return json({ error: 'Could not verify the passkey.' }, 400);
+    try {
+      const verified = await verifyRegistrationResponse({ response: payload.response,
+        expectedChallenge: fixturePasskeyChallenge.challenge, expectedOrigin: 'http://localhost:3197', expectedRPID: 'localhost', requireUserVerification: true });
+      if (!verified.verified || fixturePasskeys.some((entry) => entry.credentialId === verified.registrationInfo.credential.id)) return json({ error: 'Could not verify the passkey.' }, 400);
+      fixturePasskeyChallenge.used = true;
+      fixturePasskeys.push({ id: randomUUID(), label: typeof payload.label === 'string' ? payload.label.slice(0, 64) : 'Passkey',
+        credentialId: verified.registrationInfo.credential.id, transports: payload.response.response.transports ?? [],
+        createdAt: new Date().toISOString(), lastUsedAt: null });
+      return json({ passkeys: fixturePasskeys.map(({ id, label, createdAt, lastUsedAt }) => ({ id, label, createdAt, lastUsedAt })) }, 201);
+    } catch { return json({ error: 'Could not verify the passkey.' }, 400); }
+  }
+  if (url.pathname.startsWith('/api/v1/auth/passkeys/') && request.method === 'DELETE') {
+    const payload = JSON.parse((await body()).toString());
+    if (payload.currentPassword !== fixturePassword) return json({ error: 'Current password is incorrect.' }, 403);
+    const index = fixturePasskeys.findIndex((entry) => entry.id === url.pathname.split('/').at(-1));
+    if (index < 0) return json({ error: 'Passkey not found.' }, 404);
+    fixturePasskeys.splice(index, 1);
+    response.writeHead(204); response.end(); return;
+  }
   if (url.pathname === '/api/v1/auth/email/verification' && request.method === 'POST') {
     if (fixtureMailMode === 'disabled') return json({ error: 'Email delivery is not configured.' }, 503);
     if (fixtureMailMode === 'failure') return json({ error: 'Email delivery is temporarily unavailable. Try again later.' }, 503);
