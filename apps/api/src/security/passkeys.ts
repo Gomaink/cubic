@@ -37,10 +37,22 @@ export class PasskeyService {
   constructor(private readonly database: Database, private readonly rpID: string, private readonly rpName: string, private readonly origin: string) {}
 
   async list(userId: string) {
-    const result = await this.database.pool.query<{ id: string; label: string; created_at: Date; last_used_at: Date | null }>(
-      'select id, label, created_at, last_used_at from passkey_credentials where user_id = $1 order by created_at desc', [userId]
+    const result = await this.database.pool.query<{ id: string; label: string; created_at: Date; last_used_at: Date | null; device_type: string; backed_up: boolean }>(
+      'select id, label, created_at, last_used_at, device_type, backed_up from passkey_credentials where user_id = $1 order by created_at desc', [userId]
     );
-    return result.rows.map((row) => ({ id: row.id, label: row.label, createdAt: row.created_at, lastUsedAt: row.last_used_at }));
+    return result.rows.map((row) => ({ id: row.id, label: row.label, createdAt: row.created_at, lastUsedAt: row.last_used_at,
+      deviceType: row.device_type, backedUp: row.backed_up }));
+  }
+
+  async rename(userId: string, credentialId: string, label: string) {
+    const result = await this.database.pool.query<{ id: string; label: string; created_at: Date; last_used_at: Date | null; device_type: string; backed_up: boolean }>(
+      'update passkey_credentials set label = $3 where id = $1 and user_id = $2 returning id, label, created_at, last_used_at, device_type, backed_up',
+      [credentialId, userId, label]
+    );
+    const row = result.rows[0];
+    if (!row) throw new PasskeyError('missing');
+    return { id: row.id, label: row.label, createdAt: row.created_at, lastUsedAt: row.last_used_at,
+      deviceType: row.device_type, backedUp: row.backed_up };
   }
 
   async begin(userId: string, sessionId: string, currentPassword: string) {
