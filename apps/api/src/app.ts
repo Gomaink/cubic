@@ -48,6 +48,7 @@ import { PasswordRecoveryService } from './mail/password-recovery.js';
 import { passwordRecoveryRoutes } from './routes/password-recovery.js';
 import { PasskeyService } from './security/passkeys.js';
 import { passkeyRoutes } from './routes/passkeys.js';
+import { PasskeyAuthenticationService } from './security/passkey-authentication.js';
 
 export interface CreateAppOptions {
   database: Database;
@@ -94,6 +95,8 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   const passwordRecovery = new PasswordRecoveryService(options.database, options.mailTransport ?? disabledMailTransport, realtimeEvents);
   const passkeys = new PasskeyService(options.database, options.webauthnRpID ?? new URL(options.corsOrigin).hostname,
     options.webauthnRpName ?? 'Cubic', options.corsOrigin);
+  const passkeyAuthentication = new PasskeyAuthenticationService(options.database, options.sessionService,
+    options.webauthnRpID ?? new URL(options.corsOrigin).hostname, options.corsOrigin);
   const mediaStore = new LocalMediaStore(options.mediaRoot ?? '/data/media', options.groupAvatarMaxBytes ?? 2 * 1024 * 1024);
   const iconStore = new ServerIconStore(options.mediaRoot ?? '/data/media');
   await iconStore.prepare();
@@ -181,7 +184,11 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     prefix: '/api/v1/auth',
     cookieName: options.cookieName,
     sessionService: options.sessionService,
-    passkeys
+    cookieSecure: options.cookieSecure,
+    sessionTtlDays: options.sessionTtlDays,
+    realtimeEvents,
+    passkeys,
+    authentication: passkeyAuthentication
   });
 
   await app.register(userRoutes, {

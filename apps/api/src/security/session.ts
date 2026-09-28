@@ -208,7 +208,8 @@ export class SessionService {
   async create(
     userId: string,
     ttlDays: number,
-    userAgent?: string
+    userAgent?: string,
+    insert: SessionRepository['insert'] = this.repository.insert.bind(this.repository)
   ): Promise<{ token: string; expiresAt: Date }> {
     const token = randomBytes(SESSION_TOKEN_BYTES).toString('base64url');
     const tokenHash = digestSessionToken(token);
@@ -216,7 +217,7 @@ export class SessionService {
     const clientLabel = classifySessionClient(userAgent);
 
     try {
-      await this.repository.insert(userId, tokenHash, expiresAt, clientLabel);
+      await insert(userId, tokenHash, expiresAt, clientLabel);
     } catch {
       throw new SessionPersistenceError();
     }

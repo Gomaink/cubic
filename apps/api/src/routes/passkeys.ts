@@ -1,9 +1,11 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import type { RegistrationResponseJSON } from '@simplewebauthn/server';
+import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/server';
 import { z } from 'zod';
 import { createRequireAuth } from '../auth/guard.js';
 import type { SessionService } from '../security/session.js';
 import { PasskeyError, PasskeyService } from '../security/passkeys.js';
+import { PasskeyAuthenticationError, PasskeyAuthenticationService } from '../security/passkey-authentication.js';
+import type { RealtimeEvents } from '../realtime/events.js';
 
 const passwordBody = z.object({ currentPassword: z.string().min(1).max(128) });
 const completeBody = z.object({
@@ -14,12 +16,42 @@ const completeBody = z.object({
 const removeBody = z.object({ currentPassword: z.string().min(1).max(128) });
 const params = z.object({ id: z.uuid() });
 
-interface Options { sessionService: SessionService; cookieName: string; passkeys: PasskeyService }
+interface Options { sessionService: SessionService; cookieName: string; cookieSecure: boolean; sessionTtlDays: number; passkeys: PasskeyService; authentication: PasskeyAuthenticationService; realtimeEvents: RealtimeEvents }
 const limited = (groupId: string, max = 5) => ({ max, timeWindow: '10 minutes', hook: 'preHandler' as const,
   groupId, keyGenerator: (request: FastifyRequest) => request.auth?.user.id ?? request.ip });
 
 export const passkeyRoutes: FastifyPluginAsync<Options> = async (app, options) => {
   const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
+  const loginError = { error: 'Passkey sign-in could not be completed.' };
+  app.post('/passkeys/authentication/options', { config: { rateLimit: { max: 20, timeWindow: '10 minutes', groupId: 'passkey-login-options' } } },
+    async (_request, reply) => reply.send(await options.authentication.begin()));
+  app.post('/passkeys/authentication/complete', { config: { rateLimit: { max: 30, timeWindow: '10 minutes', groupId: 'passkey-login-complete' } } },
+    async (request, reply) => {
+      const parsed = z.object({ challengeId: z.uuid(), response: z.unknown() }).safeParse(request.body);
+      if (!parsed.success) return reply.code(401).send(loginError);
+      try {
+        const result = await options.authentication.complete(parsed.data.challengeId,
+          parsed.data.response as AuthenticationResponseJSON, options.sessionTtlDays, request.headers['user-agent']);
+        const previousToken = request.cookies[options.cookieName];
+        if (previousToken) {
+          try {
+            const previousSessionId = await options.sessionService.destroyToken(previousToken);
+            if (previousSessionId) options.realtimeEvents.emitSessionRevoked({ sessionId: previousSessionId });
+          } catch (error) {
+            await options.sessionService.destroyToken(result.session.token).catch(() => {});
+            throw error;
+          }
+        }
+        reply.setCookie(options.cookieName, result.session.token, {
+          httpOnly: true, sameSite: 'lax', secure: options.cookieSecure, path: '/',
+          expires: result.session.expiresAt, maxAge: options.sessionTtlDays * 24 * 60 * 60
+        });
+        return reply.send({ user: result.user });
+      } catch (error) {
+        if (error instanceof PasskeyAuthenticationError) return reply.code(401).send(loginError);
+        throw error;
+      }
+    });
   app.get('/passkeys', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
     return reply.send({ passkeys: await options.passkeys.list(request.auth.user.id) });

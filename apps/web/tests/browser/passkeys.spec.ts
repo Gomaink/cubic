@@ -57,8 +57,6 @@ test('verified account enrolls and removes a passkey with current-password confi
   await expect(settings.getByText('Passkey removed.')).toBeVisible();
   await expect(row).toHaveCount(0);
   await settings.getByRole('button', { name: 'Close User Settings' }).click();
-  await page.goto('http://localhost:3197/login');
-  await expect(page.getByRole('button', { name: /sign in with passkey/i })).toHaveCount(0);
 });
 
 test('unverified email and unsupported browser offer no enrollment action', async ({ page, context, request }) => {
