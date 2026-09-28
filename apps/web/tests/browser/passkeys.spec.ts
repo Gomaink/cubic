@@ -45,8 +45,38 @@ test('verified account enrolls and removes a passkey with current-password confi
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   if (project.includes('phone')) expect((await add.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   const row = settings.locator('.cubic-passkey-row');
+  await expect(row).toContainText('Device-bound passkey');
+  await row.getByRole('button', { name: 'Rename' }).click();
+  await expect(settings.getByRole('heading', { name: 'Rename Test device' })).toBeVisible();
+  const nameInput = settings.getByLabel('Passkey name');
+  await expect(nameInput).toBeFocused();
+  await nameInput.fill('Canceled name');
+  await page.keyboard.press('Escape');
+  await expect(settings.getByRole('heading', { name: 'Rename Test device' })).toHaveCount(0);
+  await expect(row).toContainText('Test device');
+  await row.getByRole('button', { name: 'Rename' }).click();
+  await settings.getByLabel('Passkey name').fill('  My laptop  ');
+  await settings.getByRole('button', { name: 'Save name' }).click();
+  await expect(settings.getByText('Passkey renamed.')).toBeVisible();
+  await expect(row).toContainText('My laptop');
+  await expect(row).not.toContainText('Test device');
+  await expect(row.getByRole('button', { name: 'Rename' })).toBeFocused();
+  await page.route('**/api/v1/auth/passkeys/*', async (route) => {
+    if (route.request().method() === 'PATCH') await route.fulfill({ status: 503, json: { error: 'Temporary failure.' } });
+    else await route.continue();
+  });
+  await row.getByRole('button', { name: 'Rename' }).click();
+  await settings.getByLabel('Passkey name').fill('Unsaved name');
+  await settings.getByRole('button', { name: 'Save name' }).click();
+  await expect(settings.getByRole('alert')).toContainText('Could not rename the passkey. Try again.');
+  await expect(row).toContainText('My laptop');
+  await settings.getByRole('button', { name: 'Cancel' }).click();
+  await page.unroute('**/api/v1/auth/passkeys/*');
+  await expect(row.getByRole('button', { name: 'Rename' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  if (project.includes('phone')) expect((await row.getByRole('button', { name: 'Rename' }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await row.getByRole('button', { name: 'Remove' }).click();
-  await expect(settings.getByRole('heading', { name: 'Remove Test device' })).toBeVisible();
+  await expect(settings.getByRole('heading', { name: 'Remove My laptop' })).toBeVisible();
   if (screen) await page.screenshot({ path: `${artifacts}/${screen}-remove-passkey.png` });
   const removePassword = settings.getByLabel('Current password').last();
   await removePassword.fill('wrong-test-password');
@@ -56,6 +86,7 @@ test('verified account enrolls and removes a passkey with current-password confi
   await settings.getByRole('button', { name: 'Remove passkey' }).click();
   await expect(settings.getByText('Passkey removed.')).toBeVisible();
   await expect(row).toHaveCount(0);
+  await expect(settings.getByRole('button', { name: 'Add passkey' })).toBeFocused();
   await settings.getByRole('button', { name: 'Close User Settings' }).click();
 });
 

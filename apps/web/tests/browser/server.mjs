@@ -298,7 +298,8 @@ const server = createServer(async (request, response) => {
     return true;
   };
   if (url.pathname === '/api/v1/auth/security' && request.method === 'GET') return json({ email: fixtureEmail, emailVerifiedAt: fixtureEmailVerifiedAt, mailDeliveryAvailable: fixtureMailMode !== 'disabled' });
-  if (url.pathname === '/api/v1/auth/passkeys' && request.method === 'GET') return json({ passkeys: fixturePasskeys.map(({ id, label, createdAt, lastUsedAt }) => ({ id, label, createdAt, lastUsedAt })) });
+  const publicPasskey = ({ id, label, createdAt, lastUsedAt, deviceType, backedUp }) => ({ id, label, createdAt, lastUsedAt, deviceType, backedUp });
+  if (url.pathname === '/api/v1/auth/passkeys' && request.method === 'GET') return json({ passkeys: fixturePasskeys.map(publicPasskey) });
   if (url.pathname === '/api/v1/auth/passkeys/options' && request.method === 'POST') {
     const payload = JSON.parse((await body()).toString());
     if (!fixtureEmailVerifiedAt) return json({ error: 'A verified email is required to add a passkey.' }, 409);
@@ -321,9 +322,20 @@ const server = createServer(async (request, response) => {
       fixturePasskeys.push({ id: randomUUID(), label: typeof payload.label === 'string' ? payload.label.slice(0, 64) : 'Passkey',
         credentialId: verified.registrationInfo.credential.id, publicKey: verified.registrationInfo.credential.publicKey,
         counter: verified.registrationInfo.credential.counter, transports: payload.response.response.transports ?? [],
+        deviceType: verified.registrationInfo.credentialDeviceType, backedUp: verified.registrationInfo.credentialBackedUp,
         createdAt: new Date().toISOString(), lastUsedAt: null });
-      return json({ passkeys: fixturePasskeys.map(({ id, label, createdAt, lastUsedAt }) => ({ id, label, createdAt, lastUsedAt })) }, 201);
+      return json({ passkeys: fixturePasskeys.map(publicPasskey) }, 201);
     } catch { return json({ error: 'Could not verify the passkey.' }, 400); }
+  }
+  if (url.pathname.startsWith('/api/v1/auth/passkeys/') && request.method === 'PATCH') {
+    const payload = JSON.parse((await body()).toString());
+    const label = typeof payload.label === 'string' ? payload.label.trim().normalize('NFC') : '';
+    if (Object.keys(payload).some((key) => key !== 'label') || !label || label.length > 64 || /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(label))
+      return json({ error: 'Enter a passkey name between 1 and 64 characters.' }, 400);
+    const credential = fixturePasskeys.find((entry) => entry.id === url.pathname.split('/').at(-1));
+    if (!credential) return json({ error: 'Passkey not found.' }, 404);
+    credential.label = label;
+    return json({ passkey: publicPasskey(credential) });
   }
   if (url.pathname.startsWith('/api/v1/auth/passkeys/') && request.method === 'DELETE') {
     const payload = JSON.parse((await body()).toString());

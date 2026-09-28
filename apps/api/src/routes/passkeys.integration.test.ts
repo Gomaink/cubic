@@ -121,13 +121,41 @@ test('passkey registration uses verified password, session-bound one-time challe
       const owned = (await app.inject({ method: 'GET', url: '/api/v1/auth/passkeys', headers: { cookie: owner.cookie } })).json().passkeys;
       assert.equal(owned.length, 1);
       assert.equal(owned[0].label, 'Test device');
+      assert.equal(owned[0].deviceType, 'singleDevice');
+      assert.equal(owned[0].backedUp, false);
       assert.equal('publicKey' in owned[0], false);
       assert.equal('credentialId' in owned[0], false);
+      assert.equal('counter' in owned[0], false);
       const credential = (await database.pool.query<{ credential_id: string; public_key: string; transports: string[] }>(
         'select credential_id, public_key, transports from passkey_credentials where user_id = $1', [owner.id])).rows[0]!;
       assert.ok(credential.credential_id.length > 20);
       assert.ok(credential.public_key.length > 20);
       assert.deepEqual(credential.transports, ['internal']);
+      const renamePath = `/api/v1/auth/passkeys/${owned[0].id}`;
+      const rename = (sessionCookie: string | null, payload: object, path = renamePath) => app.inject({
+        method: 'PATCH', url: path, headers: { origin, 'sec-fetch-site': 'same-origin', ...(sessionCookie ? { cookie: sessionCookie } : {}) }, payload
+      });
+      const credentialBefore = (await database.pool.query(
+        'select credential_id, public_key, counter, transports, device_type, backed_up, created_at, last_used_at from passkey_credentials where id = $1',
+        [owned[0].id]
+      )).rows[0];
+      assert.equal((await rename(null, { label: 'Unauthorized' })).statusCode, 401);
+      assert.equal((await rename(other.cookie, { label: 'Unauthorized' })).statusCode, 404);
+      assert.equal((await rename(owner.cookie, { label: 'Missing' }, `/api/v1/auth/passkeys/${randomUUID()}`)).statusCode, 404);
+      assert.equal((await rename(owner.cookie, { label: '  ' })).statusCode, 400);
+      assert.equal((await rename(owner.cookie, { label: 'x'.repeat(65) })).statusCode, 400);
+      assert.equal((await rename(owner.cookie, { label: 'Visible\u202eHidden' })).statusCode, 400);
+      assert.equal((await rename(owner.cookie, { label: 'Name', counter: 0 })).statusCode, 400);
+      const renamed = await rename(owner.cookie, { label: '  Cafe\u0301  ' });
+      assert.equal(renamed.statusCode, 200);
+      assert.equal(renamed.json().passkey.label, 'Café');
+      assert.equal((await database.pool.query('select label from passkey_credentials where id = $1', [owned[0].id])).rows[0].label, 'Café');
+      const credentialAfter = (await database.pool.query(
+        'select credential_id, public_key, counter, transports, device_type, backed_up, created_at, last_used_at from passkey_credentials where id = $1',
+        [owned[0].id]
+      )).rows[0];
+      assert.deepEqual(credentialAfter, credentialBefore);
+      assert.equal((await app.inject({ method: 'GET', url: '/api/v1/auth/passkeys', headers: { cookie: owner.cookie } })).json().passkeys[0].label, 'Café');
       await assert.rejects(() => database.pool.query(
         'insert into passkey_credentials (user_id, credential_id, public_key, counter, device_type, backed_up, label) values ($1, $2, $3, 0, $4, false, $5)',
         [other.id, credential.credential_id, credential.public_key, 'singleDevice', 'Duplicate']
@@ -214,6 +242,7 @@ test('passkey registration uses verified password, session-bound one-time challe
       assert.equal((await app.inject({ method: 'DELETE', url: `/api/v1/auth/passkeys/${owned[0].id}`, headers: { origin, cookie: owner.cookie }, payload: { currentPassword: 'wrong-password' } })).statusCode, 403);
       assert.equal((await app.inject({ method: 'DELETE', url: `/api/v1/auth/passkeys/${owned[0].id}`, headers: { origin } })).statusCode, 401);
       assert.equal((await app.inject({ method: 'DELETE', url: `/api/v1/auth/passkeys/${owned[0].id}`, headers: { origin, cookie: owner.cookie }, payload: { currentPassword: password } })).statusCode, 204);
+      assert.equal((await rename(owner.cookie, { label: 'Removed' })).statusCode, 404);
       assert.equal((await post('/passkeys/authentication/complete', { challengeId: removedOptions.challengeId, response: removedAssertion })).statusCode, 401);
       assert.equal((await database.pool.query('select id from passkey_credentials where user_id = $1', [owner.id])).rows.length, 0);
       assert.equal((await app.inject({ method: 'GET', url: '/api/v1/auth/passkeys', headers: { cookie: owner.cookie } })).statusCode, 200);

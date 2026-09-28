@@ -15,6 +15,8 @@ const completeBody = z.object({
 });
 const removeBody = z.object({ currentPassword: z.string().min(1).max(128) });
 const params = z.object({ id: z.uuid() });
+const renameBody = z.strictObject({ label: z.string().transform((value) => value.trim().normalize('NFC'))
+  .pipe(z.string().min(1).max(64).refine((value) => !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(value))) });
 
 interface Options { sessionService: SessionService; cookieName: string; cookieSecure: boolean; sessionTtlDays: number; passkeys: PasskeyService; authentication: PasskeyAuthenticationService; realtimeEvents: RealtimeEvents }
 const limited = (groupId: string, max = 5) => ({ max, timeWindow: '10 minutes', hook: 'preHandler' as const,
@@ -55,6 +57,18 @@ export const passkeyRoutes: FastifyPluginAsync<Options> = async (app, options) =
   app.get('/passkeys', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
     return reply.send({ passkeys: await options.passkeys.list(request.auth.user.id) });
+  });
+  app.patch('/passkeys/:id', { preHandler: requireAuth, config: { rateLimit: limited('passkey-rename', 20) } }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const parsedParams = params.safeParse(request.params);
+    const parsedBody = renameBody.safeParse(request.body);
+    if (!parsedParams.success || !parsedBody.success) return reply.code(400).send({ error: 'Enter a passkey name between 1 and 64 characters.' });
+    try {
+      return reply.send({ passkey: await options.passkeys.rename(request.auth.user.id, parsedParams.data.id, parsedBody.data.label) });
+    } catch (error) {
+      if (error instanceof PasskeyError && error.reason === 'missing') return reply.code(404).send({ error: 'Passkey not found.' });
+      throw error;
+    }
   });
   app.post('/passkeys/options', { preHandler: requireAuth, config: { rateLimit: limited('passkey-options') } }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });

@@ -3,11 +3,11 @@
   import { browserSupportsWebAuthn, startRegistration } from '@simplewebauthn/browser';
 
   let { emailVerified }: { emailVerified: boolean } = $props();
-  type Passkey = { id: string; label: string; createdAt: string; lastUsedAt: string | null };
+  type Passkey = { id: string; label: string; createdAt: string; lastUsedAt: string | null; deviceType: string; backedUp: boolean };
   let passkeys = $state<Passkey[]>([]);
   let loading = $state(true);
   let supported = $state<boolean | null>(null);
-  let mode = $state<'add' | 'remove' | null>(null);
+  let mode = $state<'add' | 'rename' | 'remove' | null>(null);
   let selected = $state<Passkey | null>(null);
   let password = $state('');
   let label = $state('Passkey');
@@ -15,6 +15,15 @@
   let error = $state('');
   let notice = $state('');
   let passwordInput = $state<HTMLInputElement | null>(null);
+  let labelInput = $state<HTMLInputElement | null>(null);
+  let addButton = $state<HTMLButtonElement | null>(null);
+  let actionTrigger: HTMLButtonElement | null = null;
+
+  function deviceDescription(passkey: Passkey) {
+    if (passkey.deviceType === 'multiDevice') return passkey.backedUp ? 'Synced passkey · Backed up' : 'Multi-device passkey · Not backed up';
+    if (passkey.deviceType === 'singleDevice') return `Device-bound passkey · ${passkey.backedUp ? 'Backed up' : 'Not backed up'}`;
+    return passkey.backedUp ? 'Backed up' : 'Not backed up';
+  }
 
   async function load() {
     try {
@@ -25,22 +34,34 @@
     finally { loading = false; }
   }
   onMount(() => { supported = browserSupportsWebAuthn(); void load(); });
-  async function open(next: 'add' | 'remove', passkey: Passkey | null = null) {
+  async function open(next: 'add' | 'rename' | 'remove', passkey: Passkey | null, trigger: HTMLButtonElement) {
+    actionTrigger = trigger;
     mode = next;
     selected = passkey;
     password = '';
-    label = 'Passkey';
+    label = next === 'rename' ? passkey?.label ?? '' : 'Passkey';
     error = '';
     notice = '';
     await tick();
-    passwordInput?.focus();
+    if (next === 'rename') labelInput?.focus();
+    else passwordInput?.focus();
   }
-  function close() { mode = null; selected = null; password = ''; }
+  async function close() {
+    mode = null; selected = null; password = '';
+    await tick();
+    if (actionTrigger?.isConnected) actionTrigger.focus();
+    else addButton?.focus();
+    actionTrigger = null;
+  }
+  function cancelOnEscape(event: KeyboardEvent) {
+    if (event.key === 'Escape' && !busy) { event.preventDefault(); event.stopPropagation(); void close(); }
+  }
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (busy || !mode) return;
     const action = mode;
     const currentPassword = password;
+    const nextLabel = label.trim();
     password = '';
     busy = true;
     error = '';
@@ -69,6 +90,14 @@
         if (!saved.ok) throw new Error(saved.status === 429 ? 'Too many attempts. Try again later.' : 'Could not verify the passkey. Try again.');
         passkeys = (await saved.json() as { passkeys: Passkey[] }).passkeys;
         notice = 'Passkey added.';
+      } else if (action === 'rename' && selected) {
+        const response = await fetch(`/api/v1/auth/passkeys/${selected.id}`, { method: 'PATCH', credentials: 'include',
+          headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label: nextLabel }) });
+        if (!response.ok) throw new Error(response.status === 429 ? 'Too many attempts. Try again later.' :
+          response.status === 400 ? 'Enter a passkey name between 1 and 64 characters.' : 'Could not rename the passkey. Try again.');
+        const updated = (await response.json() as { passkey: Passkey }).passkey;
+        passkeys = passkeys.map((entry) => entry.id === updated.id ? updated : entry);
+        notice = 'Passkey renamed.';
       } else if (selected) {
         const response = await fetch(`/api/v1/auth/passkeys/${selected.id}`, { method: 'DELETE', credentials: 'include',
           headers: { 'content-type': 'application/json' }, body: JSON.stringify({ currentPassword }) });
@@ -76,7 +105,8 @@
         passkeys = passkeys.filter((entry) => entry.id !== selected?.id);
         notice = 'Passkey removed.';
       }
-      close();
+      busy = false;
+      await close();
     } catch (cause) { error = cause instanceof Error ? cause.message : 'Passkey action failed. Try again.'; }
     finally { busy = false; }
   }
@@ -88,18 +118,21 @@
   {:else}
     {#if passkeys.length === 0}<p class="cubic-passkeys-help">No passkeys added yet.</p>{/if}
     {#each passkeys as passkey (passkey.id)}
-      <div class="cubic-passkey-row"><div><strong>{passkey.label}</strong><small>Added {new Date(passkey.createdAt).toLocaleDateString()}{passkey.lastUsedAt ? ` · Last used ${new Date(passkey.lastUsedAt).toLocaleDateString()}` : ''}</small></div><button class="cubic-control cubic-control-ghost" type="button" disabled={busy} onclick={() => void open('remove', passkey)}>Remove</button></div>
+      <div class="cubic-passkey-row">
+        <div class="cubic-passkey-details"><strong>{passkey.label}</strong><small>Added {new Date(passkey.createdAt).toLocaleDateString()}{passkey.lastUsedAt ? ` · Last used ${new Date(passkey.lastUsedAt).toLocaleDateString()}` : ''}</small><small>{deviceDescription(passkey)}</small></div>
+        <div class="cubic-passkey-row-actions"><button class="cubic-control cubic-control-ghost" type="button" disabled={busy} onclick={(event) => void open('rename', passkey, event.currentTarget)}>Rename</button><button class="cubic-control cubic-control-ghost" type="button" disabled={busy} onclick={(event) => void open('remove', passkey, event.currentTarget)}>Remove</button></div>
+      </div>
     {/each}
     {#if !emailVerified}<p class="cubic-passkeys-help">Verify your current email before adding a passkey.</p>
     {:else if supported === false}<p class="cubic-passkeys-help">This browser does not support passkey enrollment.</p>
-    {:else if supported}<button class="cubic-control cubic-control-secondary cubic-passkeys-add" type="button" disabled={busy} onclick={() => void open('add')}>Add passkey</button>{/if}
+    {:else if supported}<button bind:this={addButton} class="cubic-control cubic-control-secondary cubic-passkeys-add" type="button" disabled={busy} onclick={(event) => void open('add', null, event.currentTarget)}>Add passkey</button>{/if}
     {#if mode}
       <form class="cubic-passkeys-confirm" onsubmit={submit}>
-        <h4>{mode === 'add' ? 'Add passkey' : `Remove ${selected?.label ?? 'passkey'}`}</h4>
-        {#if mode === 'add'}<label for="cubic-passkey-label">Passkey name</label><input id="cubic-passkey-label" bind:value={label} maxlength="64" required disabled={busy} />{/if}
-        <label for="cubic-passkey-password">Current password</label>
-        <input id="cubic-passkey-password" bind:this={passwordInput} type="password" bind:value={password} autocomplete="current-password" maxlength="128" required disabled={busy} />
-        <div class="cubic-passkeys-actions"><button class={mode === 'remove' ? 'cubic-control cubic-control-danger' : 'cubic-control cubic-control-primary'} type="submit" disabled={busy}>{busy ? 'Working…' : mode === 'add' ? 'Continue' : 'Remove passkey'}</button><button class="cubic-control cubic-control-ghost" type="button" disabled={busy} onclick={close}>Cancel</button></div>
+        <h4>{mode === 'add' ? 'Add passkey' : mode === 'rename' ? `Rename ${selected?.label ?? 'passkey'}` : `Remove ${selected?.label ?? 'passkey'}`}</h4>
+        {#if mode === 'add' || mode === 'rename'}<label for="cubic-passkey-label">Passkey name</label><input id="cubic-passkey-label" bind:this={labelInput} bind:value={label} onkeydown={cancelOnEscape} maxlength="64" required disabled={busy} />{/if}
+        {#if mode !== 'rename'}<label for="cubic-passkey-password">Current password</label>
+        <input id="cubic-passkey-password" bind:this={passwordInput} type="password" bind:value={password} onkeydown={cancelOnEscape} autocomplete="current-password" maxlength="128" required disabled={busy} />{/if}
+        <div class="cubic-passkeys-actions"><button class={mode === 'remove' ? 'cubic-control cubic-control-danger' : 'cubic-control cubic-control-primary'} type="submit" disabled={busy}>{busy ? 'Working…' : mode === 'add' ? 'Continue' : mode === 'rename' ? 'Save name' : 'Remove passkey'}</button><button class="cubic-control cubic-control-ghost" type="button" disabled={busy} onclick={() => void close()}>Cancel</button></div>
       </form>
     {/if}
   {/if}
@@ -114,6 +147,8 @@
   .cubic-security-intro p, .cubic-passkeys-help, .cubic-passkey-row small { margin: 6px 0 0; color: var(--cubic-muted); font-size: .83rem; line-height: 1.45; }
   .cubic-passkey-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 10px 0; border-top: 1px solid var(--cubic-border); }
   .cubic-passkey-row div { min-width: 0; }
+  .cubic-passkey-details { flex: 1 1 auto; }
+  .cubic-passkey-row-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
   .cubic-passkey-row strong, .cubic-passkey-row small { display: block; overflow-wrap: anywhere; }
   .cubic-passkeys-add { justify-self: start; }
   .cubic-passkeys-confirm { display: grid; gap: 9px; padding-top: 12px; border-top: 1px solid var(--cubic-border); }
@@ -126,5 +161,5 @@
   .cubic-passkeys-error, .cubic-passkeys-notice { margin: 4px 0 0; font-size: .83rem; line-height: 1.4; }
   .cubic-passkeys-error { color: var(--cubic-red); }
   .cubic-passkeys-notice { color: var(--cubic-text); }
-  @media (max-width: 680px) { .cubic-passkeys { padding: 16px; } }
+  @media (max-width: 680px) { .cubic-passkeys { padding: 16px; } .cubic-passkey-row { align-items: stretch; flex-direction: column; gap: 6px; } .cubic-passkey-row-actions { justify-content: flex-start; } }
 </style>
