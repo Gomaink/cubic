@@ -129,6 +129,24 @@ export const passkeyChallenges = pgTable(
   ]
 );
 
+// Discoverable sign-in has no account or session until an assertion is verified.
+// Keep its one-time challenges separate from session-bound enrollment challenges.
+export const passkeyAuthenticationChallenges = pgTable(
+  'passkey_authentication_challenges',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    challengeDigest: varchar('challenge_digest', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true, mode: 'date' }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex('passkey_authentication_challenges_digest_uq').on(table.challengeDigest),
+    check('passkey_authentication_challenges_digest_ck', sql`${table.challengeDigest} ~ '^[0-9a-f]{64}$'`),
+    check('passkey_authentication_challenges_expiry_ck', sql`${table.expiresAt} > ${table.createdAt}`)
+  ]
+);
+
 export const servers = pgTable('servers', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: varchar('name', { length: 96 }).notNull(),

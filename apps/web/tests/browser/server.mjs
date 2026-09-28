@@ -2,7 +2,7 @@
 import { createServer } from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID, randomBytes } from 'node:crypto';
-import { generateRegistrationOptions, verifyRegistrationResponse } from '@simplewebauthn/server';
+import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
 import { Server } from 'socket.io';
 import sharp from 'sharp';
 
@@ -29,6 +29,7 @@ let fixtureEmailTokens;
 let fixtureResetTokens;
 let fixturePasskeys;
 let fixturePasskeyChallenge;
+let fixturePasskeyAuthenticationChallenges;
 let fixtureSessionValid;
 let groupMembers;
 let fixtureServers;
@@ -62,6 +63,7 @@ function reset() {
   fixtureResetTokens = [];
   fixturePasskeys = [];
   fixturePasskeyChallenge = null;
+  fixturePasskeyAuthenticationChallenges = [];
   fixtureSessionValid = true;
   fixtureSettings = { theme: 'dark', compactMode: false, reduceMotion: false, inputVolume: 100, outputVolume: 100 };
   settingsFailNext = false;
@@ -196,6 +198,33 @@ const server = createServer(async (request, response) => {
   }
   const isPeer = request.headers.cookie?.includes('cubic_session=browser-peer');
   if (url.pathname === '/api/v1/auth/capabilities') return json({ passwordRecoveryAvailable: fixtureMailMode !== 'disabled' });
+  if (url.pathname === '/api/v1/auth/passkeys/authentication/options' && request.method === 'POST') {
+    const options = await generateAuthenticationOptions({ rpID: 'localhost', allowCredentials: [], userVerification: 'required', timeout: 300000 });
+    const challengeId = randomUUID();
+    fixturePasskeyAuthenticationChallenges.push({ id: challengeId, challenge: options.challenge, expiresAt: Date.now() + 300000, used: false });
+    return json({ challengeId, options });
+  }
+  if (url.pathname === '/api/v1/auth/passkeys/authentication/complete' && request.method === 'POST') {
+    const payload = JSON.parse((await body()).toString());
+    const challenge = fixturePasskeyAuthenticationChallenges.find((entry) => entry.id === payload.challengeId && !entry.used && entry.expiresAt > Date.now());
+    const credential = fixturePasskeys.find((entry) => entry.credentialId === payload.response?.id);
+    if (!challenge || !credential || !fixtureEmailVerifiedAt) return json({ error: 'Passkey sign-in could not be completed.' }, 401);
+    try {
+      const verified = await verifyAuthenticationResponse({ response: payload.response,
+        expectedChallenge: challenge.challenge, expectedOrigin: 'http://localhost:3197', expectedRPID: 'localhost',
+        credential: { id: credential.credentialId, publicKey: credential.publicKey, counter: credential.counter, transports: credential.transports },
+        requireUserVerification: true });
+      if (!verified.verified) return json({ error: 'Passkey sign-in could not be completed.' }, 401);
+      challenge.used = true;
+      credential.counter = verified.authenticationInfo.newCounter;
+      credential.lastUsedAt = new Date().toISOString();
+      fixtureSessionValid = true;
+      activeSessions.unshift({ id: randomUUID(), current: true, client: 'Chrome on Linux', createdAt: new Date().toISOString(),
+        lastSeenAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 30 * 86400000).toISOString() });
+      response.setHeader('set-cookie', 'cubic_session=browser-fixture; Path=/; HttpOnly; SameSite=Lax');
+      return json({ user });
+    } catch { return json({ error: 'Passkey sign-in could not be completed.' }, 401); }
+  }
   if (url.pathname === '/api/v1/auth/password/recovery' && request.method === 'POST') {
     const payload = JSON.parse((await body()).toString());
     if (typeof payload.identifier !== 'string' || !payload.identifier.trim() || payload.identifier.length > 254) return json({ error: 'Enter an email or username.' }, 400);
@@ -290,7 +319,8 @@ const server = createServer(async (request, response) => {
       if (!verified.verified || fixturePasskeys.some((entry) => entry.credentialId === verified.registrationInfo.credential.id)) return json({ error: 'Could not verify the passkey.' }, 400);
       fixturePasskeyChallenge.used = true;
       fixturePasskeys.push({ id: randomUUID(), label: typeof payload.label === 'string' ? payload.label.slice(0, 64) : 'Passkey',
-        credentialId: verified.registrationInfo.credential.id, transports: payload.response.response.transports ?? [],
+        credentialId: verified.registrationInfo.credential.id, publicKey: verified.registrationInfo.credential.publicKey,
+        counter: verified.registrationInfo.credential.counter, transports: payload.response.response.transports ?? [],
         createdAt: new Date().toISOString(), lastUsedAt: null });
       return json({ passkeys: fixturePasskeys.map(({ id, label, createdAt, lastUsedAt }) => ({ id, label, createdAt, lastUsedAt })) }, 201);
     } catch { return json({ error: 'Could not verify the passkey.' }, 400); }

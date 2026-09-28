@@ -12,6 +12,8 @@ import { createSessionService } from '../security/session.js';
 import { hashPassword } from '../security/password.js';
 import { PasskeyError, PasskeyService } from '../security/passkeys.js';
 import { passkeyRoutes } from './passkeys.js';
+import { PasskeyAuthenticationError, PasskeyAuthenticationService } from '../security/passkey-authentication.js';
+import { createRealtimeEvents } from '../realtime/events.js';
 
 const connectionString = process.env.CUBIC_PASSKEY_TEST_DATABASE_URL;
 const origin = 'http://localhost:3203';
@@ -46,7 +48,9 @@ test('passkey registration uses verified password, session-bound one-time challe
       await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute' });
       app.decorateRequest('auth', null);
       app.addHook('onRequest', createBrowserMutationProtection(origin));
-      await app.register(passkeyRoutes, { prefix: '/api/v1/auth', cookieName: 'cubic_session', sessionService: sessions, passkeys: service });
+      await app.register(passkeyRoutes, { prefix: '/api/v1/auth', cookieName: 'cubic_session', cookieSecure: false,
+        sessionTtlDays: 30, sessionService: sessions, passkeys: service,
+        authentication: new PasskeyAuthenticationService(database, sessions, 'localhost', origin), realtimeEvents: createRealtimeEvents() });
       const library = await readFile(new URL('../../../../node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js', import.meta.url));
       app.get('/test', async (_request, reply) => reply.type('text/html').send('<!doctype html><title>Passkey test</title>'));
       app.get('/library', async (_request, reply) => reply.type('application/javascript').send(library));
@@ -142,13 +146,86 @@ test('passkey registration uses verified password, session-bound one-time challe
 
       assert.equal(fourth.options.excludeCredentials[0].id, credential.credential_id);
       assert.deepEqual(fourth.options.excludeCredentials[0].transports, ['internal']);
+      const authenticationOptions = (await post('/passkeys/authentication/options', {})).json();
+      assert.deepEqual(authenticationOptions.options.allowCredentials, []);
+      assert.equal(authenticationOptions.options.userVerification, 'required');
+      assert.equal('userId' in authenticationOptions, false);
+      const loginChallenge = (await database.pool.query<{ challenge_digest: string; expires_at: Date; created_at: Date }>(
+        'select challenge_digest, expires_at, created_at from passkey_authentication_challenges where id = $1',
+        [authenticationOptions.challengeId])).rows[0]!;
+      assert.equal(loginChallenge.challenge_digest, digest(authenticationOptions.options.challenge));
+      assert.notEqual(loginChallenge.challenge_digest, authenticationOptions.options.challenge);
+      assert.ok(Math.abs(loginChallenge.expires_at.getTime() - loginChallenge.created_at.getTime() - 300_000) < 5_000);
+      const authenticate = (authenticationOptionsValue: unknown) => page.evaluate(async (optionsJSON) =>
+        (globalThis as unknown as { SimpleWebAuthnBrowser: { startAuthentication: (arg: { optionsJSON: unknown }) => Promise<unknown> } }).SimpleWebAuthnBrowser.startAuthentication({ optionsJSON }), authenticationOptionsValue);
+      const assertion = await authenticate(authenticationOptions.options);
+      const beforeLoginSessions = Number((await database.pool.query<{ count: string }>(
+        'select count(*) from sessions where user_id = $1', [owner.id])).rows[0]!.count);
+      const loginResults = await Promise.all([
+        post('/passkeys/authentication/complete', { challengeId: authenticationOptions.challengeId, response: assertion }),
+        post('/passkeys/authentication/complete', { challengeId: authenticationOptions.challengeId, response: assertion })
+      ]);
+      assert.deepEqual(loginResults.map((result) => result.statusCode).sort(), [200, 401]);
+      const loginSuccess = loginResults.find((result) => result.statusCode === 200)!;
+      assert.equal(loginSuccess.json().user.id, owner.id);
+      const loginCookie = loginSuccess.cookies.find((entry) => entry.name === 'cubic_session')!;
+      assert.equal(loginCookie.httpOnly, true);
+      assert.equal(loginCookie.sameSite, 'Lax');
+      assert.notEqual(loginCookie.secure, true);
+      assert.equal((await sessions.resolveToken(loginCookie.value))?.user.id, owner.id);
+      assert.equal(Number((await database.pool.query<{ count: string }>(
+        'select count(*) from sessions where user_id = $1', [owner.id])).rows[0]!.count), beforeLoginSessions + 1);
+      const usedCredential = (await database.pool.query<{ counter: string; last_used_at: Date | null }>(
+        'select counter, last_used_at from passkey_credentials where user_id = $1', [owner.id])).rows[0]!;
+      assert.ok(Number(usedCredential.counter) >= 0);
+      assert.ok(usedCredential.last_used_at);
+      assert.equal((await post('/passkeys/authentication/complete', { challengeId: authenticationOptions.challengeId, response: assertion })).statusCode, 401);
+
+      const securityOptions = (await post('/passkeys/authentication/options', {})).json();
+      const securityAssertion = await authenticate(securityOptions.options);
+      const wrongCredential = structuredClone(securityAssertion) as { id: string };
+      wrongCredential.id = 'random-credential';
+      assert.equal((await post('/passkeys/authentication/complete', { challengeId: securityOptions.challengeId, response: wrongCredential })).statusCode, 401);
+      const wrongLoginOrigin = structuredClone(securityAssertion) as { response: { clientDataJSON: string } };
+      const loginClientData = JSON.parse(Buffer.from(wrongLoginOrigin.response.clientDataJSON, 'base64url').toString());
+      wrongLoginOrigin.response.clientDataJSON = Buffer.from(JSON.stringify({ ...loginClientData, origin: 'https://evil.example' })).toString('base64url');
+      assert.equal((await post('/passkeys/authentication/complete', { challengeId: securityOptions.challengeId, response: wrongLoginOrigin })).statusCode, 401);
+      const wrongLoginRP = new PasskeyAuthenticationService(database, sessions, 'wrong.example', origin);
+      await assert.rejects(() => wrongLoginRP.complete(securityOptions.challengeId, securityAssertion as never, 30), PasskeyAuthenticationError);
+      await database.pool.query('update users set email_verified_at = null where id = $1', [owner.id]);
+      assert.equal((await post('/passkeys/authentication/complete', { challengeId: securityOptions.challengeId, response: securityAssertion })).statusCode, 401);
+      await database.pool.query('update users set email_verified_at = now(), disabled_at = now() where id = $1', [owner.id]);
+      assert.equal((await post('/passkeys/authentication/complete', { challengeId: securityOptions.challengeId, response: securityAssertion })).statusCode, 401);
+      await database.pool.query('update users set disabled_at = null where id = $1', [owner.id]);
+      const malformedSignature = structuredClone(securityAssertion) as { response: { signature: string } };
+      malformedSignature.response.signature = 'invalid-signature';
+      assert.equal((await post('/passkeys/authentication/complete', { challengeId: securityOptions.challengeId, response: malformedSignature })).statusCode, 401);
+      assert.equal((await post('/passkeys/authentication/complete', { challengeId: securityOptions.challengeId, response: securityAssertion })).statusCode, 200);
+
+      const expiredOptions = (await post('/passkeys/authentication/options', {})).json();
+      await database.pool.query("update passkey_authentication_challenges set created_at = now() - interval '10 minutes', expires_at = now() - interval '1 second' where id = $1", [expiredOptions.challengeId]);
+      assert.equal((await post('/passkeys/authentication/complete', { challengeId: expiredOptions.challengeId, response: assertion })).statusCode, 401);
+      assert.equal((await post('/passkeys/authentication/complete', { challengeId: randomUUID(), response: assertion })).statusCode, 401);
+      const removedOptions = (await post('/passkeys/authentication/options', {})).json();
+      assert.equal((await database.pool.query('select id from passkey_authentication_challenges where id = $1',
+        [expiredOptions.challengeId])).rowCount, 0);
+      const removedAssertion = await authenticate(removedOptions.options);
       assert.equal((await app.inject({ method: 'DELETE', url: `/api/v1/auth/passkeys/${owned[0].id}`, headers: { origin, cookie: other.cookie }, payload: { currentPassword: password } })).statusCode, 404);
       assert.equal((await app.inject({ method: 'DELETE', url: `/api/v1/auth/passkeys/${owned[0].id}`, headers: { origin, cookie: owner.cookie }, payload: { currentPassword: 'wrong-password' } })).statusCode, 403);
       assert.equal((await app.inject({ method: 'DELETE', url: `/api/v1/auth/passkeys/${owned[0].id}`, headers: { origin } })).statusCode, 401);
       assert.equal((await app.inject({ method: 'DELETE', url: `/api/v1/auth/passkeys/${owned[0].id}`, headers: { origin, cookie: owner.cookie }, payload: { currentPassword: password } })).statusCode, 204);
+      assert.equal((await post('/passkeys/authentication/complete', { challengeId: removedOptions.challengeId, response: removedAssertion })).statusCode, 401);
       assert.equal((await database.pool.query('select id from passkey_credentials where user_id = $1', [owner.id])).rows.length, 0);
       assert.equal((await app.inject({ method: 'GET', url: '/api/v1/auth/passkeys', headers: { cookie: owner.cookie } })).statusCode, 200);
       assert.equal((await app.inject({ method: 'GET', url: '/api/v1/auth/passkeys', headers: { cookie: secondOwnerCookie } })).statusCode, 200);
+      let optionsRateLimited = false;
+      for (let attempt = 0; attempt < 25; attempt += 1) {
+        if ((await post('/passkeys/authentication/options', {})).statusCode === 429) {
+          optionsRateLimited = true;
+          break;
+        }
+      }
+      assert.equal(optionsRateLimited, true);
     } finally {
       await browser?.close();
       await app.close();

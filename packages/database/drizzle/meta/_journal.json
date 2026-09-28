@@ -134,6 +134,13 @@
       "when": 1790554801611,
       "tag": "0018_watery_karma",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790568975984,
+      "tag": "0019_perpetual_millenium_guard",
+      "breakpoints": true
     }
   ]
 }

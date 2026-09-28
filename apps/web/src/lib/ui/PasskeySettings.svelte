@@ -83,7 +83,7 @@
 </script>
 
 <section class="cubic-passkeys cubic-security-form" aria-labelledby="cubic-passkeys-title" aria-busy={busy || loading}>
-  <div class="cubic-security-intro"><h3 id="cubic-passkeys-title">Passkeys</h3><p>Passkeys are stored by your device or password manager. Sign-in with passkeys is coming in a later release.</p></div>
+  <div class="cubic-security-intro"><h3 id="cubic-passkeys-title">Passkeys</h3><p>Passkeys are stored by your device or password manager. Use one to sign in to Cubic.</p></div>
   {#if loading}<p role="status">Loading passkeys…</p>
   {:else}
     {#if passkeys.length === 0}<p class="cubic-passkeys-help">No passkeys added yet.</p>{/if}
