@@ -1,5 +1,11 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   let { data } = $props();
+  let recoveryAvailable = $state(false);
+  onMount(() => {
+    void fetch('/api/v1/auth/capabilities').then((response) => response.ok ? response.json() : null)
+      .then((value) => { recoveryAvailable = value?.passwordRecoveryAvailable === true; }).catch(() => {});
+  });
   let identifier = $state('');
   let password = $state('');
   let error = $state('');
@@ -64,6 +70,8 @@
         {submitting ? 'Signing in…' : 'Log in'}
       </button>
     </form>
+
+    {#if recoveryAvailable}<p class="auth-switch"><a href="/forgot-password">Forgot password?</a></p>{/if}
 
     <p class="auth-switch">New to Cubic? <a href={data.continueInvite ? '/register?returnTo=invite' : '/register'}>Create an account</a>.</p>
   </section>

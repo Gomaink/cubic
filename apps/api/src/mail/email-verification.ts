@@ -155,6 +155,9 @@ export class EmailVerificationService {
           await client.query('update users set email = $2, email_normalized = $2, email_verified_at = now(), updated_at = now() where id = $1',
             [found.rows[0].user_id, token.target_email_normalized]);
           await client.query('update email_verification_tokens set used_at = now() where user_id = $1 and used_at is null', [found.rows[0].user_id]);
+          // A reset link sent to the former mailbox must not become valid again
+          // if that address is ever restored.
+          await client.query('update password_reset_tokens set used_at = now() where user_id = $1 and used_at is null', [found.rows[0].user_id]);
           const sessions = await client.query<{ id: string }>('delete from sessions where user_id = $1 returning id', [found.rows[0].user_id]);
           revokedIds = sessions.rows.map((row) => row.id);
           result = 'changed';

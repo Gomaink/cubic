@@ -65,6 +65,25 @@ export const emailVerificationTokens = pgTable(
   ]
 );
 
+export const passwordResetTokens = pgTable(
+  'password_reset_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    tokenDigest: varchar('token_digest', { length: 64 }).notNull(),
+    targetEmailNormalized: text('target_email_normalized').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true, mode: 'date' }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex('password_reset_tokens_digest_uq').on(table.tokenDigest),
+    index('password_reset_tokens_user_idx').on(table.userId),
+    check('password_reset_tokens_digest_ck', sql`${table.tokenDigest} ~ '^[0-9a-f]{64}$'`),
+    check('password_reset_tokens_expiry_ck', sql`${table.expiresAt} > ${table.createdAt}`)
+  ]
+);
+
 export const servers = pgTable('servers', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: varchar('name', { length: 96 }).notNull(),

@@ -25,6 +25,7 @@ let fixtureEmailVerifiedAt;
 let fixtureMailMode;
 let fixtureMail;
 let fixtureEmailTokens;
+let fixtureResetTokens;
 let fixtureSessionValid;
 let groupMembers;
 let fixtureServers;
@@ -55,6 +56,7 @@ function reset() {
   fixtureMailMode = 'enabled';
   fixtureMail = [];
   fixtureEmailTokens = [];
+  fixtureResetTokens = [];
   fixtureSessionValid = true;
   fixtureSettings = { theme: 'dark', compactMode: false, reduceMotion: false, inputVolume: 100, outputVolume: 100 };
   settingsFailNext = false;
@@ -122,6 +124,7 @@ const server = createServer(async (request, response) => {
   if (url.pathname === '/__test/reset') { reset(); return json({ ok: true }); }
   if (url.pathname === '/__test/mail-mode') { fixtureMailMode = url.searchParams.get('value') ?? 'enabled'; return json({ ok: true }); }
   if (url.pathname === '/__test/mail') return json({ messages: fixtureMail });
+  if (url.pathname === '/__test/email-verified') { fixtureEmailVerifiedAt = url.searchParams.get('value') === 'true' ? new Date().toISOString() : null; return json({ ok: true }); }
   if (url.pathname === '/__test/server-friends') { fixtureServerFriends = true; return json({ ok: true }); }
   if (url.pathname === '/__test/server-voice-connected') {
     fixtureServerVoiceConnected = true;
@@ -187,6 +190,34 @@ const server = createServer(async (request, response) => {
     return json(event);
   }
   const isPeer = request.headers.cookie?.includes('cubic_session=browser-peer');
+  if (url.pathname === '/api/v1/auth/capabilities') return json({ passwordRecoveryAvailable: fixtureMailMode !== 'disabled' });
+  if (url.pathname === '/api/v1/auth/password/recovery' && request.method === 'POST') {
+    const payload = JSON.parse((await body()).toString());
+    if (typeof payload.identifier !== 'string' || !payload.identifier.trim() || payload.identifier.length > 254) return json({ error: 'Enter an email or username.' }, 400);
+    const identifier = payload.identifier.trim().toLowerCase();
+    if (fixtureMailMode === 'enabled' && fixtureEmailVerifiedAt && ['tester', fixtureEmail].includes(identifier)) {
+      for (const entry of fixtureResetTokens) if (!entry.used) entry.superseded = true;
+      const token = randomBytes(32).toString('base64url');
+      fixtureResetTokens.push({ token, email: fixtureEmail, expiresAt: Date.now() + 1800000, used: false });
+      fixtureMail.push({ purpose: 'password_reset', to: fixtureEmail, url: `http://127.0.0.1:3197/reset-password#token=${token}` });
+    }
+    return json({ message: 'If an eligible account exists, password reset instructions have been sent.' });
+  }
+  if (url.pathname === '/api/v1/auth/password/reset' && request.method === 'POST') {
+    const payload = JSON.parse((await body()).toString());
+    if (typeof payload.newPassword !== 'string' || payload.newPassword.length < 10 || payload.newPassword.length > 128) return json({ status: 'invalid' }, 400);
+    const entry = fixtureResetTokens.find((item) => item.token === payload.token);
+    if (!entry || entry.superseded || entry.email !== fixtureEmail || !fixtureEmailVerifiedAt) return json({ status: 'invalid' }, 400);
+    if (entry.used) return json({ status: 'used' }, 400);
+    if (entry.expiresAt <= Date.now()) return json({ status: 'expired' }, 400);
+    entry.used = true;
+    for (const pending of fixtureResetTokens) pending.used = true;
+    for (const pending of fixtureEmailTokens) if (pending.purpose === 'change_email') pending.used = true;
+    fixturePassword = payload.newPassword;
+    fixtureSessionValid = false;
+    activeSessions = [];
+    return json({ status: 'changed' });
+  }
   if (url.pathname === '/api/v1/auth/login' && request.method === 'POST') {
     const payload = JSON.parse((await body()).toString());
     if (payload.password !== fixturePassword) return json({ error: 'Invalid credentials.' }, 401);
