@@ -10,7 +10,7 @@ import { SessionPersistenceError, type SessionService } from '../security/sessio
 import type { RealtimeEvents } from '../realtime/events.js';
 import type { EmailVerificationService } from '../mail/email-verification.js';
 
-const passwordPolicySchema = z.string().min(10).max(128);
+export const passwordPolicySchema = z.string().min(10).max(128);
 
 const registerBodySchema = z.object({
   email: z.string().trim().email().max(254),

@@ -44,6 +44,8 @@ import { ServerIconReconciler, ServerIconReconciliationScheduler } from './serve
 import { accountEmailRoutes } from './routes/account-email.js';
 import { EmailVerificationService } from './mail/email-verification.js';
 import { disabledMailTransport, type MailTransport } from './mail/transport.js';
+import { PasswordRecoveryService } from './mail/password-recovery.js';
+import { passwordRecoveryRoutes } from './routes/password-recovery.js';
 
 export interface CreateAppOptions {
   database: Database;
@@ -85,6 +87,7 @@ export interface CreateAppOptions {
 export async function createApp(options: CreateAppOptions): Promise<FastifyInstance> {
   const realtimeEvents = options.realtimeEvents ?? createRealtimeEvents();
   const emailVerification = new EmailVerificationService(options.database, options.mailTransport ?? disabledMailTransport, realtimeEvents);
+  const passwordRecovery = new PasswordRecoveryService(options.database, options.mailTransport ?? disabledMailTransport, realtimeEvents);
   const mediaStore = new LocalMediaStore(options.mediaRoot ?? '/data/media', options.groupAvatarMaxBytes ?? 2 * 1024 * 1024);
   const iconStore = new ServerIconStore(options.mediaRoot ?? '/data/media');
   await iconStore.prepare();
@@ -161,6 +164,11 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     cookieName: options.cookieName,
     sessionService: options.sessionService,
     emailVerification
+  });
+
+  await app.register(passwordRecoveryRoutes, {
+    prefix: '/api/v1/auth',
+    recovery: passwordRecovery
   });
 
   await app.register(userRoutes, {
