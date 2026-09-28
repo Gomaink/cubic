@@ -286,6 +286,7 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
       const nextHash = await hashPassword(parsed.data.newPassword);
       await client.query('update users set password_hash = $2, updated_at = now() where id = $1',
         [request.auth.user.id, nextHash]);
+      await client.query('delete from passkey_challenges where user_id = $1', [request.auth.user.id]);
       const revoked = await client.query<{ id: string }>(
         'delete from sessions where user_id = $1 and id <> $2 returning id',
         [request.auth.user.id, request.auth.sessionId]

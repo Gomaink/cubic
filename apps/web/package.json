@@ -23,8 +23,9 @@
     "vite": "^8.3.0"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "14.0.0",
     "http-proxy": "^1.18.1",
-    "socket.io-client": "^4.8.1",
-    "livekit-client": "^2.22.3"
+    "livekit-client": "^2.22.3",
+    "socket.io-client": "^4.8.1"
   }
 }

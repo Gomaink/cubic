@@ -45,6 +45,8 @@ const app = await createApp({
   sessionService,
   registrationEnabled: env.REGISTRATION_ENABLED,
   mailTransport: createMailTransport(env),
+  webauthnRpID: env.WEBAUTHN_RP_ID,
+  webauthnRpName: env.WEBAUTHN_RP_NAME,
   mediaRoot: env.MEDIA_ROOT,
   groupAvatarMaxBytes: env.GROUP_AVATAR_MAX_BYTES,
   attachmentMaxBytes: env.ATTACHMENT_MAX_BYTES,

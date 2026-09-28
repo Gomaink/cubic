@@ -1,9 +1,11 @@
 import {
   type AnyPgColumn,
+  bigint,
   boolean,
   check,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -81,6 +83,49 @@ export const passwordResetTokens = pgTable(
     index('password_reset_tokens_user_idx').on(table.userId),
     check('password_reset_tokens_digest_ck', sql`${table.tokenDigest} ~ '^[0-9a-f]{64}$'`),
     check('password_reset_tokens_expiry_ck', sql`${table.expiresAt} > ${table.createdAt}`)
+  ]
+);
+
+export const passkeyCredentials = pgTable(
+  'passkey_credentials',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    credentialId: text('credential_id').notNull(),
+    publicKey: text('public_key').notNull(),
+    counter: bigint('counter', { mode: 'number' }).notNull(),
+    transports: jsonb('transports').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    deviceType: varchar('device_type', { length: 32 }).notNull(),
+    backedUp: boolean('backed_up').notNull(),
+    label: varchar('label', { length: 64 }).notNull().default('Passkey'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true, mode: 'date' })
+  },
+  (table) => [
+    uniqueIndex('passkey_credentials_credential_id_uq').on(table.credentialId),
+    index('passkey_credentials_user_idx').on(table.userId),
+    check('passkey_credentials_counter_ck', sql`${table.counter} >= 0`)
+  ]
+);
+
+export const passkeyChallenges = pgTable(
+  'passkey_challenges',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    sessionId: uuid('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+    purpose: varchar('purpose', { length: 24 }).notNull(),
+    challengeDigest: varchar('challenge_digest', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true, mode: 'date' }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex('passkey_challenges_digest_uq').on(table.challengeDigest),
+    index('passkey_challenges_user_session_idx').on(table.userId, table.sessionId, table.purpose),
+    check('passkey_challenges_purpose_ck', sql`${table.purpose} = 'enroll'`),
+    check('passkey_challenges_digest_ck', sql`${table.challengeDigest} ~ '^[0-9a-f]{64}$'`),
+    check('passkey_challenges_expiry_ck', sql`${table.expiresAt} > ${table.createdAt}`)
   ]
 );
 

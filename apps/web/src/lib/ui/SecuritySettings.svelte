@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import PasskeySettings from './PasskeySettings.svelte';
   type EmailState = { email: string; emailVerifiedAt: string | null; mailDeliveryAvailable: boolean };
   let emailState = $state<EmailState | null>(null);
   let emailLoading = $state(true);
@@ -166,6 +167,7 @@
     {#if emailError}<p class="cubic-security-error" role="alert">{emailError}</p>{/if}
     {#if emailNotice}<p class="cubic-security-success" role="status">{emailNotice}</p>{/if}
   </section>
+  <PasskeySettings emailVerified={Boolean(emailState?.emailVerifiedAt)} />
 </section>
 
 <style>
