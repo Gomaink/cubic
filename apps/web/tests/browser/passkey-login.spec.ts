@@ -73,13 +73,17 @@ test('resident passkey signs in with an ordinary Cubic session and removal block
 });
 
 test('cancellation and unsupported WebAuthn leave password login available', async ({ page }) => {
+  let completionRequests = 0;
+  page.on('request', (request) => { if (request.url().includes('/passkeys/authentication/complete')) completionRequests += 1; });
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'credentials', { value: { get: async () => { throw new DOMException('Canceled', 'NotAllowedError'); } } });
   });
   await page.goto('http://localhost:3197/login');
   await page.getByRole('button', { name: 'Sign in with passkey' }).click();
-  await expect(page.getByRole('status')).toContainText('Passkey sign-in canceled.');
+  await expect(page.getByRole('status')).toContainText('Passkey prompt closed or unavailable. Try again or use your password.');
   await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(completionRequests).toBe(0);
+  expect((await page.request.get('http://localhost:3197/api/v1/auth/me')).status()).toBe(401);
   await expect(page.getByRole('button', { name: 'Log in' })).toBeEnabled();
   await page.addInitScript(() => { Object.defineProperty(window, 'PublicKeyCredential', { value: undefined }); });
   await page.reload();

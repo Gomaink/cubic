@@ -80,6 +80,9 @@ export class PasskeyService {
         authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
         excludeCredentials: existing.rows.map((row) => ({ id: row.credential_id, transports: row.transports }))
       });
+      // Abandoned enrollment challenges need no retention after expiry, and
+      // completed enrollment challenges need no recent-auth lifetime.
+      await client.query("delete from passkey_challenges where purpose in ('enroll', 'enroll_reauth') and (expires_at <= now() or used_at is not null)");
       await client.query("delete from passkey_challenges where user_id = $1 and session_id = $2 and purpose in ('enroll', 'enroll_reauth')", [userId, sessionId]);
       const challenge = await client.query<{ id: string }>(
         'insert into passkey_challenges (user_id, session_id, purpose, challenge_digest, expires_at) values ($1, $2, $3, $4, $5) returning id',

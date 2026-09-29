@@ -76,7 +76,7 @@
     try { assertion = await startAuthentication({ optionsJSON: ceremony.options }); }
     catch (cause) {
       if (cause instanceof Error && (cause.name === 'NotAllowedError' || cause.name === 'AbortError')) {
-        notice = 'Passkey confirmation canceled.';
+        notice = 'Passkey prompt closed or unavailable. Try again or use your password.';
         return false;
       }
       throw new Error('Passkey confirmation did not complete. Try again.');
@@ -112,7 +112,7 @@
         try { credential = await startRegistration({ optionsJSON: setup.options }); }
         catch (cause) {
           if (cause instanceof Error && (cause.name === 'NotAllowedError' || cause.name === 'AbortError')) {
-            notice = 'Passkey setup canceled.';
+            notice = 'Passkey setup was canceled or unavailable. Try again.';
             close();
             return;
           }
