@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { browserSupportsWebAuthn, startRegistration } from '@simplewebauthn/browser';
+  import { browserSupportsWebAuthn, startAuthentication, startRegistration } from '@simplewebauthn/browser';
 
   let { emailVerified }: { emailVerified: boolean } = $props();
   type Passkey = { id: string; label: string; createdAt: string; lastUsedAt: string | null; deviceType: string; backedUp: boolean };
@@ -8,6 +8,7 @@
   let loading = $state(true);
   let supported = $state<boolean | null>(null);
   let mode = $state<'add' | 'rename' | 'remove' | null>(null);
+  let confirmMethod = $state<'password' | 'passkey'>('password');
   let selected = $state<Passkey | null>(null);
   let password = $state('');
   let label = $state('Passkey');
@@ -17,6 +18,7 @@
   let passwordInput = $state<HTMLInputElement | null>(null);
   let labelInput = $state<HTMLInputElement | null>(null);
   let addButton = $state<HTMLButtonElement | null>(null);
+  let passkeyConfirmButton = $state<HTMLButtonElement | null>(null);
   let actionTrigger: HTMLButtonElement | null = null;
 
   function deviceDescription(passkey: Passkey) {
@@ -37,6 +39,7 @@
   async function open(next: 'add' | 'rename' | 'remove', passkey: Passkey | null, trigger: HTMLButtonElement) {
     actionTrigger = trigger;
     mode = next;
+    confirmMethod = 'password';
     selected = passkey;
     password = '';
     label = next === 'rename' ? passkey?.label ?? '' : 'Passkey';
@@ -47,7 +50,7 @@
     else passwordInput?.focus();
   }
   async function close() {
-    mode = null; selected = null; password = '';
+    mode = null; selected = null; password = ''; confirmMethod = 'password';
     await tick();
     if (actionTrigger?.isConnected) actionTrigger.focus();
     else addButton?.focus();
@@ -56,23 +59,53 @@
   function cancelOnEscape(event: KeyboardEvent) {
     if (event.key === 'Escape' && !busy) { event.preventDefault(); event.stopPropagation(); void close(); }
   }
+  async function chooseMethod(next: 'password' | 'passkey') {
+    confirmMethod = next;
+    password = '';
+    error = '';
+    notice = '';
+    await tick();
+    if (next === 'password') passwordInput?.focus();
+    else passkeyConfirmButton?.focus();
+  }
+  async function reauthenticateWithPasskey() {
+    const response = await fetch('/api/v1/auth/passkeys/reauthentication/options', { method: 'POST', credentials: 'include' });
+    if (!response.ok) throw new Error(response.status === 429 ? 'Too many attempts. Try again later.' : 'Could not start passkey confirmation. Try again.');
+    const ceremony = await response.json() as { challengeId: string; options: Parameters<typeof startAuthentication>[0]['optionsJSON'] };
+    let assertion;
+    try { assertion = await startAuthentication({ optionsJSON: ceremony.options }); }
+    catch (cause) {
+      if (cause instanceof Error && (cause.name === 'NotAllowedError' || cause.name === 'AbortError')) {
+        notice = 'Passkey confirmation canceled.';
+        return false;
+      }
+      throw new Error('Passkey confirmation did not complete. Try again.');
+    }
+    const completed = await fetch('/api/v1/auth/passkeys/reauthentication/complete', { method: 'POST', credentials: 'include',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeId: ceremony.challengeId, response: assertion }) });
+    if (!completed.ok) throw new Error(completed.status === 429 ? 'Too many attempts. Try again later.' : 'Could not confirm the passkey. Try again.');
+    return true;
+  }
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (busy || !mode) return;
     const action = mode;
     const currentPassword = password;
+    const method = confirmMethod;
     const nextLabel = label.trim();
     password = '';
     busy = true;
     error = '';
     notice = '';
     try {
+      if (action !== 'rename' && method === 'passkey' && !(await reauthenticateWithPasskey())) return;
+      const confirmation = method === 'password' ? { currentPassword } : {};
       if (action === 'add') {
         const response = await fetch('/api/v1/auth/passkeys/options', { method: 'POST', credentials: 'include',
-          headers: { 'content-type': 'application/json' }, body: JSON.stringify({ currentPassword }) });
+          headers: { 'content-type': 'application/json' }, body: JSON.stringify(confirmation) });
         if (!response.ok) {
           const body = await response.json().catch(() => ({})) as { error?: string };
-          throw new Error(response.status === 403 ? 'Current password is incorrect.' : response.status === 429 ? 'Too many attempts. Try again later.' : body.error === 'A verified email is required to add a passkey.' ? body.error : 'Could not start passkey setup. Try again.');
+          throw new Error(response.status === 403 ? method === 'passkey' ? 'Passkey confirmation expired. Try again.' : 'Current password is incorrect.' : response.status === 429 ? 'Too many attempts. Try again later.' : body.error === 'A verified email is required to add a passkey.' ? body.error : 'Could not start passkey setup. Try again.');
         }
         const setup = await response.json() as { challengeId: string; options: Parameters<typeof startRegistration>[0]['optionsJSON'] };
         let credential;
@@ -100,8 +133,8 @@
         notice = 'Passkey renamed.';
       } else if (selected) {
         const response = await fetch(`/api/v1/auth/passkeys/${selected.id}`, { method: 'DELETE', credentials: 'include',
-          headers: { 'content-type': 'application/json' }, body: JSON.stringify({ currentPassword }) });
-        if (!response.ok) throw new Error(response.status === 403 ? 'Current password is incorrect.' : response.status === 429 ? 'Too many attempts. Try again later.' : 'Could not remove the passkey. Try again.');
+          headers: { 'content-type': 'application/json' }, body: JSON.stringify(confirmation) });
+        if (!response.ok) throw new Error(response.status === 403 ? method === 'passkey' ? 'Passkey confirmation expired. Try again.' : 'Current password is incorrect.' : response.status === 429 ? 'Too many attempts. Try again later.' : 'Could not remove the passkey. Try again.');
         passkeys = passkeys.filter((entry) => entry.id !== selected?.id);
         notice = 'Passkey removed.';
       }
@@ -130,9 +163,16 @@
       <form class="cubic-passkeys-confirm" onsubmit={submit}>
         <h4>{mode === 'add' ? 'Add passkey' : mode === 'rename' ? `Rename ${selected?.label ?? 'passkey'}` : `Remove ${selected?.label ?? 'passkey'}`}</h4>
         {#if mode === 'add' || mode === 'rename'}<label for="cubic-passkey-label">Passkey name</label><input id="cubic-passkey-label" bind:this={labelInput} bind:value={label} onkeydown={cancelOnEscape} maxlength="64" required disabled={busy} />{/if}
-        {#if mode !== 'rename'}<label for="cubic-passkey-password">Current password</label>
+        {#if mode !== 'rename' && supported && passkeys.length > 0}
+          <div class="cubic-passkeys-methods" role="group" aria-label="Confirmation method">
+            <button class={confirmMethod === 'password' ? 'cubic-control cubic-control-secondary cubic-passkeys-method-active' : 'cubic-control cubic-control-ghost'} type="button" aria-pressed={confirmMethod === 'password'} disabled={busy} onclick={() => void chooseMethod('password')}>Use password</button>
+            <button class={confirmMethod === 'passkey' ? 'cubic-control cubic-control-secondary cubic-passkeys-method-active' : 'cubic-control cubic-control-ghost'} type="button" aria-pressed={confirmMethod === 'passkey'} disabled={busy} onclick={() => void chooseMethod('passkey')}>Use passkey</button>
+          </div>
+        {/if}
+        {#if mode !== 'rename' && confirmMethod === 'password'}<label for="cubic-passkey-password">Current password</label>
         <input id="cubic-passkey-password" bind:this={passwordInput} type="password" bind:value={password} onkeydown={cancelOnEscape} autocomplete="current-password" maxlength="128" required disabled={busy} />{/if}
-        <div class="cubic-passkeys-actions"><button class={mode === 'remove' ? 'cubic-control cubic-control-danger' : 'cubic-control cubic-control-primary'} type="submit" disabled={busy}>{busy ? 'Working…' : mode === 'add' ? 'Continue' : mode === 'rename' ? 'Save name' : 'Remove passkey'}</button><button class="cubic-control cubic-control-ghost" type="button" disabled={busy} onclick={() => void close()}>Cancel</button></div>
+        {#if mode !== 'rename' && confirmMethod === 'passkey'}<p class="cubic-passkeys-help">Your device or password manager will ask you to confirm.</p>{/if}
+        <div class="cubic-passkeys-actions"><button bind:this={passkeyConfirmButton} class={mode === 'remove' ? 'cubic-control cubic-control-danger' : 'cubic-control cubic-control-primary'} type="submit" disabled={busy}>{busy ? 'Working…' : mode === 'add' ? confirmMethod === 'passkey' ? 'Confirm with passkey' : 'Continue' : mode === 'rename' ? 'Save name' : confirmMethod === 'passkey' ? 'Confirm with passkey and remove' : 'Remove passkey'}</button><button class="cubic-control cubic-control-ghost" type="button" disabled={busy} onclick={() => void close()}>Cancel</button></div>
       </form>
     {/if}
   {/if}
@@ -157,6 +197,8 @@
   .cubic-passkeys-confirm input { width: 100%; min-width: 0; min-height: 44px; padding: 9px 11px; border: 1px solid var(--cubic-control-border); border-radius: var(--cubic-control-radius); background: var(--cubic-control-bg); color: var(--cubic-text); font: inherit; }
   .cubic-passkeys-confirm input:focus-visible { outline: 2px solid var(--cubic-brand-focus); outline-offset: 2px; }
   .cubic-passkeys-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .cubic-passkeys-methods { display: flex; flex-wrap: wrap; gap: 8px; }
+  .cubic-passkeys-method-active { border-color: var(--cubic-brand-border); }
   .cubic-passkeys-actions button, .cubic-passkey-row button { min-height: 44px; }
   .cubic-passkeys-error, .cubic-passkeys-notice { margin: 4px 0 0; font-size: .83rem; line-height: 1.4; }
   .cubic-passkeys-error { color: var(--cubic-red); }

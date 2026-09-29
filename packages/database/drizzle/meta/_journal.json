@@ -141,6 +141,13 @@
       "when": 1790568975984,
       "tag": "0019_perpetual_millenium_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790631093656,
+      "tag": "0020_skinny_guardsmen",
+      "breakpoints": true
     }
   ]
 }

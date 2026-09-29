@@ -123,7 +123,7 @@ export const passkeyChallenges = pgTable(
   (table) => [
     uniqueIndex('passkey_challenges_digest_uq').on(table.challengeDigest),
     index('passkey_challenges_user_session_idx').on(table.userId, table.sessionId, table.purpose),
-    check('passkey_challenges_purpose_ck', sql`${table.purpose} = 'enroll'`),
+    check('passkey_challenges_purpose_ck', sql`${table.purpose} in ('enroll', 'enroll_reauth', 'reauth')`),
     check('passkey_challenges_digest_ck', sql`${table.challengeDigest} ~ '^[0-9a-f]{64}$'`),
     check('passkey_challenges_expiry_ck', sql`${table.expiresAt} > ${table.createdAt}`)
   ]

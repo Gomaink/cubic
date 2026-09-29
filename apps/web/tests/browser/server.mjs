@@ -30,6 +30,8 @@ let fixtureResetTokens;
 let fixturePasskeys;
 let fixturePasskeyChallenge;
 let fixturePasskeyAuthenticationChallenges;
+let fixturePasskeyReauthChallenge;
+let fixturePasskeyReauthAt;
 let fixtureSessionValid;
 let groupMembers;
 let fixtureServers;
@@ -64,6 +66,8 @@ function reset() {
   fixturePasskeys = [];
   fixturePasskeyChallenge = null;
   fixturePasskeyAuthenticationChallenges = [];
+  fixturePasskeyReauthChallenge = null;
+  fixturePasskeyReauthAt = null;
   fixtureSessionValid = true;
   fixtureSettings = { theme: 'dark', compactMode: false, reduceMotion: false, inputVolume: 100, outputVolume: 100 };
   settingsFailNext = false;
@@ -300,20 +304,48 @@ const server = createServer(async (request, response) => {
   if (url.pathname === '/api/v1/auth/security' && request.method === 'GET') return json({ email: fixtureEmail, emailVerifiedAt: fixtureEmailVerifiedAt, mailDeliveryAvailable: fixtureMailMode !== 'disabled' });
   const publicPasskey = ({ id, label, createdAt, lastUsedAt, deviceType, backedUp }) => ({ id, label, createdAt, lastUsedAt, deviceType, backedUp });
   if (url.pathname === '/api/v1/auth/passkeys' && request.method === 'GET') return json({ passkeys: fixturePasskeys.map(publicPasskey) });
+  if (url.pathname === '/api/v1/auth/passkeys/reauthentication/options' && request.method === 'POST') {
+    if (isPeer || !fixtureEmailVerifiedAt || !fixturePasskeys.length) return json({ error: 'Passkey confirmation could not be completed.' }, 400);
+    const options = await generateAuthenticationOptions({ rpID: 'localhost', timeout: 300000, userVerification: 'required',
+      allowCredentials: fixturePasskeys.map((entry) => ({ id: entry.credentialId, transports: entry.transports })) });
+    fixturePasskeyReauthChallenge = { id: randomUUID(), challenge: options.challenge, expiresAt: Date.now() + 300000, used: false };
+    return json({ challengeId: fixturePasskeyReauthChallenge.id, options });
+  }
+  if (url.pathname === '/api/v1/auth/passkeys/reauthentication/complete' && request.method === 'POST') {
+    const payload = JSON.parse((await body()).toString());
+    const challenge = fixturePasskeyReauthChallenge;
+    const credential = fixturePasskeys.find((entry) => entry.credentialId === payload.response?.id);
+    if (isPeer || !challenge || challenge.id !== payload.challengeId || challenge.used || challenge.expiresAt <= Date.now() || !credential || !fixtureEmailVerifiedAt)
+      return json({ error: 'Passkey confirmation could not be completed.' }, 400);
+    try {
+      const verified = await verifyAuthenticationResponse({ response: payload.response,
+        expectedChallenge: challenge.challenge, expectedOrigin: 'http://localhost:3197', expectedRPID: 'localhost',
+        credential: { id: credential.credentialId, publicKey: credential.publicKey, counter: credential.counter, transports: credential.transports },
+        requireUserVerification: true });
+      if (!verified.verified) return json({ error: 'Passkey confirmation could not be completed.' }, 400);
+      challenge.used = true;
+      credential.counter = verified.authenticationInfo.newCounter;
+      credential.lastUsedAt = new Date().toISOString();
+      fixturePasskeyReauthAt = Date.now();
+      response.writeHead(204); response.end(); return;
+    } catch { return json({ error: 'Passkey confirmation could not be completed.' }, 400); }
+  }
   if (url.pathname === '/api/v1/auth/passkeys/options' && request.method === 'POST') {
     const payload = JSON.parse((await body()).toString());
     if (!fixtureEmailVerifiedAt) return json({ error: 'A verified email is required to add a passkey.' }, 409);
-    if (payload.currentPassword !== fixturePassword) return json({ error: 'Current password is incorrect.' }, 403);
+    if (payload.currentPassword === undefined ? !fixturePasskeyReauthAt || fixturePasskeyReauthAt <= Date.now() - 300000 : payload.currentPassword !== fixturePassword)
+      return json({ error: payload.currentPassword === undefined ? 'Confirm with your password or passkey.' : 'Current password is incorrect.' }, 403);
     const options = await generateRegistrationOptions({ rpName: 'Cubic', rpID: 'localhost', userName: user.username,
       userDisplayName: user.displayName, userID: Buffer.from(user.id), attestationType: 'none',
       authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
       excludeCredentials: fixturePasskeys.map((entry) => ({ id: entry.credentialId, transports: entry.transports })) });
-    fixturePasskeyChallenge = { id: randomUUID(), challenge: options.challenge, used: false };
+    fixturePasskeyChallenge = { id: randomUUID(), challenge: options.challenge, used: false, passkeyStepUp: payload.currentPassword === undefined };
     return json({ challengeId: fixturePasskeyChallenge.id, options });
   }
   if (url.pathname === '/api/v1/auth/passkeys/complete' && request.method === 'POST') {
     const payload = JSON.parse((await body()).toString());
-    if (!fixturePasskeyChallenge || fixturePasskeyChallenge.id !== payload.challengeId || fixturePasskeyChallenge.used) return json({ error: 'Could not verify the passkey.' }, 400);
+    if (!fixturePasskeyChallenge || fixturePasskeyChallenge.id !== payload.challengeId || fixturePasskeyChallenge.used ||
+      (fixturePasskeyChallenge.passkeyStepUp && (!fixturePasskeyReauthAt || fixturePasskeyReauthAt <= Date.now() - 300000))) return json({ error: 'Could not verify the passkey.' }, 400);
     try {
       const verified = await verifyRegistrationResponse({ response: payload.response,
         expectedChallenge: fixturePasskeyChallenge.challenge, expectedOrigin: 'http://localhost:3197', expectedRPID: 'localhost', requireUserVerification: true });
@@ -339,10 +371,12 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname.startsWith('/api/v1/auth/passkeys/') && request.method === 'DELETE') {
     const payload = JSON.parse((await body()).toString());
-    if (payload.currentPassword !== fixturePassword) return json({ error: 'Current password is incorrect.' }, 403);
+    if (payload.currentPassword === undefined ? !fixturePasskeyReauthAt || fixturePasskeyReauthAt <= Date.now() - 300000 : payload.currentPassword !== fixturePassword)
+      return json({ error: payload.currentPassword === undefined ? 'Confirm with your password or passkey.' : 'Current password is incorrect.' }, 403);
     const index = fixturePasskeys.findIndex((entry) => entry.id === url.pathname.split('/').at(-1));
     if (index < 0) return json({ error: 'Passkey not found.' }, 404);
     fixturePasskeys.splice(index, 1);
+    fixturePasskeyReauthAt = null;
     response.writeHead(204); response.end(); return;
   }
   if (url.pathname === '/api/v1/auth/email/verification' && request.method === 'POST') {
