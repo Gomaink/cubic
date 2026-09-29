@@ -7,6 +7,16 @@ test.beforeEach(async ({ page, context, request }) => {
   await page.goto('/app');
 });
 
+test('create-group dialog takes focus and returns it on Escape', async ({ page }) => {
+  const trigger = page.getByRole('button', { name: 'New group' });
+  await trigger.click();
+  const dialog = page.getByRole('dialog', { name: 'Create group' });
+  await expect(dialog).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
+
 test('primary rail, user bar, and contextual navigation retain existing actions', async ({ page }, testInfo) => {
   const rail = page.getByRole('navigation', { name: 'Primary navigation' });
   const messages = rail.getByRole('button', { name: 'Messages' });
