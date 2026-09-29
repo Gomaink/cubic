@@ -9,15 +9,16 @@ import { PasskeyReauthenticationError, PasskeyReauthenticationService } from '..
 import type { RealtimeEvents } from '../realtime/events.js';
 
 const passwordBody = z.strictObject({ currentPassword: z.string().min(1).max(128).optional() });
+const passkeyLabel = z.string().transform((value) => value.trim().normalize('NFC'))
+  .pipe(z.string().min(1).max(64).refine((value) => !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(value)));
 const completeBody = z.object({
   challengeId: z.uuid(),
   response: z.unknown(),
-  label: z.string().trim().min(1).max(64).default('Passkey')
+  label: passkeyLabel.default('Passkey')
 });
 const removeBody = passwordBody;
 const params = z.object({ id: z.uuid() });
-const renameBody = z.strictObject({ label: z.string().transform((value) => value.trim().normalize('NFC'))
-  .pipe(z.string().min(1).max(64).refine((value) => !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(value))) });
+const renameBody = z.strictObject({ label: passkeyLabel });
 
 interface Options { sessionService: SessionService; cookieName: string; cookieSecure: boolean; sessionTtlDays: number; passkeys: PasskeyService; authentication: PasskeyAuthenticationService; reauthentication: PasskeyReauthenticationService; realtimeEvents: RealtimeEvents }
 const limited = (groupId: string, max = 5) => ({ max, timeWindow: '10 minutes', hook: 'preHandler' as const,
