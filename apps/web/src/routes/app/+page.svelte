@@ -15,6 +15,7 @@
   import MemberPanel from '$lib/ui/MemberPanel.svelte';
   import ProfileCard from '$lib/ui/ProfileCard.svelte';
   import ServerInviteCard from '$lib/ui/ServerInviteCard.svelte';
+  import { modalFocus } from '$lib/ui/modalFocus';
   import { firstTrustedServerInviteToken, ServerInvitePreviewQueue } from '$lib/server-invite-links';
 
   let { data } = $props();
@@ -297,6 +298,7 @@
   };
 
   let streamVolumeMenu = $state<StreamVolumeMenuState | null>(null);
+  let streamVolumeMenuTrigger: HTMLElement | null = null;
   let focusedVideoIdentity = $state<string | null>(null);
   let focusedScreenShareIdentity = $state<string | null>(null);
   let screenShareFocusDismissed = false;
@@ -2168,16 +2170,6 @@
       : [...newGroupMemberIds, userId];
   }
 
-  function focusDialog(node: HTMLElement) {
-    const previousFocus = document.activeElement;
-    node.focus();
-    return {
-      destroy() {
-        if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
-      }
-    };
-  }
-
   function openNewGroup() {
     error = '';
     newGroupTitle = '';
@@ -2688,6 +2680,7 @@
 
     event.preventDefault();
     event.stopPropagation();
+    streamVolumeMenuTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
 
     const vertical = event.clientY < window.innerHeight / 2 ? 'top' : 'bottom';
     const horizontal = event.clientX < window.innerWidth / 2 ? 'left' : 'right';
@@ -2699,10 +2692,17 @@
       volume: savedStreamVolume(participant.identity),
       audioAvailable: participant.screenShareAudioEnabled
     };
+    void tick().then(() => {
+      const menu = document.querySelector<HTMLElement>('.stream-volume-menu');
+      (menu?.querySelector<HTMLInputElement>('input:not(:disabled)') ?? menu)?.focus();
+    });
   }
 
   function closeStreamVolumeMenu() {
     streamVolumeMenu = null;
+    const trigger = streamVolumeMenuTrigger;
+    streamVolumeMenuTrigger = null;
+    void tick().then(() => { if (trigger?.isConnected) trigger.focus(); });
   }
 
   function onStreamVolumeInput(event: Event) {
@@ -4141,7 +4141,7 @@
 </script>
 
 <svelte:head><title>Cubic — {currentUser.displayName}</title></svelte:head>
-<svelte:window onkeydown={(event) => { if (event.key === 'Escape') { if (userSettingsOpen) closeUserSettings(); else { navigationMenu = null; serverMenuOpen = false; if (serverMembersOpen) closeServerMembers(); else if (channelSettingsTarget) closeChannelSettings(); else if (serverSurface) closeServerSurface(); } } }} />
+<svelte:window onkeydown={(event) => { if (event.key === 'Escape') { if (streamVolumeMenu) closeStreamVolumeMenu(); else if (userSettingsOpen) closeUserSettings(); else { navigationMenu = null; serverMenuOpen = false; if (serverMembersOpen) closeServerMembers(); else if (channelSettingsTarget) closeChannelSettings(); else if (serverSurface) closeServerSurface(); } } }} />
 
 {#snippet mediaControls()}
   <div class="cubic-media-settings-controls">
@@ -4456,7 +4456,7 @@
       </header>
       {#if conversations.length === 0}<div class="empty-state">No conversations yet.<br />Add a friend or create a group.</div>{/if}
       {#each conversations as conversation}
-        <button class="conversation-row" class:active={activeConversation?.id === conversation.id} onclick={() => selectConversation(conversation)}>
+        <button class="conversation-row" class:active={activeConversation?.id === conversation.id} aria-current={activeConversation?.id === conversation.id ? 'page' : undefined} onclick={() => selectConversation(conversation)}>
           {#if conversation.kind === 'group' && conversation.avatarUrl}
             <img class="avatar group-avatar avatar-image" src={conversation.avatarUrl} alt="" />
           {:else if conversation.kind === 'direct' && conversation.peer?.avatarUrl}
@@ -4579,7 +4579,7 @@
       {/if}
     {:else}
       <header class="conversation-list-header"><div><small>SOCIAL</small><h1>People</h1></div><button class="icon-action" type="button" aria-label="Back to Messages" title="Back to Messages" onclick={showMessages}><Icon name="back" size={19} /></button></header>
-      <div class="people-search"><input bind:value={query} oninput={search} placeholder="Search username or name" /></div>
+      <div class="people-search"><label class="cubic-sr-only" for="cubic-people-search">Search people</label><input id="cubic-people-search" bind:value={query} oninput={search} placeholder="Search username or name" /></div>
       {#if error}<div class="inline-error">{error}</div>{/if}
       {#if serverInvites.length}<h2 class="section-label">Server invitations</h2>{/if}
       {#each serverInvites as invite (invite.id)}
@@ -4977,6 +4977,7 @@
             class:continuation={isMessageContinuation(index)}
             class:mine={message.senderId === data.user.id}
             class:cubic-message-highlight={highlightedMessageId === message.id}
+            aria-label={isMessageContinuation(index) ? `${messageSenderName(message)}, ${formatMessageDay(message.createdAt)} at ${formatMessageTime(message.createdAt)}` : undefined}
           >
             <div class="discord-message-gutter">
               {#if !isMessageContinuation(index)}
@@ -5249,7 +5250,9 @@
           </svg>
         </button>
 
+        <label class="cubic-sr-only" for="cubic-message-input">{editingMessageId ? 'Edit message' : 'Message'}</label>
         <input
+          id="cubic-message-input"
           bind:this={messageInput}
           bind:value={messageBody}
           maxlength="8000"
@@ -5630,6 +5633,7 @@
           <button
             type="button"
             class:camera-active={voiceCameraEnabled}
+            aria-pressed={voiceCameraEnabled}
             title={voiceCameraEnabled ? 'Turn camera off' : 'Turn camera on'}
             aria-label={voiceCameraEnabled ? 'Turn camera off' : 'Turn camera on'}
             onclick={toggleVoiceCamera}
@@ -5641,6 +5645,7 @@
           <button
             type="button"
             class:screen-share-active={voiceScreenShareEnabled}
+            aria-pressed={voiceScreenShareEnabled}
             title={!screenShareSupported()
               ? 'Screen sharing is not available in this browser'
               : voiceScreenShareEnabled
@@ -5703,7 +5708,7 @@
         aria-modal="true"
         aria-label={mediaPreflightKind === 'camera' ? 'Camera quality' : 'Go Live quality'}
         tabindex="-1"
-        use:focusDialog
+        use:modalFocus
         onkeydown={(event) => {
           if (event.key === 'Escape') {
             event.stopPropagation();
@@ -5734,12 +5739,13 @@
           </button>
         </header>
 
-        <div class="media-preflight-section">
-          <span>Resolution</span>
+        <div class="media-preflight-section" role="group" aria-label="Resolution">
+          <span aria-hidden="true">Resolution</span>
           <div class="media-preflight-options two">
             <button
               type="button"
               class:active={mediaPreflightResolution === 720}
+              aria-pressed={mediaPreflightResolution === 720}
               onclick={() => setPreflightResolution(720)}
             >
               720p
@@ -5747,6 +5753,7 @@
             <button
               type="button"
               class:active={mediaPreflightResolution === 1080}
+              aria-pressed={mediaPreflightResolution === 1080}
               onclick={() => setPreflightResolution(1080)}
             >
               1080p
@@ -5754,13 +5761,14 @@
           </div>
         </div>
 
-        <div class="media-preflight-section">
-          <span>Frame rate</span>
+        <div class="media-preflight-section" role="group" aria-label="Frame rate">
+          <span aria-hidden="true">Frame rate</span>
           <div class="media-preflight-options">
             {#if mediaPreflightKind === 'screen-share'}
               <button
                 type="button"
                 class:active={mediaPreflightFps === 15}
+                aria-pressed={mediaPreflightFps === 15}
                 onclick={() => setPreflightFps(15)}
               >
                 15 FPS
@@ -5769,6 +5777,7 @@
               <button
                 type="button"
                 class:active={mediaPreflightFps === 24}
+                aria-pressed={mediaPreflightFps === 24}
                 onclick={() => setPreflightFps(24)}
               >
                 24 FPS
@@ -5777,6 +5786,7 @@
             <button
               type="button"
               class:active={mediaPreflightFps === 30}
+              aria-pressed={mediaPreflightFps === 30}
               onclick={() => setPreflightFps(30)}
             >
               30 FPS
@@ -5784,6 +5794,7 @@
             <button
               type="button"
               class:active={mediaPreflightFps === 60}
+              aria-pressed={mediaPreflightFps === 60}
               onclick={() => setPreflightFps(60)}
             >
               60 FPS
@@ -5852,6 +5863,7 @@
 
     <section
       class="stream-volume-menu"
+      tabindex="-1"
       class:top-left={streamVolumeMenu.placement === 'top-left'}
       class:top-right={streamVolumeMenu.placement === 'top-right'}
       class:bottom-left={streamVolumeMenu.placement === 'bottom-left'}
@@ -5900,7 +5912,7 @@
         aria-modal="true"
         aria-labelledby="new-group-title"
         tabindex="-1"
-        use:focusDialog
+        use:modalFocus
         onkeydown={(event) => {
           if (event.key === 'Escape') {
             event.stopPropagation();

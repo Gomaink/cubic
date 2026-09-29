@@ -1550,7 +1550,7 @@ body {
 }
 
 .group-avatar { background: var(--cubic-brand-action); }
-.conversation-kind { color: #6d7080; font-size: .55rem; font-weight: 900; letter-spacing: .08em; }
+.conversation-kind { color: var(--cubic-muted); font-size: .55rem; font-weight: 900; letter-spacing: .08em; }
 .chat-heading { min-width: 0; flex: 1; }
 .chat-meta-button { padding: 9px 12px; border-radius: 12px; }
 .message-author { display: block; margin: 0 8px 3px !important; color: var(--cubic-brand-active) !important; font-weight: 800; }
@@ -4903,4 +4903,40 @@ main.cubic-app-shell.cubic-app-reduce-motion *::after {
   .cubic-server-create input,
   .cubic-server-create select,
   .cubic-navigation-actions button { min-height: 44px; }
+}
+
+.cubic-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.cubic-app-shell :is(button, a[href], input, select, textarea):focus-visible {
+  outline: 2px solid var(--cubic-brand-focus);
+  outline-offset: 2px;
+}
+
+.cubic-app-shell .composer input:focus-visible {
+  outline: 2px solid var(--cubic-brand-focus) !important;
+  outline-offset: -2px;
+}
+
+@media (max-width: 680px), (max-width: 900px) and (max-height: 500px), (pointer: coarse), (hover: none) {
+  .cubic-app-shell .icon-action,
+  .cubic-app-shell .chat-meta-button,
+  .cubic-app-shell .cubic-mobile-user-settings-trigger,
+  .cubic-app-shell .cubic-server-dialog > header button,
+  .cubic-app-shell .media-preflight > header button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .cubic-app-shell .composer.cubic-attachment-composer { grid-template-columns: 44px minmax(0, 1fr) 44px; }
+  .cubic-app-shell .composer.cubic-attachment-composer > button { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
+
+  .cubic-app-shell .video-stage-head { gap: 4px; }
+  .cubic-app-shell .video-stage-action { width: 44px; height: 44px; }
 }

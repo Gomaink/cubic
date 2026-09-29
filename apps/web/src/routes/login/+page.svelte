@@ -92,7 +92,7 @@
       <p>Your session is stored server-side and the browser only keeps an HttpOnly session token.</p>
     </div>
 
-    <form class="auth-form" onsubmit={submit}>
+    <form class="auth-form" onsubmit={submit} aria-describedby={error ? 'cubic-login-error' : undefined}>
       <label>
         <span>E-mail or username</span>
         <input bind:value={identifier} autocomplete="username" required maxlength="254" placeholder="samuel" />
@@ -102,7 +102,7 @@
         <input bind:value={password} type="password" autocomplete="current-password" required maxlength="128" placeholder="••••••••••" />
       </label>
 
-      {#if error}<p class="form-error" role="alert">{error}</p>{/if}
+      {#if error}<p id="cubic-login-error" class="form-error" role="alert">{error}</p>{/if}
 
       <button class="button button-primary button-full" type="submit" disabled={submitting}>
         {submitting ? 'Signing in…' : 'Log in'}

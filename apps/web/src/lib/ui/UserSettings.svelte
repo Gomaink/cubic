@@ -4,6 +4,7 @@
   import Icon from './Icon.svelte';
   import SecuritySettings from './SecuritySettings.svelte';
   import SessionSettings from './SessionSettings.svelte';
+  import { modalFocus } from './modalFocus';
 
   type Identity = { username: string; displayName: string; avatarUrl: string | null };
   type AppPreferences = { compactMode: boolean; reduceMotion: boolean };
@@ -59,8 +60,9 @@
 </script>
 
 <section class="cubic-user-settings" aria-label="User Settings">
+  <div class="cubic-user-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="cubic-user-settings-heading" tabindex="-1" use:modalFocus>
   <header class="cubic-user-settings-head">
-    <div><small>ACCOUNT</small><h1>User Settings</h1></div>
+    <div><small>ACCOUNT</small><h1 id="cubic-user-settings-heading">User Settings</h1></div>
     <button type="button" aria-label="Close User Settings" title="Close User Settings" onclick={onclose}><Icon name="x" size={19} /></button>
   </header>
   <div class="cubic-user-settings-layout">
@@ -87,7 +89,7 @@
                   <span aria-label={`${profile.displayName}'s initials`}>{profile.displayName.slice(0, 1).toUpperCase()}</span>
                 {/if}
               </span>
-              <input bind:this={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" aria-label="Choose avatar image" onchange={(event) => {
+              <input bind:this={fileInput} type="file" tabindex="-1" accept="image/png,image/jpeg,image/webp,image/gif" aria-label="Choose avatar image" onchange={(event) => {
                 const file = event.currentTarget.files?.[0];
                 if (file) void run(() => onupload(file));
                 event.currentTarget.value = '';
@@ -120,12 +122,12 @@
           <div class="cubic-user-settings-title"><small>PREFERENCES</small><h2 id="cubic-app-preferences-title">App</h2></div>
           {#if preferences}
             <div class="cubic-app-preference-row">
-              <div><strong>Compact mode</strong><small>Reduce spacing in messages and navigation lists.</small></div>
-              <input class="cubic-preference-switch" type="checkbox" aria-label="Compact mode" checked={preferences.compactMode} disabled={preferenceBusy} onchange={(event) => void savePreference({ compactMode: event.currentTarget.checked }, event.currentTarget, 'compactMode')} />
+              <div><strong>Compact mode</strong><small id="cubic-compact-description">Reduce spacing in messages and navigation lists.</small></div>
+              <input class="cubic-preference-switch" type="checkbox" aria-label="Compact mode" aria-describedby="cubic-compact-description" checked={preferences.compactMode} disabled={preferenceBusy} onchange={(event) => void savePreference({ compactMode: event.currentTarget.checked }, event.currentTarget, 'compactMode')} />
             </div>
             <div class="cubic-app-preference-row">
-              <div><strong>Reduced motion</strong><small>Minimize app animations and transitions.</small></div>
-              <input class="cubic-preference-switch" type="checkbox" aria-label="Reduced motion" checked={preferences.reduceMotion} disabled={preferenceBusy} onchange={(event) => void savePreference({ reduceMotion: event.currentTarget.checked }, event.currentTarget, 'reduceMotion')} />
+              <div><strong>Reduced motion</strong><small id="cubic-motion-description">Minimize app animations and transitions.</small></div>
+              <input class="cubic-preference-switch" type="checkbox" aria-label="Reduced motion" aria-describedby="cubic-motion-description" checked={preferences.reduceMotion} disabled={preferenceBusy} onchange={(event) => void savePreference({ reduceMotion: event.currentTarget.checked }, event.currentTarget, 'reduceMotion')} />
             </div>
             {#if preferenceBusy}<p role="status">Saving preferences…</p>{/if}
             {#if preferenceError}<p class="cubic-user-profile-error" role="alert">{preferenceError}</p>{/if}
@@ -145,10 +147,12 @@
       {/if}
     </div>
   </div>
+  </div>
 </section>
 
 <style>
   .cubic-user-settings { position: fixed; inset: 0 0 0 66px; z-index: 85; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #111217; color: var(--cubic-text); }
+  .cubic-user-settings-dialog { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; }
   .cubic-user-settings-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 0 0 auto; min-height: 66px; padding: 10px 22px; border-bottom: 1px solid var(--cubic-border); background: #15171d; }
   .cubic-user-settings-head small, .cubic-user-settings-title small { color: var(--cubic-muted); font-size: .7rem; font-weight: 800; letter-spacing: .08em; }
   .cubic-user-settings-head h1 { margin: 2px 0 0; font-size: 1.1rem; }

@@ -104,6 +104,10 @@ test('touch layouts expose one keyboard-operable action menu without regressing 
     await trigger.click();
     await expect(message.getByRole('menu')).toBeVisible();
     await expect(message.getByRole('menuitem', { name: 'Reply' })).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(message.getByRole('menuitem', { name: 'React' })).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(message.getByRole('menuitem', { name: 'Reply' })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(message.getByRole('menu')).toHaveCount(0);
     await expect(trigger).toBeFocused();

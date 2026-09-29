@@ -148,7 +148,7 @@
           <button class="cubic-control cubic-control-secondary" type="button" disabled={sendingVerification} onclick={resendVerification}>{sendingVerification ? 'Sending…' : 'Send verification email'}</button>
         {/if}
         {#if changingEmail}
-          <form class="cubic-security-email-change" onsubmit={requestEmailChange}>
+          <form class="cubic-security-email-change" onsubmit={requestEmailChange} aria-describedby={emailError ? 'cubic-email-error' : undefined}>
             <p>The new address must be verified before it replaces your current email. Completing the change signs you out everywhere.</p>
             <label for="cubic-new-email">New email</label>
             <input id="cubic-new-email" type="email" bind:value={newEmail} autocomplete="email" maxlength="254" required disabled={emailBusy} />
@@ -164,7 +164,7 @@
         {/if}
       {/if}
     {/if}
-    {#if emailError}<p class="cubic-security-error" role="alert">{emailError}</p>{/if}
+    {#if emailError}<p id="cubic-email-error" class="cubic-security-error" role="alert">{emailError}</p>{/if}
     {#if emailNotice}<p class="cubic-security-success" role="status">{emailNotice}</p>{/if}
   </section>
   <PasskeySettings emailVerified={Boolean(emailState?.emailVerifiedAt)} />
