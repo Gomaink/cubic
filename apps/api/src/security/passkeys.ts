@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { generateRegistrationOptions, verifyRegistrationResponse, type RegistrationResponseJSON } from '@simplewebauthn/server';
 import type { Database } from '@cubic/database';
 import { verifyPassword } from './password.js';
+import { hasRecentPasskeyAuthentication } from './passkey-reauthentication.js';
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -28,7 +29,7 @@ function sanitizeTransports(value: unknown): string[] {
   )].slice(0, AUTHENTICATOR_TRANSPORTS.size);
 }
 
-export type PasskeyFailure = 'unavailable' | 'password' | 'invalid' | 'expired' | 'duplicate' | 'missing';
+export type PasskeyFailure = 'unavailable' | 'password' | 'reauth' | 'invalid' | 'expired' | 'duplicate' | 'missing';
 export class PasskeyError extends Error {
   constructor(readonly reason: PasskeyFailure) { super(reason); }
 }
@@ -55,7 +56,7 @@ export class PasskeyService {
       deviceType: row.device_type, backedUp: row.backed_up };
   }
 
-  async begin(userId: string, sessionId: string, currentPassword: string) {
+  async begin(userId: string, sessionId: string, currentPassword?: string) {
     const client = await this.database.pool.connect();
     try {
       await client.query('begin');
@@ -63,9 +64,11 @@ export class PasskeyService {
         'select username, display_name, password_hash, email_verified_at, disabled_at from users where id = $1 for no key update', [userId]
       )).rows[0];
       if (!account || account.disabled_at || !account.email_verified_at) throw new PasskeyError('unavailable');
-      const session = (await client.query('select id from sessions where id = $1 and user_id = $2', [sessionId, userId])).rows[0];
+      const session = (await client.query('select id from sessions where id = $1 and user_id = $2 for key share', [sessionId, userId])).rows[0];
       if (!session) throw new PasskeyError('unavailable');
-      if (!(await verifyPassword(account.password_hash, currentPassword)).valid) throw new PasskeyError('password');
+      if (currentPassword === undefined) {
+        if (!(await hasRecentPasskeyAuthentication(client, userId, sessionId))) throw new PasskeyError('reauth');
+      } else if (!(await verifyPassword(account.password_hash, currentPassword)).valid) throw new PasskeyError('password');
       const existing = await client.query<{ credential_id: string; transports: string[] }>(
         'select credential_id, transports from passkey_credentials where user_id = $1', [userId]
       );
@@ -77,10 +80,10 @@ export class PasskeyService {
         authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
         excludeCredentials: existing.rows.map((row) => ({ id: row.credential_id, transports: row.transports }))
       });
-      await client.query("delete from passkey_challenges where user_id = $1 and session_id = $2 and purpose = 'enroll'", [userId, sessionId]);
+      await client.query("delete from passkey_challenges where user_id = $1 and session_id = $2 and purpose in ('enroll', 'enroll_reauth')", [userId, sessionId]);
       const challenge = await client.query<{ id: string }>(
-        "insert into passkey_challenges (user_id, session_id, purpose, challenge_digest, expires_at) values ($1, $2, 'enroll', $3, $4) returning id",
-        [userId, sessionId, digest(options.challenge), new Date(Date.now() + CHALLENGE_TTL_MS)]
+        'insert into passkey_challenges (user_id, session_id, purpose, challenge_digest, expires_at) values ($1, $2, $3, $4, $5) returning id',
+        [userId, sessionId, currentPassword === undefined ? 'enroll_reauth' : 'enroll', digest(options.challenge), new Date(Date.now() + CHALLENGE_TTL_MS)]
       );
       await client.query('commit');
       return { challengeId: challenge.rows[0]!.id, options };
@@ -98,14 +101,15 @@ export class PasskeyService {
         'select email_verified_at, disabled_at from users where id = $1 for no key update', [userId]
       )).rows[0];
       if (!account || account.disabled_at || !account.email_verified_at) throw new PasskeyError('unavailable');
-      const session = (await client.query('select id from sessions where id = $1 and user_id = $2', [sessionId, userId])).rows[0];
+      const session = (await client.query('select id from sessions where id = $1 and user_id = $2 for key share', [sessionId, userId])).rows[0];
       if (!session) throw new PasskeyError('unavailable');
-      const challenge = (await client.query<{ challenge_digest: string; expires_at: Date; used_at: Date | null }>(
-        "select challenge_digest, expires_at, used_at from passkey_challenges where id = $1 and user_id = $2 and session_id = $3 and purpose = 'enroll' for update",
+      const challenge = (await client.query<{ challenge_digest: string; expires_at: Date; used_at: Date | null; purpose: string }>(
+        "select challenge_digest, expires_at, used_at, purpose from passkey_challenges where id = $1 and user_id = $2 and session_id = $3 and purpose in ('enroll', 'enroll_reauth') for update",
         [challengeId, userId, sessionId]
       )).rows[0];
       if (!challenge || challenge.used_at) throw new PasskeyError('invalid');
       if (challenge.expires_at.getTime() <= Date.now()) throw new PasskeyError('expired');
+      if (challenge.purpose === 'enroll_reauth' && !(await hasRecentPasskeyAuthentication(client, userId, sessionId))) throw new PasskeyError('reauth');
       let verification;
       try {
         verification = await verifyRegistrationResponse({
@@ -129,19 +133,22 @@ export class PasskeyService {
     } finally { client.release(); }
   }
 
-  async remove(userId: string, sessionId: string, credentialId: string, currentPassword: string) {
+  async remove(userId: string, sessionId: string, credentialId: string, currentPassword?: string) {
     const client = await this.database.pool.connect();
     try {
       await client.query('begin');
-      const account = (await client.query<{ password_hash: string; disabled_at: Date | null }>(
-        'select password_hash, disabled_at from users where id = $1 for no key update', [userId]
+      const account = (await client.query<{ password_hash: string; disabled_at: Date | null; email_verified_at: Date | null }>(
+        'select password_hash, disabled_at, email_verified_at from users where id = $1 for no key update', [userId]
       )).rows[0];
       if (!account || account.disabled_at) throw new PasskeyError('unavailable');
-      const session = (await client.query('select id from sessions where id = $1 and user_id = $2', [sessionId, userId])).rows[0];
+      const session = (await client.query('select id from sessions where id = $1 and user_id = $2 for key share', [sessionId, userId])).rows[0];
       if (!session) throw new PasskeyError('unavailable');
-      if (!(await verifyPassword(account.password_hash, currentPassword)).valid) throw new PasskeyError('password');
+      if (currentPassword === undefined) {
+        if (!account.email_verified_at || !(await hasRecentPasskeyAuthentication(client, userId, sessionId))) throw new PasskeyError('reauth');
+      } else if (!(await verifyPassword(account.password_hash, currentPassword)).valid) throw new PasskeyError('password');
       const removed = await client.query('delete from passkey_credentials where id = $1 and user_id = $2 returning id', [credentialId, userId]);
       if (!removed.rows[0]) throw new PasskeyError('missing');
+      await client.query("delete from passkey_challenges where user_id = $1 and purpose = 'reauth'", [userId]);
       await client.query('commit');
     } catch (error) {
       await client.query('rollback').catch(() => {});

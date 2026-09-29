@@ -13,6 +13,7 @@ import { hashPassword } from '../security/password.js';
 import { PasskeyError, PasskeyService } from '../security/passkeys.js';
 import { passkeyRoutes } from './passkeys.js';
 import { PasskeyAuthenticationError, PasskeyAuthenticationService } from '../security/passkey-authentication.js';
+import { PasskeyReauthenticationError, PasskeyReauthenticationService } from '../security/passkey-reauthentication.js';
 import { createRealtimeEvents } from '../realtime/events.js';
 
 const connectionString = process.env.CUBIC_PASSKEY_TEST_DATABASE_URL;
@@ -50,7 +51,8 @@ test('passkey registration uses verified password, session-bound one-time challe
       app.addHook('onRequest', createBrowserMutationProtection(origin));
       await app.register(passkeyRoutes, { prefix: '/api/v1/auth', cookieName: 'cubic_session', cookieSecure: false,
         sessionTtlDays: 30, sessionService: sessions, passkeys: service,
-        authentication: new PasskeyAuthenticationService(database, sessions, 'localhost', origin), realtimeEvents: createRealtimeEvents() });
+        authentication: new PasskeyAuthenticationService(database, sessions, 'localhost', origin),
+        reauthentication: new PasskeyReauthenticationService(database, 'localhost', origin), realtimeEvents: createRealtimeEvents() });
       const library = await readFile(new URL('../../../../node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js', import.meta.url));
       app.get('/test', async (_request, reply) => reply.type('text/html').send('<!doctype html><title>Passkey test</title>'));
       app.get('/library', async (_request, reply) => reply.type('application/javascript').send(library));
@@ -255,6 +257,174 @@ test('passkey registration uses verified password, session-bound one-time challe
         }
       }
       assert.equal(optionsRateLimited, true);
+    } finally {
+      await browser?.close();
+      await app.close();
+      for (const id of userIds) await database.pool.query('delete from users where id = $1', [id]);
+      await database.pool.end();
+    }
+  });
+
+test('passkey step-up is verified, session-bound, short-lived and authorizes enrollment or removal',
+  { skip: !connectionString, timeout: 120_000 }, async () => {
+    const database = createDatabase(connectionString!);
+    const sessions = createSessionService(database, 30 * 24 * 60 * 60 * 1000);
+    const stepUpOrigin = 'http://localhost:3204';
+    const passkeys = new PasskeyService(database, 'localhost', 'Cubic', stepUpOrigin);
+    const reauthentication = new PasskeyReauthenticationService(database, 'localhost', stepUpOrigin);
+    const app = Fastify({ logger: false });
+    const suffix = randomUUID().slice(0, 8);
+    const userIds: string[] = [];
+    let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
+    const createUser = async (name: string, verified: boolean) => {
+      const result = await database.pool.query<{ id: string }>(
+        'insert into users (email, email_normalized, username, username_normalized, display_name, password_hash, email_verified_at) values ($1, $1, $2, $2, $3, $4, $5) returning id',
+        [`${name}@example.test`, name, 'Step-up fixture', await hashPassword(password), verified ? new Date() : null]
+      );
+      const id = result.rows[0]!.id;
+      userIds.push(id);
+      const session = await sessions.create(id, 30);
+      return { id, cookie: `cubic_session=${session.token}`, sessionId: (await sessions.resolveToken(session.token))!.sessionId };
+    };
+    const post = (path: string, payload: object, cookieValue?: string) => app.inject({ method: 'POST', url: `/api/v1/auth${path}`,
+      headers: { origin: stepUpOrigin, 'sec-fetch-site': 'same-origin', ...(cookieValue ? { cookie: cookieValue } : {}) }, payload });
+    const remove = (id: string, payload: object, cookieValue: string) => app.inject({ method: 'DELETE', url: `/api/v1/auth/passkeys/${id}`,
+      headers: { origin: stepUpOrigin, 'sec-fetch-site': 'same-origin', cookie: cookieValue }, payload });
+    try {
+      await app.register(cookie);
+      await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute' });
+      app.decorateRequest('auth', null);
+      app.addHook('onRequest', createBrowserMutationProtection(stepUpOrigin));
+      await app.register(passkeyRoutes, { prefix: '/api/v1/auth', cookieName: 'cubic_session', cookieSecure: false,
+        sessionTtlDays: 30, sessionService: sessions, passkeys,
+        authentication: new PasskeyAuthenticationService(database, sessions, 'localhost', stepUpOrigin),
+        reauthentication, realtimeEvents: createRealtimeEvents() });
+      const library = await readFile(new URL('../../../../node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js', import.meta.url));
+      app.get('/test', async (_request, reply) => reply.type('text/html').send('<!doctype html><title>Step-up test</title>'));
+      app.get('/library', async (_request, reply) => reply.type('application/javascript').send(library));
+      await app.listen({ host: '127.0.0.1', port: 3204 });
+      browser = await chromium.launch({ headless: true });
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      const cdp = await context.newCDPSession(page);
+      await cdp.send('WebAuthn.enable');
+      await cdp.send('WebAuthn.addVirtualAuthenticator', { options: {
+        protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true
+      } });
+      await page.goto(`${stepUpOrigin}/test`);
+      await page.addScriptTag({ url: `${stepUpOrigin}/library` });
+      const register = (options: unknown) => page.evaluate(async (optionsJSON) =>
+        (globalThis as unknown as { SimpleWebAuthnBrowser: { startRegistration: (arg: { optionsJSON: unknown }) => Promise<unknown> } }).SimpleWebAuthnBrowser.startRegistration({ optionsJSON }), options);
+      const authenticate = (options: unknown) => page.evaluate(async (optionsJSON) =>
+        (globalThis as unknown as { SimpleWebAuthnBrowser: { startAuthentication: (arg: { optionsJSON: unknown }) => Promise<unknown> } }).SimpleWebAuthnBrowser.startAuthentication({ optionsJSON }), options);
+      const owner = await createUser(`step_${suffix}`, true);
+      const other = await createUser(`other_step_${suffix}`, true);
+      const unverified = await createUser(`unverified_step_${suffix}`, false);
+      const secondOwnerSession = await sessions.create(owner.id, 30);
+      const secondOwnerCookie = `cubic_session=${secondOwnerSession.token}`;
+      const enroll = async (actor: typeof owner, label: string, payload: object = { currentPassword: password }) => {
+        const optionsReply = await post('/passkeys/options', payload, actor.cookie);
+        assert.equal(optionsReply.statusCode, 200);
+        const setup = optionsReply.json();
+        const response = await register(setup.options);
+        const saved = await post('/passkeys/complete', { challengeId: setup.challengeId, response, label }, actor.cookie);
+        assert.equal(saved.statusCode, 201);
+        return saved.json().passkeys.find((entry: { label: string }) => entry.label === label) as { id: string };
+      };
+      const first = await enroll(owner, 'Owner passkey');
+      await enroll(other, 'Other passkey');
+      const ownerCredential = (await database.pool.query<{ credential_id: string }>(
+        'select credential_id from passkey_credentials where id = $1', [first.id])).rows[0]!.credential_id;
+      const otherCredential = (await database.pool.query<{ credential_id: string }>(
+        'select credential_id from passkey_credentials where user_id = $1', [other.id])).rows[0]!.credential_id;
+      assert.equal((await post('/passkeys/reauthentication/options', {})).statusCode, 401);
+      assert.equal((await post('/passkeys/reauthentication/options', {}, unverified.cookie)).statusCode, 400);
+      await database.pool.query('update users set disabled_at = now() where id = $1', [owner.id]);
+      assert.equal((await post('/passkeys/reauthentication/options', {}, owner.cookie)).statusCode, 401);
+      await database.pool.query('update users set disabled_at = null, email_verified_at = null where id = $1', [owner.id]);
+      assert.equal((await post('/passkeys/reauthentication/options', {}, owner.cookie)).statusCode, 400);
+      await database.pool.query('update users set email_verified_at = now() where id = $1', [owner.id]);
+      assert.equal((await post('/passkeys/options', {}, owner.cookie)).statusCode, 403);
+      assert.equal((await remove(first.id, {}, owner.cookie)).statusCode, 403);
+      const firstOptions = (await post('/passkeys/reauthentication/options', {}, owner.cookie)).json();
+      assert.equal(firstOptions.options.userVerification, 'required');
+      assert.ok(firstOptions.options.allowCredentials.length === 1 && firstOptions.options.allowCredentials[0].id === ownerCredential);
+      assert.equal(firstOptions.options.allowCredentials.some((entry: { id: string }) => entry.id === otherCredential), false);
+      const stored = (await database.pool.query<{ challenge_digest: string; user_id: string; session_id: string; purpose: string; expires_at: Date; created_at: Date }>(
+        'select challenge_digest, user_id, session_id, purpose, expires_at, created_at from passkey_challenges where id = $1',
+        [firstOptions.challengeId])).rows[0]!;
+      assert.ok(stored.challenge_digest === digest(firstOptions.options.challenge));
+      assert.ok(stored.challenge_digest !== firstOptions.options.challenge);
+      assert.equal(stored.user_id, owner.id);
+      assert.equal(stored.session_id, owner.sessionId);
+      assert.equal(stored.purpose, 'reauth');
+      assert.ok(Math.abs(stored.expires_at.getTime() - stored.created_at.getTime() - 300_000) < 5_000);
+      const secondOptions = (await post('/passkeys/reauthentication/options', {}, owner.cookie)).json();
+      assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: firstOptions.challengeId, response: {} }, owner.cookie)).statusCode, 400);
+      const assertion = await authenticate(secondOptions.options);
+      assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: secondOptions.challengeId, response: assertion })).statusCode, 401);
+      assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: secondOptions.challengeId, response: assertion }, secondOwnerCookie)).statusCode, 400);
+      assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: secondOptions.challengeId, response: assertion }, other.cookie)).statusCode, 400);
+      const wrongCredential = structuredClone(assertion) as { id: string };
+      wrongCredential.id = otherCredential;
+      assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: secondOptions.challengeId, response: wrongCredential }, owner.cookie)).statusCode, 400);
+      const wrongOrigin = structuredClone(assertion) as { response: { clientDataJSON: string } };
+      const clientData = JSON.parse(Buffer.from(wrongOrigin.response.clientDataJSON, 'base64url').toString());
+      wrongOrigin.response.clientDataJSON = Buffer.from(JSON.stringify({ ...clientData, origin: 'https://evil.example' })).toString('base64url');
+      assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: secondOptions.challengeId, response: wrongOrigin }, owner.cookie)).statusCode, 400);
+      const wrongRP = new PasskeyReauthenticationService(database, 'wrong.example', stepUpOrigin);
+      await assert.rejects(() => wrongRP.complete(owner.id, owner.sessionId, secondOptions.challengeId, assertion as never), PasskeyReauthenticationError);
+      const malformedSignature = structuredClone(assertion) as { response: { signature: string } };
+      malformedSignature.response.signature = 'invalid-signature';
+      assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: secondOptions.challengeId, response: malformedSignature }, owner.cookie)).statusCode, 400);
+      const beforeStepUpSessions = Number((await database.pool.query<{ count: string }>(
+        'select count(*) from sessions where user_id = $1', [owner.id])).rows[0]!.count);
+      const completions = await Promise.all([
+        post('/passkeys/reauthentication/complete', { challengeId: secondOptions.challengeId, response: assertion }, owner.cookie),
+        post('/passkeys/reauthentication/complete', { challengeId: secondOptions.challengeId, response: assertion }, owner.cookie)
+      ]);
+      assert.deepEqual(completions.map((result) => result.statusCode).sort(), [204, 400]);
+      assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: secondOptions.challengeId, response: assertion }, owner.cookie)).statusCode, 400);
+      assert.equal(Number((await database.pool.query<{ count: string }>(
+        'select count(*) from sessions where user_id = $1', [owner.id])).rows[0]!.count), beforeStepUpSessions);
+      const used = (await database.pool.query<{ used_at: Date | null }>(
+        'select used_at from passkey_challenges where id = $1', [secondOptions.challengeId])).rows[0]!;
+      assert.ok(used.used_at);
+      const usedCredential = (await database.pool.query<{ counter: string; last_used_at: Date | null }>(
+        'select counter, last_used_at from passkey_credentials where id = $1', [first.id])).rows[0]!;
+      assert.ok(Number.isSafeInteger(Number(usedCredential.counter)) && Number(usedCredential.counter) >= 0);
+      assert.ok(usedCredential.last_used_at);
+      const otherSessionId = (await sessions.resolveToken(secondOwnerSession.token))!.sessionId;
+      await assert.rejects(() => passkeys.begin(owner.id, otherSessionId), (error: unknown) =>
+        error instanceof PasskeyError && error.reason === 'reauth');
+      assert.equal((await remove(first.id, {}, secondOwnerCookie)).statusCode, 403);
+      await database.pool.query("update passkey_challenges set used_at = now() - interval '6 minutes' where id = $1", [secondOptions.challengeId]);
+      assert.equal((await post('/passkeys/options', {}, owner.cookie)).statusCode, 403);
+      assert.equal((await remove(first.id, {}, owner.cookie)).statusCode, 403);
+      const thirdOptions = (await post('/passkeys/reauthentication/options', {}, owner.cookie)).json();
+      const thirdAssertion = await authenticate(thirdOptions.options);
+      assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: thirdOptions.challengeId, response: thirdAssertion }, owner.cookie)).statusCode, 204);
+      await cdp.send('WebAuthn.addVirtualAuthenticator', { options: {
+        protocol: 'ctap2', transport: 'usb', hasResidentKey: true, hasUserVerification: true, isUserVerified: true
+      } });
+      const staleEnrollment = (await post('/passkeys/options', {}, owner.cookie)).json();
+      const staleRegistration = await register(staleEnrollment.options);
+      await database.pool.query("update passkey_challenges set used_at = now() - interval '6 minutes' where id = $1", [thirdOptions.challengeId]);
+      assert.equal((await post('/passkeys/complete', { challengeId: staleEnrollment.challengeId, response: staleRegistration, label: 'Stale proof' }, owner.cookie)).statusCode, 400);
+      const freshOptions = (await post('/passkeys/reauthentication/options', {}, owner.cookie)).json();
+      const freshAssertion = await authenticate(freshOptions.options);
+      assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: freshOptions.challengeId, response: freshAssertion }, owner.cookie)).statusCode, 204);
+      const second = await enroll(owner, 'Second passkey', {});
+      assert.ok(second?.id);
+      assert.equal((await remove(second.id, {}, owner.cookie)).statusCode, 204);
+      const expiredOptions = (await post('/passkeys/reauthentication/options', {}, owner.cookie)).json();
+      await database.pool.query("update passkey_challenges set created_at = now() - interval '10 minutes', expires_at = now() - interval '1 second' where id = $1", [expiredOptions.challengeId]);
+      assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: expiredOptions.challengeId, response: assertion }, owner.cookie)).statusCode, 400);
+      const removedOptions = (await post('/passkeys/reauthentication/options', {}, owner.cookie)).json();
+      const removedAssertion = await authenticate(removedOptions.options);
+      assert.equal((await remove(first.id, { currentPassword: password }, owner.cookie)).statusCode, 204);
+      assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: removedOptions.challengeId, response: removedAssertion }, owner.cookie)).statusCode, 400);
+      assert.equal((await database.pool.query('select id from passkey_credentials where user_id = $1', [owner.id])).rows.length, 0);
     } finally {
       await browser?.close();
       await app.close();
