@@ -107,6 +107,12 @@ test('passkey registration uses verified password, session-bound one-time challe
 
       const third = (await post('/passkeys/options', { currentPassword: password }, owner.cookie)).json();
       const validResponse = await createResponse(third.options);
+      assert.equal((await post('/passkeys/complete', {
+        challengeId: third.challengeId, response: validResponse, label: 'Visible\u202eHidden'
+      }, owner.cookie)).statusCode, 400);
+      assert.equal((await database.pool.query<{ used_at: Date | null }>(
+        'select used_at from passkey_challenges where id = $1', [third.challengeId]
+      )).rows[0]!.used_at, null);
       const responseWithInjectedTransports = structuredClone(validResponse) as {
         response: { transports?: string[] };
       };
@@ -228,6 +234,12 @@ test('passkey registration uses verified password, session-bound one-time challe
       assert.equal((await post('/passkeys/authentication/complete', { challengeId: securityOptions.challengeId, response: wrongLoginOrigin })).statusCode, 401);
       const wrongLoginRP = new PasskeyAuthenticationService(database, sessions, 'wrong.example', origin);
       await assert.rejects(() => wrongLoginRP.complete(securityOptions.challengeId, securityAssertion as never, 30), PasskeyAuthenticationError);
+      await database.pool.query('update passkey_credentials set counter = $2 where user_id = $1', [owner.id, '9007199254740992']);
+      assert.equal((await post('/passkeys/authentication/complete', { challengeId: securityOptions.challengeId, response: securityAssertion })).statusCode, 401);
+      assert.deepEqual((await database.pool.query<{ counter: string; last_used_at: Date | null }>(
+        'select counter, last_used_at from passkey_credentials where user_id = $1', [owner.id]
+      )).rows[0], { counter: '9007199254740992', last_used_at: usedCredential.last_used_at });
+      await database.pool.query('update passkey_credentials set counter = $2 where user_id = $1', [owner.id, usedCredential.counter]);
       await database.pool.query('update users set email_verified_at = null where id = $1', [owner.id]);
       assert.equal((await post('/passkeys/authentication/complete', { challengeId: securityOptions.challengeId, response: securityAssertion })).statusCode, 401);
       await database.pool.query('update users set email_verified_at = now(), disabled_at = now() where id = $1', [owner.id]);
@@ -236,7 +248,14 @@ test('passkey registration uses verified password, session-bound one-time challe
       const malformedSignature = structuredClone(securityAssertion) as { response: { signature: string } };
       malformedSignature.response.signature = 'invalid-signature';
       assert.equal((await post('/passkeys/authentication/complete', { challengeId: securityOptions.challengeId, response: malformedSignature })).statusCode, 401);
-      assert.equal((await post('/passkeys/authentication/complete', { challengeId: securityOptions.challengeId, response: securityAssertion })).statusCode, 200);
+      const previousOtherSession = await sessions.create(other.id, 30);
+      const switchedAccount = await post('/passkeys/authentication/complete',
+        { challengeId: securityOptions.challengeId, response: securityAssertion }, `cubic_session=${previousOtherSession.token}`);
+      assert.equal(switchedAccount.statusCode, 200);
+      assert.equal((await sessions.resolveToken(previousOtherSession.token)), null);
+      const switchedCookie = switchedAccount.cookies.find((entry) => entry.name === 'cubic_session');
+      assert.ok(switchedCookie && switchedCookie.value !== previousOtherSession.token);
+      assert.equal((await sessions.resolveToken(switchedCookie.value))?.user.id, owner.id);
 
       const expiredOptions = (await post('/passkeys/authentication/options', {})).json();
       await database.pool.query("update passkey_authentication_challenges set created_at = now() - interval '10 minutes', expires_at = now() - interval '1 second' where id = $1", [expiredOptions.challengeId]);
