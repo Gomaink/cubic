@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte';
   import { io, type Socket } from 'socket.io-client';
   import { recoverAfterServerDisconnect } from '$lib/realtime/server-disconnect.js';
-  import { Room, RoomEvent, Track } from 'livekit-client';
+  import type { Room as LiveKitRoom } from 'livekit-client';
   import { mediaDeviceErrorMessage, microphoneCaptureOptions, missingSelectedCameraNotice, screenShareFailure } from '$lib/media-ux';
   import Icon from '$lib/ui/Icon.svelte';
   import PrimaryRail from '$lib/ui/PrimaryRail.svelte';
@@ -17,6 +17,24 @@
   import ServerInviteCard from '$lib/ui/ServerInviteCard.svelte';
   import { modalFocus } from '$lib/ui/modalFocus';
   import { firstTrustedServerInviteToken, ServerInvitePreviewQueue } from '$lib/server-invite-links';
+
+  type Room = LiveKitRoom;
+  let Room: typeof import('livekit-client').Room;
+  let RoomEvent: typeof import('livekit-client').RoomEvent;
+  let Track: typeof import('livekit-client').Track;
+  let liveKitLoad: Promise<typeof import('livekit-client')> | null = null;
+
+  async function loadLiveKit() {
+    try {
+      const kit = await (liveKitLoad ??= import('livekit-client'));
+      Room = kit.Room;
+      RoomEvent = kit.RoomEvent;
+      Track = kit.Track;
+    } catch (cause) {
+      liveKitLoad = null;
+      throw cause;
+    }
+  }
 
   let { data } = $props();
   let updatedCurrentUser = $state<typeof data.user | null>(null);
@@ -3084,6 +3102,7 @@
     mediaSettingsNotice = '';
 
     try {
+      await loadLiveKit();
       const devices = await Room.getLocalDevices(undefined, false);
       audioInputDevices = devices.filter((device) => device.kind === 'audioinput');
       videoInputDevices = devices.filter((device) => device.kind === 'videoinput');
@@ -3506,6 +3525,8 @@
     try {
       const ticket = await api(`/api/v1/voice/conversations/${conversation.id}/token`, { method: 'POST' });
       if (attempt !== voiceAttemptSerial) return;
+      await loadLiveKit();
+      if (attempt !== voiceAttemptSerial) return;
       const room = new Room({
         adaptiveStream: true,
         dynacast: true
@@ -3671,6 +3692,8 @@
     voiceRetryServerChannel = null;
     try {
       const ticket = await api(`/api/v1/server-voice/channels/${channel.id}/token`, { method: 'POST' });
+      if (attempt !== voiceAttemptSerial || activeServerVoiceId !== channel.id) return;
+      await loadLiveKit();
       if (attempt !== voiceAttemptSerial || activeServerVoiceId !== channel.id) return;
       // The browser-test build substitutes only the media transport. Cubic's
       // ticket request, selected channel and connected UI remain real.
