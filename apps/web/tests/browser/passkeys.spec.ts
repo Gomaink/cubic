@@ -110,6 +110,8 @@ test('unverified email and unsupported browser offer no enrollment action', asyn
 });
 
 test('browser cancellation is a normal passkey setup outcome', async ({ page, context, request }) => {
+  let completionRequests = 0;
+  page.on('request', (entry) => { if (entry.url().includes('/passkeys/complete')) completionRequests += 1; });
   await request.get(`${fixture}/__test/email-verified?value=true`);
   await context.addCookies([{ name: 'cubic_session', value: 'browser-fixture', domain: 'localhost', path: '/' }]);
   await page.addInitScript(() => {
@@ -122,7 +124,8 @@ test('browser cancellation is a normal passkey setup outcome', async ({ page, co
   await settings.getByRole('button', { name: 'Add passkey' }).click();
   await settings.getByLabel('Current password').last().fill('test-only-password');
   await settings.getByRole('button', { name: 'Continue' }).click();
-  await expect(settings.getByRole('status')).toContainText('Passkey setup canceled.');
+  await expect(settings.getByRole('status')).toContainText('Passkey setup was canceled or unavailable. Try again.');
   await expect(settings.getByRole('alert')).toHaveCount(0);
   await expect(settings.getByText('No passkeys added yet.')).toBeVisible();
+  expect(completionRequests).toBe(0);
 });

@@ -31,7 +31,7 @@
         assertion = await startAuthentication({ optionsJSON: ceremony.options });
       } catch (cause) {
         if (cause instanceof Error && (cause.name === 'AbortError' || cause.name === 'NotAllowedError')) {
-          passkeyNotice = 'Passkey sign-in canceled.';
+          passkeyNotice = 'Passkey prompt closed or unavailable. Try again or use your password.';
           return;
         }
         throw new Error('Passkey sign-in could not be completed.');

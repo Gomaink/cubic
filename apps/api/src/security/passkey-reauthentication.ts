@@ -42,7 +42,7 @@ export class PasskeyReauthenticationService {
         rpID: this.rpID, timeout: CHALLENGE_TTL_MS, userVerification: 'required',
         allowCredentials: credentials.rows.map((row) => ({ id: row.credential_id, transports: row.transports }))
       });
-      await client.query("delete from passkey_challenges where user_id = $1 and purpose = 'reauth' and ((used_at is null and expires_at <= now()) or used_at <= now() - interval '5 minutes')", [userId]);
+      await client.query("delete from passkey_challenges where purpose = 'reauth' and ((used_at is null and expires_at <= now()) or used_at <= now() - interval '5 minutes')");
       await client.query("delete from passkey_challenges where user_id = $1 and session_id = $2 and purpose = 'reauth' and used_at is null", [userId, sessionId]);
       const challenge = await client.query<{ id: string }>(
         "insert into passkey_challenges (user_id, session_id, purpose, challenge_digest, expires_at) values ($1, $2, 'reauth', $3, $4) returning id",

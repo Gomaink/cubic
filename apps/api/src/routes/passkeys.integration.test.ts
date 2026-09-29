@@ -163,7 +163,13 @@ test('passkey registration uses verified password, session-bound one-time challe
         [other.id, credential.credential_id, credential.public_key, 'singleDevice', 'Duplicate']
       ), (error: unknown) => (error as { code?: string }).code === '23505');
       assert.deepEqual((await app.inject({ method: 'GET', url: '/api/v1/auth/passkeys', headers: { cookie: other.cookie } })).json().passkeys, []);
+      const abandonedSessionId = other.sessionId;
+      const abandoned = await database.pool.query<{ id: string }>(
+        "insert into passkey_challenges (user_id, session_id, purpose, challenge_digest, created_at, expires_at) values ($1, $2, 'enroll', $3, now() - interval '10 minutes', now() - interval '1 minute') returning id",
+        [other.id, abandonedSessionId, digest(randomUUID())]
+      );
       const fourth = (await post('/passkeys/options', { currentPassword: password }, owner.cookie)).json();
+      assert.equal((await database.pool.query('select id from passkey_challenges where id = $1', [abandoned.rows[0]!.id])).rowCount, 0);
 
       const challengeRows = await database.pool.query<{ id: string }>(
         "select id from passkey_challenges where user_id = $1 and session_id = $2 and purpose = 'enroll'",
@@ -308,7 +314,7 @@ test('passkey step-up is verified, session-bound, short-lived and authorizes enr
       const page = await context.newPage();
       const cdp = await context.newCDPSession(page);
       await cdp.send('WebAuthn.enable');
-      await cdp.send('WebAuthn.addVirtualAuthenticator', { options: {
+      const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', { options: {
         protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true
       } });
       await page.goto(`${stepUpOrigin}/test`);
@@ -335,6 +341,10 @@ test('passkey step-up is verified, session-bound, short-lived and authorizes enr
       await enroll(other, 'Other passkey');
       const ownerCredential = (await database.pool.query<{ credential_id: string }>(
         'select credential_id from passkey_credentials where id = $1', [first.id])).rows[0]!.credential_id;
+      await cdp.send('WebAuthn.setCredentialProperties', { authenticatorId,
+        credentialId: Buffer.from(ownerCredential, 'base64url').toString('base64'), signCount: -1 });
+      // Model an authenticator that has always reported a zero counter.
+      await database.pool.query('update passkey_credentials set counter = 0 where id = $1', [first.id]);
       const otherCredential = (await database.pool.query<{ credential_id: string }>(
         'select credential_id from passkey_credentials where user_id = $1', [other.id])).rows[0]!.credential_id;
       assert.equal((await post('/passkeys/reauthentication/options', {})).statusCode, 401);
@@ -346,7 +356,12 @@ test('passkey step-up is verified, session-bound, short-lived and authorizes enr
       await database.pool.query('update users set email_verified_at = now() where id = $1', [owner.id]);
       assert.equal((await post('/passkeys/options', {}, owner.cookie)).statusCode, 403);
       assert.equal((await remove(first.id, {}, owner.cookie)).statusCode, 403);
+      const abandonedReauth = await database.pool.query<{ id: string }>(
+        "insert into passkey_challenges (user_id, session_id, purpose, challenge_digest, created_at, expires_at) values ($1, $2, 'reauth', $3, now() - interval '10 minutes', now() - interval '1 minute') returning id",
+        [other.id, other.sessionId, digest(randomUUID())]
+      );
       const firstOptions = (await post('/passkeys/reauthentication/options', {}, owner.cookie)).json();
+      assert.equal((await database.pool.query('select id from passkey_challenges where id = $1', [abandonedReauth.rows[0]!.id])).rowCount, 0);
       assert.equal(firstOptions.options.userVerification, 'required');
       assert.ok(firstOptions.options.allowCredentials.length === 1 && firstOptions.options.allowCredentials[0].id === ownerCredential);
       assert.equal(firstOptions.options.allowCredentials.some((entry: { id: string }) => entry.id === otherCredential), false);
@@ -359,9 +374,16 @@ test('passkey step-up is verified, session-bound, short-lived and authorizes enr
       assert.equal(stored.session_id, owner.sessionId);
       assert.equal(stored.purpose, 'reauth');
       assert.ok(Math.abs(stored.expires_at.getTime() - stored.created_at.getTime() - 300_000) < 5_000);
+      assert.equal((await database.pool.query<{ used_at: Date | null }>(
+        'select used_at from passkey_challenges where id = $1', [firstOptions.challengeId])).rows[0]!.used_at, null);
+      const beforeFailedAssertion = (await database.pool.query<{ counter: string; last_used_at: Date | null }>(
+        'select counter, last_used_at from passkey_credentials where id = $1', [first.id])).rows[0]!;
       const secondOptions = (await post('/passkeys/reauthentication/options', {}, owner.cookie)).json();
+      assert.equal((await database.pool.query('select id from passkey_challenges where id = $1', [firstOptions.challengeId])).rowCount, 0);
       assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: firstOptions.challengeId, response: {} }, owner.cookie)).statusCode, 400);
       const assertion = await authenticate(secondOptions.options);
+      assert.equal(Buffer.from((assertion as { response: { authenticatorData: string } }).response.authenticatorData, 'base64url').readUInt32BE(33), 0);
+      assert.ok((assertion as { id: string }).id === ownerCredential);
       assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: secondOptions.challengeId, response: assertion })).statusCode, 401);
       assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: secondOptions.challengeId, response: assertion }, secondOwnerCookie)).statusCode, 400);
       assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: secondOptions.challengeId, response: assertion }, other.cookie)).statusCode, 400);
@@ -377,6 +399,11 @@ test('passkey step-up is verified, session-bound, short-lived and authorizes enr
       const malformedSignature = structuredClone(assertion) as { response: { signature: string } };
       malformedSignature.response.signature = 'invalid-signature';
       assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: secondOptions.challengeId, response: malformedSignature }, owner.cookie)).statusCode, 400);
+      const afterFailedAssertion = (await database.pool.query<{ counter: string; last_used_at: Date | null }>(
+        'select counter, last_used_at from passkey_credentials where id = $1', [first.id])).rows[0]!;
+      assert.deepEqual(afterFailedAssertion, beforeFailedAssertion);
+      assert.equal((await database.pool.query<{ used_at: Date | null }>(
+        'select used_at from passkey_challenges where id = $1', [secondOptions.challengeId])).rows[0]!.used_at, null);
       const beforeStepUpSessions = Number((await database.pool.query<{ count: string }>(
         'select count(*) from sessions where user_id = $1', [owner.id])).rows[0]!.count);
       const completions = await Promise.all([
@@ -392,8 +419,16 @@ test('passkey step-up is verified, session-bound, short-lived and authorizes enr
       assert.ok(used.used_at);
       const usedCredential = (await database.pool.query<{ counter: string; last_used_at: Date | null }>(
         'select counter, last_used_at from passkey_credentials where id = $1', [first.id])).rows[0]!;
-      assert.ok(Number.isSafeInteger(Number(usedCredential.counter)) && Number(usedCredential.counter) >= 0);
+      assert.equal(Number(usedCredential.counter), 0);
       assert.ok(usedCredential.last_used_at);
+      await cdp.send('WebAuthn.removeCredential', { authenticatorId,
+        credentialId: Buffer.from(otherCredential, 'base64url').toString('base64') });
+      const zeroLoginOptions = (await post('/passkeys/authentication/options', {})).json();
+      const zeroLoginAssertion = await authenticate(zeroLoginOptions.options);
+      assert.equal(Buffer.from((zeroLoginAssertion as { response: { authenticatorData: string } }).response.authenticatorData, 'base64url').readUInt32BE(33), 0);
+      assert.equal((await post('/passkeys/authentication/complete', { challengeId: zeroLoginOptions.challengeId, response: zeroLoginAssertion })).statusCode, 200);
+      assert.equal(Number((await database.pool.query<{ counter: string }>(
+        'select counter from passkey_credentials where id = $1', [first.id])).rows[0]!.counter), 0);
       const otherSessionId = (await sessions.resolveToken(secondOwnerSession.token))!.sessionId;
       await assert.rejects(() => passkeys.begin(owner.id, otherSessionId), (error: unknown) =>
         error instanceof PasskeyError && error.reason === 'reauth');
@@ -405,7 +440,8 @@ test('passkey step-up is verified, session-bound, short-lived and authorizes enr
       const thirdAssertion = await authenticate(thirdOptions.options);
       assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: thirdOptions.challengeId, response: thirdAssertion }, owner.cookie)).statusCode, 204);
       await cdp.send('WebAuthn.addVirtualAuthenticator', { options: {
-        protocol: 'ctap2', transport: 'usb', hasResidentKey: true, hasUserVerification: true, isUserVerified: true
+        protocol: 'ctap2', ctap2Version: 'ctap2_1', transport: 'usb', hasResidentKey: true,
+        hasUserVerification: true, isUserVerified: true, defaultBackupEligibility: true, defaultBackupState: true
       } });
       const staleEnrollment = (await post('/passkeys/options', {}, owner.cookie)).json();
       const staleRegistration = await register(staleEnrollment.options);
@@ -416,6 +452,13 @@ test('passkey step-up is verified, session-bound, short-lived and authorizes enr
       assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: freshOptions.challengeId, response: freshAssertion }, owner.cookie)).statusCode, 204);
       const second = await enroll(owner, 'Second passkey', {});
       assert.ok(second?.id);
+      const synced = (await database.pool.query<{ counter: string; device_type: string; backed_up: boolean; transports: string[] }>(
+        'select counter, device_type, backed_up, transports from passkey_credentials where id = $1', [second.id])).rows[0]!;
+      assert.equal(synced.device_type, 'multiDevice');
+      assert.equal(synced.backed_up, true);
+      assert.ok(synced.transports.every((transport) => ['usb', 'hybrid', 'internal'].includes(transport)));
+      const publicList = (await app.inject({ method: 'GET', url: '/api/v1/auth/passkeys', headers: { cookie: owner.cookie } })).json().passkeys;
+      assert.equal(publicList.find((entry: { id: string }) => entry.id === second.id)?.backedUp, true);
       assert.equal((await remove(second.id, {}, owner.cookie)).statusCode, 204);
       const expiredOptions = (await post('/passkeys/reauthentication/options', {}, owner.cookie)).json();
       await database.pool.query("update passkey_challenges set created_at = now() - interval '10 minutes', expires_at = now() - interval '1 second' where id = $1", [expiredOptions.challengeId]);
@@ -424,6 +467,11 @@ test('passkey step-up is verified, session-bound, short-lived and authorizes enr
       const removedAssertion = await authenticate(removedOptions.options);
       assert.equal((await remove(first.id, { currentPassword: password }, owner.cookie)).statusCode, 204);
       assert.equal((await post('/passkeys/reauthentication/complete', { challengeId: removedOptions.challengeId, response: removedAssertion }, owner.cookie)).statusCode, 400);
+      assert.equal((await database.pool.query('select id from passkey_credentials where user_id = $1', [owner.id])).rows.length, 0);
+      await cdp.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId });
+      const staleLogin = (await post('/passkeys/authentication/options', {})).json();
+      const staleAssertion = await authenticate(staleLogin.options);
+      assert.equal((await post('/passkeys/authentication/complete', { challengeId: staleLogin.challengeId, response: staleAssertion })).statusCode, 401);
       assert.equal((await database.pool.query('select id from passkey_credentials where user_id = $1', [owner.id])).rows.length, 0);
     } finally {
       await browser?.close();
