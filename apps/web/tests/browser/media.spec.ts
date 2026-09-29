@@ -34,7 +34,7 @@ test('message heights, galleries, native video, file cards, and composer staging
   await expect(page.locator('.cubic-message-attachment')).toHaveCount(3);
   await expect(page.locator('.cubic-media-video[controls][playsinline]')).toHaveCount(2);
   const controls = await page.locator('.composer').evaluate((node) => {
-    const children = [...node.children].filter((item) => !(item instanceof HTMLInputElement && item.type === 'file'));
+    const children = [...node.querySelectorAll(':scope > button, :scope > input:not([type="file"])')];
     return children.map((item) => {
       const rect = item.getBoundingClientRect();
       return { left: rect.left, right: rect.right, center: rect.top + rect.height / 2 };

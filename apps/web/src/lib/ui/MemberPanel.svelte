@@ -70,7 +70,7 @@
   .cubic-member-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 68px; padding: 12px 14px; border-bottom: 1px solid #232428; }
   .cubic-member-panel-head small { color: #949ba4; font-size: .6rem; letter-spacing: .08em; font-weight: 700; }
   .cubic-member-panel-head h2 { margin: 2px 0 0; color: #f2f3f5; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 165px; }
-  .cubic-member-panel-head button { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 4px; background: transparent; color: #b5bac1; cursor: pointer; }
+  .cubic-member-panel-head button { display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 4px; background: transparent; color: #b5bac1; cursor: pointer; }
   .cubic-member-panel-head button:hover { background: #2b2d31; }
   .cubic-member-panel-list { overflow-y: auto; min-height: 0; padding: 12px 8px; }
   .cubic-member-panel-count { margin: 0 7px 8px; color: #949ba4; font-size: .68rem; font-weight: 700; text-transform: uppercase; }

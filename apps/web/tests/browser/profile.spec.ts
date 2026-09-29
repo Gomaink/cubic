@@ -15,7 +15,8 @@ test.beforeEach(async ({ page, context, request }) => {
 test('member profile is read-only and closes back to the member panel', async ({ page }) => {
   await page.getByRole('button', { name: 'Members', exact: true }).click();
   const panel = page.getByRole('complementary', { name: 'Group members' });
-  await panel.getByRole('button', { name: 'Fixture DM, member, offline' }).click();
+  const member = panel.getByRole('button', { name: 'Fixture DM, member, offline' });
+  await member.click();
   const profile = page.locator('dialog.cubic-profile-dialog');
   await expect(profile).toBeVisible();
   await expect(profile.getByText('Fixture DM')).toBeVisible();
@@ -23,6 +24,12 @@ test('member profile is read-only and closes back to the member panel', async ({
   await expect(profile.getByRole('button', { name: 'Edit display name' })).toHaveCount(0);
   await profile.getByRole('button', { name: 'Close profile' }).click();
   await expect(panel).toBeVisible();
+  await expect(member).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(profile).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(profile).toHaveCount(0);
+  await expect(member).toBeFocused();
 });
 
 test('own profile opens Settings and edits display name without losing context', async ({ page }) => {

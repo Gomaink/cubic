@@ -50,10 +50,23 @@
   });
 
   function closeFromKeyboard(event: KeyboardEvent) {
-    if (event.key !== 'Escape') return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      ontoggle();
+      void tick().then(() => trigger?.focus());
+      return;
+    }
+    const buttons = Array.from(menu?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)') ?? []);
+    if (buttons.length === 0) return;
+    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    let next = current;
+    if (event.key === 'ArrowDown') next = current < 0 ? 0 : (current + 1) % buttons.length;
+    else if (event.key === 'ArrowUp') next = current < 0 ? buttons.length - 1 : (current - 1 + buttons.length) % buttons.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = buttons.length - 1;
+    else return;
     event.preventDefault();
-    ontoggle();
-    void tick().then(() => trigger?.focus());
+    buttons[next]?.focus();
   }
 
   function closeReactionPicker(event: KeyboardEvent) {

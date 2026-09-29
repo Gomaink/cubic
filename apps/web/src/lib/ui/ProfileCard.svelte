@@ -17,14 +17,18 @@
   let failedAvatarUrl = $state<string | null>(null);
 
   onMount(() => {
+    const previousFocus = document.activeElement;
     dialog.showModal();
     dialog.focus();
-    return () => { if (dialog.open) dialog.close(); };
+    return () => {
+      if (dialog.open) dialog.close();
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+    };
   });
 
 </script>
 
-<dialog bind:this={dialog} class="cubic-profile-dialog" aria-label={`${profile.displayName}'s profile`} onclose={onclose}>
+<dialog bind:this={dialog} class="cubic-profile-dialog" aria-label={`${profile.displayName}'s profile`} onclose={onclose} onkeydown={(event) => { if (event.key === 'Escape') event.stopPropagation(); }}>
   <header class="cubic-profile-head">
     <strong>USER PROFILE</strong>
     <button type="button" aria-label="Close profile" onclick={onclose}>×</button>
@@ -32,9 +36,9 @@
   <div class="cubic-profile-body">
     <div class="cubic-profile-avatar">
       {#if profile.avatarUrl && failedAvatarUrl !== profile.avatarUrl}
-        <img src={profile.avatarUrl} alt={`${profile.displayName}'s avatar`} onerror={() => failedAvatarUrl = profile.avatarUrl} />
+        <img src={profile.avatarUrl} alt="" onerror={() => failedAvatarUrl = profile.avatarUrl} />
       {:else}
-        <span aria-label={`${profile.displayName}'s initials`}>{profile.displayName.slice(0, 1).toUpperCase()}</span>
+        <span aria-hidden="true">{profile.displayName.slice(0, 1).toUpperCase()}</span>
       {/if}
     </div>
     <h2>{profile.displayName}</h2>
@@ -47,7 +51,7 @@
   .cubic-profile-dialog::backdrop { background: #000a; }
   .cubic-profile-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: #22242a; }
   .cubic-profile-head strong { font-size: .7rem; letter-spacing: .08em; }
-  .cubic-profile-head button { border: 0; background: transparent; color: #ddd; font-size: 1.5rem; cursor: pointer; }
+  .cubic-profile-head button { width: 44px; height: 44px; border: 0; background: transparent; color: #ddd; font-size: 1.5rem; cursor: pointer; }
   .cubic-profile-body { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 22px 18px; }
   .cubic-profile-avatar { display: grid; place-items: center; width: 88px; height: 88px; overflow: hidden; border-radius: 50%; background: #393b43; font-size: 2rem; }
   .cubic-profile-avatar img { width: 100%; height: 100%; object-fit: cover; }

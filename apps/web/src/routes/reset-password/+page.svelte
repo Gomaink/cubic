@@ -15,7 +15,11 @@
     event.preventDefault();
     if (!resetToken || resetStatus === 'submitting') return;
     error = '';
-    if (newPassword !== confirmPassword) { error = 'New passwords do not match.'; return; }
+    if (newPassword !== confirmPassword) {
+      error = 'New passwords do not match.';
+      (event.currentTarget as HTMLFormElement).querySelector<HTMLInputElement>('#cubic-reset-confirm-password')?.focus();
+      return;
+    }
     resetStatus = 'submitting';
     try {
       const response = await fetch('/api/v1/auth/password/reset', { method: 'POST', credentials: 'include',
@@ -32,7 +36,7 @@
 <main class="auth-shell">
   <section class="auth-panel">
     <a class="auth-brand" href="/"><img src="/images/cubic-w-nobg.png" alt="" /><span>Cubic</span></a>
-    <div class="auth-copy"><p class="eyebrow">ACCOUNT RECOVERY</p>
+    <div class="auth-copy" aria-live="polite"><p class="eyebrow">ACCOUNT RECOVERY</p>
       {#if resetStatus === 'changed'}<h1>Password changed.</h1><p>All previous sessions were signed out. Sign in with your new password.</p>
       {:else if resetStatus === 'expired'}<h1>Link expired.</h1><p>Request another reset link from the login page.</p>
       {:else if resetStatus === 'used'}<h1>Link already used.</h1><p>Request another reset link if you still need to change your password.</p>
@@ -43,8 +47,8 @@
     {#if resetStatus === 'ready' || resetStatus === 'submitting'}
       <form class="auth-form" onsubmit={submit}>
         <label><span>New password</span><input type="password" bind:value={newPassword} autocomplete="new-password" minlength="10" maxlength="128" required disabled={resetStatus === 'submitting'} /></label>
-        <label><span>Confirm new password</span><input type="password" bind:value={confirmPassword} autocomplete="new-password" maxlength="128" required disabled={resetStatus === 'submitting'} aria-invalid={error ? 'true' : undefined} /></label>
-        {#if error}<p class="form-error" role="alert">{error}</p>{/if}
+        <label><span>Confirm new password</span><input id="cubic-reset-confirm-password" type="password" bind:value={confirmPassword} autocomplete="new-password" maxlength="128" required disabled={resetStatus === 'submitting'} aria-invalid={error ? 'true' : undefined} aria-describedby={error ? 'cubic-reset-error' : undefined} /></label>
+        {#if error}<p id="cubic-reset-error" class="form-error" role="alert">{error}</p>{/if}
         <button class="button button-primary" type="submit" disabled={resetStatus === 'submitting'}>{resetStatus === 'submitting' ? 'Changing password…' : 'Reset password'}</button>
       </form>
     {/if}

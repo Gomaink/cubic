@@ -160,7 +160,7 @@
     {:else if supported === false}<p class="cubic-passkeys-help">This browser does not support passkey enrollment.</p>
     {:else if supported}<button bind:this={addButton} class="cubic-control cubic-control-secondary cubic-passkeys-add" type="button" disabled={busy} onclick={(event) => void open('add', null, event.currentTarget)}>Add passkey</button>{/if}
     {#if mode}
-      <form class="cubic-passkeys-confirm" onsubmit={submit}>
+      <form class="cubic-passkeys-confirm" onsubmit={submit} aria-describedby={error ? 'cubic-passkeys-error' : undefined}>
         <h4>{mode === 'add' ? 'Add passkey' : mode === 'rename' ? `Rename ${selected?.label ?? 'passkey'}` : `Remove ${selected?.label ?? 'passkey'}`}</h4>
         {#if mode === 'add' || mode === 'rename'}<label for="cubic-passkey-label">Passkey name</label><input id="cubic-passkey-label" bind:this={labelInput} bind:value={label} onkeydown={cancelOnEscape} maxlength="64" required disabled={busy} />{/if}
         {#if mode !== 'rename' && supported && passkeys.length > 0}
@@ -176,7 +176,7 @@
       </form>
     {/if}
   {/if}
-  {#if error}<p class="cubic-passkeys-error" role="alert">{error}</p>{/if}
+  {#if error}<p id="cubic-passkeys-error" class="cubic-passkeys-error" role="alert">{error}</p>{/if}
   {#if notice}<p class="cubic-passkeys-notice" role="status">{notice}</p>{/if}
 </section>
 
