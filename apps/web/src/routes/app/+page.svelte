@@ -168,7 +168,7 @@
   let groupRename = $state('');
   let avatarUploading = $state(false);
   let avatarError = $state('');
-  let avatarInput: HTMLInputElement | null = null;
+  let avatarInput = $state<HTMLInputElement | null>(null);
 
   type VoiceParticipantView = {
     identity: string;
@@ -195,13 +195,13 @@
   let voiceMuted = $state(false);
   let voiceError = $state('');
   let voiceRetryConversation = $state<any | null>(null);
-  let voiceAudioHost: HTMLDivElement | null = null;
+  let voiceAudioHost = $state<HTMLDivElement | null>(null);
 
   const MESSAGE_PAGE_SIZE = 50;
   const HISTORY_TOP_THRESHOLD = 120;
   const LATEST_THRESHOLD = 120;
 
-  let messagesViewport: HTMLDivElement | null = null;
+  let messagesViewport = $state<HTMLDivElement | null>(null);
   let historyCursor = $state<string | null>(null);
   let historyHasMore = $state(false);
   let historyLoading = $state(false);
@@ -300,7 +300,7 @@
   let focusedVideoIdentity = $state<string | null>(null);
   let focusedScreenShareIdentity = $state<string | null>(null);
   let screenShareFocusDismissed = false;
-  let videoStageElement: HTMLElement | null = null;
+  let videoStageElement = $state<HTMLElement | null>(null);
 
   type DirectCallWire = {
     id: string;
@@ -1594,7 +1594,7 @@
   const MAX_ATTACHMENTS_PER_MESSAGE = 10;
   const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
-  let attachmentInput: HTMLInputElement | null = null;
+  let attachmentInput = $state<HTMLInputElement | null>(null);
   let stagedAttachments = $state<StagedAttachment[]>([]);
   let stagedAttachmentConversationId = $state<string | null>(null);
   const attachmentUploadRequests = new Map<string, XMLHttpRequest>();
@@ -2166,6 +2166,16 @@
     newGroupMemberIds = newGroupMemberIds.includes(userId)
       ? newGroupMemberIds.filter((id) => id !== userId)
       : [...newGroupMemberIds, userId];
+  }
+
+  function focusDialog(node: HTMLElement) {
+    const previousFocus = document.activeElement;
+    node.focus();
+    return {
+      destroy() {
+        if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+      }
+    };
   }
 
   function openNewGroup() {
@@ -5687,11 +5697,19 @@
 
   {#if mediaPreflightKind}
     <div class="media-preflight-backdrop">
-      <section
+      <div
         class="media-preflight"
         role="dialog"
         aria-modal="true"
         aria-label={mediaPreflightKind === 'camera' ? 'Camera quality' : 'Go Live quality'}
+        tabindex="-1"
+        use:focusDialog
+        onkeydown={(event) => {
+          if (event.key === 'Escape') {
+            event.stopPropagation();
+            closeMediaPreflight();
+          }
+        }}
       >
         <header>
           <div>
@@ -5816,7 +5834,7 @@
                 : 'Turn on'}
           </button>
         </footer>
-      </section>
+      </div>
     </div>
   {/if}
 
@@ -5876,7 +5894,20 @@
 
   {#if newGroupOpen}
     <div class="modal-backdrop">
-      <section class="group-create-modal" role="dialog" aria-modal="true" aria-labelledby="new-group-title">
+      <div
+        class="group-create-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-group-title"
+        tabindex="-1"
+        use:focusDialog
+        onkeydown={(event) => {
+          if (event.key === 'Escape') {
+            event.stopPropagation();
+            newGroupOpen = false;
+          }
+        }}
+      >
         <div class="group-panel-head"><div><small>NEW</small><h2 id="new-group-title">Create group</h2></div><button class="icon-action" type="button" aria-label="Close" title="Close" onclick={() => newGroupOpen = false}><Icon name="x" size={18} /></button></div>
         <label for="new-group-name">Group name</label>
         <input id="new-group-name" bind:value={newGroupTitle} maxlength="96" placeholder="Weekend crew" />
@@ -5893,7 +5924,7 @@
         </div>
         {#if error}<div class="inline-error">{error}</div>{/if}
         <button class="primary-wide" onclick={createGroup} disabled={busy || !newGroupTitle.trim() || newGroupMemberIds.length === 0}>{busy ? 'Creating…' : `Create group (${newGroupMemberIds.length + 1})`}</button>
-      </section>
+      </div>
     </div>
   {/if}
 </main>

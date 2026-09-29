@@ -162,7 +162,13 @@ test('member ticket joins the selected voice room, keeps text usable, and leaves
   await dock.getByRole('button', { name: 'Undeafen audio' }).click();
   await expect(dock.getByRole('button', { name: 'Unmute microphone' })).toHaveAttribute('aria-pressed', 'true');
   await expect(dock).not.toContainText('The selected camera disconnected');
-  await dock.getByRole('button', { name: 'Turn camera on' }).click();
+  const cameraButton = dock.getByRole('button', { name: 'Turn camera on' });
+  await cameraButton.click();
+  await expect(page.getByRole('dialog', { name: 'Camera quality' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Camera quality' })).toHaveCount(0);
+  await expect(cameraButton).toBeFocused();
+  await cameraButton.click();
   await page.getByRole('dialog', { name: 'Camera quality' }).getByRole('button', { name: 'Turn on', exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as any).__cubicVoiceTest?.cameraStarts)).toBe(1);
   const stage = page.getByRole('region', { name: 'Server voice media' });

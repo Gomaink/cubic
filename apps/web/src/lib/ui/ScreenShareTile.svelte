@@ -15,7 +15,7 @@
     oncontextmenu?: (event: MouseEvent) => void;
   } = $props();
 
-  let videoElement: HTMLVideoElement | null = null;
+  let videoElement = $state<HTMLVideoElement | null>(null);
 
   $effect(() => {
     const currentTrack = track;

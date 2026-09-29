@@ -46,7 +46,9 @@ test('message heights, galleries, native video, file cards, and composer staging
   expect(Math.abs(controls[0].center - controls[1].center)).toBeLessThan(1);
   expect(Math.abs(controls[2].center - controls[1].center)).toBeLessThan(1);
 
-  await page.locator('input[type=file].cubic-attachment-input').setInputFiles(
+  const fileChooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Add attachment' }).click();
+  await (await fileChooser).setFiles(
     Array.from({ length: 10 }, (_, index) => ({ name: `upload-${index}.png`, mimeType: 'image/png', buffer: Buffer.from('fixture') }))
   );
   await expect(page.locator('.cubic-staged-attachment')).toHaveCount(10);
