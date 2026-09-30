@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { allowsDisplayCapture, allowsDisplayRequest, allowsPermission, classifyNavigation } from '../security.js';
+import { allowsDisplayCapture, allowsDisplayRequest, allowsNotifications, allowsPermission, classifyNavigation } from '../security.js';
 
 test('navigation uses exact HTTPS origin and blocks unsafe schemes', () => {
   for (const url of ['https://cubic.goma.ink', 'https://cubic.goma.ink/app']) {
@@ -88,6 +88,24 @@ test('display permission requires an exact Cubic main-frame origin and URL', () 
     assert.equal(allowsDisplayCapture(origin, invalidUrl, true), false, String(invalidUrl));
   }
   assert.equal(allowsDisplayCapture(origin, url, false), false);
+});
+
+test('Web notifications require the exact Cubic origin and main document', () => {
+  const origin = 'https://cubic.goma.ink';
+  const url = `${origin}/app`;
+  assert.equal(allowsNotifications(origin, url, true), true);
+  for (const invalidOrigin of [undefined, '', 'http://cubic.goma.ink',
+    'https://cubic.goma.ink:444', 'https://cubic.goma.ink.evil.example',
+    'https://evil.example', 'not a URL']) {
+    assert.equal(allowsNotifications(invalidOrigin, url, true), false, String(invalidOrigin));
+  }
+  for (const invalidUrl of [undefined, '', 'http://cubic.goma.ink/app',
+    'https://cubic.goma.ink:444/app', 'https://cubic.goma.ink.evil.example/app',
+    'https://evil.example/app', 'not a URL']) {
+    assert.equal(allowsNotifications(origin, invalidUrl, true), false, String(invalidUrl));
+  }
+  assert.equal(allowsNotifications(origin, url, false), false);
+  assert.equal(allowsPermission('notifications', url, true), false);
 });
 
 test('display request requires a live expected top frame, gesture, and video', () => {

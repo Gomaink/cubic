@@ -45,6 +45,16 @@ export function allowsDisplayCapture(
     requestingUrl !== undefined && classifyNavigation(requestingUrl) === 'internal';
 }
 
+/** Web notifications are eligible only from the current Cubic document. */
+export function allowsNotifications(
+  requestingOrigin: string | undefined,
+  requestingUrl: string | undefined,
+  isMainFrame: boolean
+): boolean {
+  return isMainFrame && requestingOrigin === CUBIC_ORIGIN &&
+    requestingUrl !== undefined && classifyNavigation(requestingUrl) === 'internal';
+}
+
 /** Facts from Electron's display request; frame identity is checked in main. */
 export function allowsDisplayRequest(
   securityOrigin: string | undefined,

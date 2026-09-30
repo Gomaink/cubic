@@ -1,8 +1,33 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, Menu, shell, Tray } from 'electron';
+import { fileURLToPath } from 'node:url';
 import { installDisplayCapture } from './display-capture.js';
-import { allowsDisplayCapture, allowsPermission, classifyNavigation, CUBIC_ORIGIN } from './security.js';
+import { allowsDisplayCapture, allowsNotifications, allowsPermission, classifyNavigation, CUBIC_ORIGIN } from './security.js';
 
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+const trayIcon = fileURLToPath(new URL('../../web/static/favicon.ico', import.meta.url));
+
+function openCubic(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    if (app.isReady()) createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray(): void {
+  if (tray) return;
+  tray = new Tray(trayIcon);
+  tray.setToolTip('Cubic');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open Cubic', click: openCubic },
+    { type: 'separator' },
+    { label: 'Quit Cubic', click: () => app.quit() }
+  ]));
+  tray.on('click', openCubic);
+}
 
 function openExternal(url: string): void {
   if (classifyNavigation(url) !== 'external') return;
@@ -45,20 +70,25 @@ function createWindow(): void {
         (!details.securityOrigin || details.securityOrigin === CUBIC_ORIGIN) &&
         allowsDisplayCapture(origin, details.requestingUrl, true);
     }
+    if (permission === 'notifications') {
+      return allowsNotifications(origin, details.requestingUrl, true);
+    }
     if (details.requestingUrl && classifyNavigation(details.requestingUrl) !== 'internal') return false;
     return allowsPermission(permission, origin, true, details.mediaType ? [details.mediaType] : undefined);
   });
   browserSession.setPermissionRequestHandler((requester, permission, callback, details) => {
     // PermissionRequest has no securityOrigin in Electron 44; derive it from
     // the document URL only after the exact-origin classifier accepts it.
-    const displayOrigin = 'securityOrigin' in details && details.securityOrigin
+    const requestOrigin = 'securityOrigin' in details && details.securityOrigin
       ? details.securityOrigin
       : classifyNavigation(details.requestingUrl) === 'internal' ? CUBIC_ORIGIN : undefined;
     let allowed = requester === contents && (permission === 'display-capture'
       ? process.platform === 'win32' &&
-        allowsDisplayCapture(displayOrigin, details.requestingUrl, details.isMainFrame)
-      : allowsPermission(permission, details.requestingUrl, details.isMainFrame,
-          'mediaTypes' in details ? details.mediaTypes : undefined));
+        allowsDisplayCapture(requestOrigin, details.requestingUrl, details.isMainFrame)
+      : permission === 'notifications'
+        ? allowsNotifications(requestOrigin, details.requestingUrl, details.isMainFrame)
+        : allowsPermission(permission, details.requestingUrl, details.isMainFrame,
+            'mediaTypes' in details ? details.mediaTypes : undefined));
     if ('securityOrigin' in details && details.securityOrigin &&
         classifyNavigation(details.securityOrigin) !== 'internal') allowed = false;
     callback(allowed);
@@ -107,9 +137,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.setName('Cubic');
   app.on('second-instance', () => {
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
+    openCubic();
   });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -117,5 +145,12 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
   });
-  void app.whenReady().then(createWindow).catch(() => app.quit());
+  app.on('before-quit', () => {
+    tray?.destroy();
+    tray = null;
+  });
+  void app.whenReady().then(() => {
+    createWindow();
+    createTray();
+  }).catch(() => app.quit());
 }
