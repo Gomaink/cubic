@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { allowsPermission, classifyNavigation } from '../security.js';
+import { allowsDisplayCapture, allowsDisplayRequest, allowsPermission, classifyNavigation } from '../security.js';
 
 test('navigation uses exact HTTPS origin and blocks unsafe schemes', () => {
   for (const url of ['https://cubic.goma.ink', 'https://cubic.goma.ink/app']) {
@@ -53,6 +53,7 @@ test('permissions require the main Cubic frame and a small capability set', () =
   assert.equal(allowsPermission('media', origin, true, undefined), false);
   assert.equal(allowsPermission('media', origin, true, ['unknown']), false);
   assert.equal(allowsPermission('media', origin, true, ['screen']), false);
+  assert.equal(allowsPermission('media', origin, true, ['audio', 'screen']), false);
   assert.equal(allowsPermission('media', origin, true, []), false);
   for (const permission of ['speaker-selection', 'clipboard-sanitized-write', 'fullscreen']) {
     assert.equal(allowsPermission(permission, origin, true), true, permission);
@@ -62,4 +63,42 @@ test('permissions require the main Cubic frame and a small capability set', () =
   }
   assert.equal(allowsPermission('media', origin, false, ['audio']), false);
   assert.equal(allowsPermission('media', 'https://evil.example/', true, ['audio']), false);
+  assert.equal(allowsPermission('media', 'https://cubic.goma.ink.evil.example/', true, ['video']), false);
+  assert.equal(allowsPermission('media', 'http://cubic.goma.ink/', true, ['audio']), false);
+  assert.equal(allowsPermission('media', 'not a URL', true, ['audio']), false);
+  for (const url of [origin, 'https://cubic.goma.ink.evil.example/', 'http://cubic.goma.ink/', 'https://evil.example/', 'not a URL']) {
+    assert.equal(allowsPermission('display-capture', url, true), false, url);
+  }
+  assert.equal(allowsPermission('display-capture', origin, false), false);
+  assert.equal(allowsPermission('speaker-selection', origin, false), false);
+  assert.equal(allowsPermission('speaker-selection', 'https://evil.example/', true), false);
+});
+
+test('display permission requires an exact Cubic main-frame origin and URL', () => {
+  const origin = 'https://cubic.goma.ink';
+  const url = `${origin}/app`;
+  assert.equal(allowsDisplayCapture(origin, url, true), true);
+  for (const invalidOrigin of [undefined, '', 'http://cubic.goma.ink',
+    'https://cubic.goma.ink:444', 'https://cubic.goma.ink.evil.example', 'https://evil.example', 'not a URL']) {
+    assert.equal(allowsDisplayCapture(invalidOrigin, url, true), false, String(invalidOrigin));
+  }
+  for (const invalidUrl of [undefined, '', 'http://cubic.goma.ink/app',
+    'https://cubic.goma.ink:444/app', 'https://cubic.goma.ink.evil.example/app',
+    'https://evil.example/app', 'not a URL']) {
+    assert.equal(allowsDisplayCapture(origin, invalidUrl, true), false, String(invalidUrl));
+  }
+  assert.equal(allowsDisplayCapture(origin, url, false), false);
+});
+
+test('display request requires a live expected top frame, gesture, and video', () => {
+  const origin = 'https://cubic.goma.ink';
+  const url = `${origin}/app`;
+  assert.equal(allowsDisplayRequest(origin, url, true, true, true), true);
+  assert.equal(allowsDisplayRequest(origin, url, true, false, true), false);
+  assert.equal(allowsDisplayRequest(origin, url, true, true, false), false);
+  assert.equal(allowsDisplayRequest(undefined, url, true, true, true), false);
+  assert.equal(allowsDisplayRequest('https://evil.example', url, true, true, true), false);
+  assert.equal(allowsDisplayRequest(origin, 'https://evil.example/app', true, true, true), false);
+  assert.equal(allowsDisplayRequest(origin, undefined, true, true, true), false);
+  assert.equal(allowsDisplayRequest(origin, url, false, true, true), false);
 });

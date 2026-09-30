@@ -34,3 +34,25 @@ export function allowsPermission(
     permission === 'clipboard-sanitized-write' ||
     permission === 'fullscreen';
 }
+
+/** Display capture has a separate, stricter grant path than camera/microphone. */
+export function allowsDisplayCapture(
+  requestingOrigin: string | undefined,
+  requestingUrl: string | undefined,
+  isMainFrame: boolean
+): boolean {
+  return isMainFrame && requestingOrigin === CUBIC_ORIGIN &&
+    requestingUrl !== undefined && classifyNavigation(requestingUrl) === 'internal';
+}
+
+/** Facts from Electron's display request; frame identity is checked in main. */
+export function allowsDisplayRequest(
+  securityOrigin: string | undefined,
+  frameUrl: string | undefined,
+  frameIsExpectedMain: boolean,
+  userGesture: boolean,
+  videoRequested: boolean
+): boolean {
+  return userGesture && videoRequested &&
+    allowsDisplayCapture(securityOrigin, frameUrl, frameIsExpectedMain);
+}

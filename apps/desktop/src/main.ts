@@ -1,5 +1,6 @@
 import { app, BrowserWindow, shell } from 'electron';
-import { allowsPermission, classifyNavigation, CUBIC_ORIGIN } from './security.js';
+import { installDisplayCapture } from './display-capture.js';
+import { allowsDisplayCapture, allowsPermission, classifyNavigation, CUBIC_ORIGIN } from './security.js';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -39,17 +40,30 @@ function createWindow(): void {
   browserSession.setPermissionCheckHandler((requester, permission, origin, details) => {
     if (requester !== contents || !details.isMainFrame) return false;
     if (details.securityOrigin && classifyNavigation(details.securityOrigin) !== 'internal') return false;
+    if (permission === 'display-capture') {
+      return process.platform === 'win32' &&
+        (!details.securityOrigin || details.securityOrigin === CUBIC_ORIGIN) &&
+        allowsDisplayCapture(origin, details.requestingUrl, true);
+    }
     if (details.requestingUrl && classifyNavigation(details.requestingUrl) !== 'internal') return false;
     return allowsPermission(permission, origin, true, details.mediaType ? [details.mediaType] : undefined);
   });
   browserSession.setPermissionRequestHandler((requester, permission, callback, details) => {
-    let allowed = requester === contents &&
-      allowsPermission(permission, details.requestingUrl, details.isMainFrame,
-        'mediaTypes' in details ? details.mediaTypes : undefined);
+    // PermissionRequest has no securityOrigin in Electron 44; derive it from
+    // the document URL only after the exact-origin classifier accepts it.
+    const displayOrigin = 'securityOrigin' in details && details.securityOrigin
+      ? details.securityOrigin
+      : classifyNavigation(details.requestingUrl) === 'internal' ? CUBIC_ORIGIN : undefined;
+    let allowed = requester === contents && (permission === 'display-capture'
+      ? process.platform === 'win32' &&
+        allowsDisplayCapture(displayOrigin, details.requestingUrl, details.isMainFrame)
+      : allowsPermission(permission, details.requestingUrl, details.isMainFrame,
+          'mediaTypes' in details ? details.mediaTypes : undefined));
     if ('securityOrigin' in details && details.securityOrigin &&
         classifyNavigation(details.securityOrigin) !== 'internal') allowed = false;
     callback(allowed);
   });
+  installDisplayCapture(window);
 
   const handleNavigation = (url: string, isMainFrame: boolean, preventDefault: () => void) => {
     if (classifyNavigation(url) === 'internal') return;
