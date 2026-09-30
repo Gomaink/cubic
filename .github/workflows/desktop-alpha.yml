@@ -1,0 +1,181 @@
+name: Desktop Alpha Distribution
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing annotated tag, for example v2.0.0-alpha.8'
+        required: true
+        type: string
+      publish:
+        description: 'Publish a signed Windows alpha release after approval'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-alpha-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - name: Require the protected release workflow branch
+        shell: bash
+        run: test "$GITHUB_REF" = refs/heads/refactor/v2
+
+      - name: Checkout the existing release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tagged source is on refactor/v2
+        id: source
+        shell: bash
+        env:
+          DESKTOP_RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$DESKTOP_RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]
+          test "$(git cat-file -t "refs/tags/$DESKTOP_RELEASE_TAG")" = tag
+          test "$(git rev-parse "refs/tags/$DESKTOP_RELEASE_TAG^{commit}")" = "$GITHUB_SHA"
+          git fetch origin refactor/v2
+          git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD
+          echo "commit=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Verify version and release configuration
+        shell: bash
+        env:
+          DESKTOP_RELEASE_TAG: ${{ inputs.tag }}
+        run: node apps/desktop/scripts/release-guard.mjs source "$DESKTOP_RELEASE_TAG"
+
+      - name: Check, test and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run check
+          npm test
+          npm run build
+          npm audit --omit=dev
+
+  publish:
+    if: ${{ inputs.publish }}
+    needs: validate
+    runs-on: windows-latest
+    environment: desktop-alpha-release
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout the validated release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Recheck the exact validated commit
+        shell: bash
+        env:
+          VALIDATED_COMMIT: ${{ needs.validate.outputs.commit }}
+        run: test "$(git rev-parse HEAD)" = "$VALIDATED_COMMIT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Require signing credentials
+        shell: bash
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          WIN_SIGNING_PUBLISHER: ${{ secrets.WIN_SIGNING_PUBLISHER }}
+          WIN_SIGNING_CERT_THUMBPRINT: ${{ secrets.WIN_SIGNING_CERT_THUMBPRINT }}
+        run: |
+          set -euo pipefail
+          test -n "$WIN_CSC_LINK"
+          test -n "$WIN_CSC_KEY_PASSWORD"
+          test -n "$WIN_SIGNING_PUBLISHER"
+          test -n "$WIN_SIGNING_CERT_THUMBPRINT"
+
+      - name: Package signed Windows x64 installer without publishing
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: npm run package:win --workspace @cubic/desktop
+
+      - name: Verify update assets and expected publisher
+        env:
+          WIN_SIGNING_PUBLISHER: ${{ secrets.WIN_SIGNING_PUBLISHER }}
+        run: npm run verify:release-artifacts --workspace @cubic/desktop
+
+      - name: Verify Authenticode signatures
+        shell: pwsh
+        env:
+          WIN_SIGNING_CERT_THUMBPRINT: ${{ secrets.WIN_SIGNING_CERT_THUMBPRINT }}
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $release = 'apps/desktop/release'
+          $files = @(
+            "$release/Cubic-Desktop-Setup-$version-win-x64.exe",
+            "$release/win-unpacked/Cubic.exe"
+          )
+          foreach ($file in $files) {
+            $signature = Get-AuthenticodeSignature $file
+            if ($signature.Status -ne 'Valid' -or
+                $signature.SignerCertificate.Thumbprint -ne $env:WIN_SIGNING_CERT_THUMBPRINT) {
+              throw 'Desktop signature or expected signer verification failed'
+            }
+          }
+
+      - name: Create release checksums
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $release = 'apps/desktop/release'
+          $installer = "Cubic-Desktop-Setup-$version-win-x64.exe"
+          $names = @($installer, "$installer.blockmap", 'alpha.yml')
+          $lines = foreach ($name in $names) {
+            $hash = (Get-FileHash -Algorithm SHA256 "$release/$name").Hash.ToLowerInvariant()
+            "$hash  $name"
+          }
+          [System.IO.File]::WriteAllLines("$release/SHA256SUMS.txt", $lines)
+
+      - name: Publish approved alpha release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DESKTOP_RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$DESKTOP_RELEASE_TAG" >/dev/null 2>&1; then
+            echo 'A release already exists for this tag' >&2
+            exit 1
+          fi
+          version="$(cat VERSION)"
+          release=apps/desktop/release
+          installer="Cubic-Desktop-Setup-${version}-win-x64.exe"
+          gh release create "$DESKTOP_RELEASE_TAG" \
+            "$release/$installer" "$release/$installer.blockmap" \
+            "$release/alpha.yml" "$release/SHA256SUMS.txt" \
+            --verify-tag --prerelease --title "Cubic Desktop $version (alpha)" \
+            --notes 'Windows x64 Desktop Preview. Requires completed physical smoke and signed-build approval.'

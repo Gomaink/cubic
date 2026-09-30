@@ -1,8 +1,8 @@
 # Cubic v2 roadmap
 
-**Status of this document: PLANNED work.** It does not describe features available today. The current documentation-sync checkpoint is **Alpha 11.8.5** on the `2.0.0-alpha.7` development line. For implemented capabilities see [README](README.md), [CHANGELOG](CHANGELOG.md) and [RELEASE_NOTES](RELEASE_NOTES.md). Exact scope and order can change before release.
+**Status of this document: PLANNED work.** It does not describe features available today. Desktop Preview preparation is at **Alpha 11.9.6** on the `2.0.0-alpha.7` development line; distribution and the accumulated Windows smoke are pending. For implemented capabilities see [README](README.md), [CHANGELOG](CHANGELOG.md) and [RELEASE_NOTES](RELEASE_NOTES.md). Exact scope and order can change before release.
 
-## 11.9 — Desktop Preview Foundation (planned)
+## 11.9 — Desktop Preview Foundation (in progress)
 
 Begin a secure Electron preview in parallel with the web app. This is not the production desktop hardening milestone; see Alpha 17 and [Product Direction](PRODUCT_DIRECTION.md).
 
@@ -59,7 +59,7 @@ Translation architecture and packs, locale formatting, language preference and R
 
 ## Alpha 17 — Desktop Production Hardening (planned)
 
-Electron **begins in 11.9**, not here. Alpha 17 covers signing, final update channels, deep links, tray/startup, installer polish, crash recovery and cross-platform packaging.
+Electron **begins in 11.9**, not here. Alpha 17 covers production signing and final update channels, deep links, tray/startup polish, installer polish, crash recovery and cross-platform packaging.
 
 ## Release path (planned)
 

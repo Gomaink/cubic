@@ -10,6 +10,7 @@ extraResources:
   - from: ../web/static/favicon.ico
     to: icons/favicon.ico
 win:
+  executableName: Cubic
   target:
     - target: nsis
       arch: [x64]
@@ -18,6 +19,8 @@ win:
 nsis:
   oneClick: true
   perMachine: false
+  buildUniversalInstaller: false
+  artifactName: Cubic-Desktop-Setup-${version}-win-x64.${ext}
 publish:
   provider: github
   owner: Gomaink
