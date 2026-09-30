@@ -7,6 +7,20 @@ publicly available.
 
 Source-code secrecy is not a security boundary.
 
+## Trust boundaries
+
+```text
+Browser -> operator HTTPS proxy / Cubic web -> Cubic API
+                                         API -> PostgreSQL and controlled media filesystem
+                                         API -> LiveKit administrative API
+Browser -------------------------------> LiveKit media transport (scoped capability)
+```
+
+The web service canonicalizes trusted forwarding data before the API uses it.
+PostgreSQL is the authority for account, session, membership, credential and
+message state. The filesystem holds media bytes but does not decide who may
+read them. LiveKit carries media and cannot authenticate a Cubic account.
+
 ## Primary assets
 
 - user accounts
@@ -20,6 +34,7 @@ Source-code secrecy is not a security boundary.
 - LiveKit capabilities
 - account recovery credentials
 - administrative capabilities
+- verified email, recovery tokens and passkey credentials
 
 ## Threat actors
 
@@ -63,7 +78,7 @@ it does not prevent XSS from issuing authenticated actions through the browser.
 An attacker who has already copied a raw cookie can continue acting while the
 session remains valid and active. Absolute expiry, idle expiry, server-side
 revocation and realtime disconnect bound or terminate that reuse; per-device
-management and broader credential rotation remain future controls.
+management is implemented; fully automatic periodic credential rotation is not.
 
 The architecture should minimize the ability to steal one credential and reuse
 it indefinitely from another device.
@@ -100,6 +115,13 @@ Particular attention is required for:
 
 Negative authorization tests are required.
 
+For server membership and invite transitions, the server row is locked before
+revalidating membership/link state. Post-commit room revocation removes users
+from text realtime rooms and known voice participants. A stale or copied invite
+link is not authorization once expired or revoked. These checks limit concurrent
+join/removal races; future role/override semantics require their own central
+permission evaluator.
+
 ## User-generated content / XSS
 
 Messages, names, bios, filenames, server names and future Markdown are
@@ -109,6 +131,37 @@ Raw HTML rendering is forbidden by default.
 
 Future rich-text/Markdown support requires sanitization and dedicated XSS
 tests.
+
+## Account email, recovery and WebAuthn
+
+Threats include account enumeration, intercepted recovery links, token replay,
+stale email authority, credential theft, client-supplied user identity, assertion
+replay and use of an old credential after deletion. Recovery requests return a
+generic result for syntactically valid identifiers and require a currently
+verified email. Email verification/change and password recovery have separate
+single-use, finite-lifetime SHA-256 token digests. Raw link secrets travel in
+fragments, are removed promptly from the browser URL and are not persisted as
+browser account credentials. Email change and recovery revoke sessions.
+
+Passkey enrollment requires a valid session, verified current email and password
+or recent passkey proof bound to the same session. Login is discoverable, but
+credential ID → owner resolution happens in PostgreSQL, never from client user
+claims. Enrollment, login and reauthentication use separate challenge purposes
+and appropriate user/session binding. Only challenge digests persist; expected
+origin/RP ID, user verification, signature and counter checks are performed by
+SimpleWebAuthn. A challenge is short lived, one use and transactionally
+consumed. Removed credentials are rejected on the next login. Private
+authenticator keys and biometric data remain on the authenticator.
+Successful passkey login creates a fresh Cubic session rather than promoting an
+existing session from a different account. Disabled accounts and accounts whose
+current email is unverified cannot authenticate with a passkey. Password change
+and recovery preserve independent passkey credentials; recovery revokes sessions
+and invalidates pending email-change authorization.
+
+Residual risk: endpoint compromise or a malicious browser extension can act
+within an existing session and interfere with native passkey UX. Chrome iOS
+with a third-party passkey provider has returned `NotAllowedError` before
+ceremony completion; the server must not relax verification to accommodate it.
 
 ## File uploads
 
@@ -124,6 +177,14 @@ Threats include:
 
 Uploads must be stored outside directly executable web roots and delivered
 through authorized routes where required.
+
+Current media handling sniffs bytes rather than trusting the client MIME type,
+sanitizes filenames, checks path containment and regular-file status without
+following symlinks, stages uploads before publication and reconciles stale
+files. Private attachments are checked against current conversation or channel
+access on delivery. Active or unknown formats are downloads rather than trusted
+inline HTML; unsafe PDF rendering is avoided. Server icons are decoded and
+normalized before publication.
 
 ### Attachment storage exhaustion
 
@@ -153,8 +214,8 @@ Controls:
 Residual risk: the free-space check is a final guard rather than a reservation,
 so simultaneous writes or unrelated processes can consume space after the
 check. The alpha stack's rate-limit counters are local to its single API
-process. Crashes can still create filesystem/database orphans; generalized
-reconciliation and a durable deletion queue are deferred to Slice 0A.4b.
+process. Cleanup and reconciliation reduce orphans, but cannot eliminate every
+filesystem or operator failure.
 
 ## Sessions
 
@@ -184,10 +245,10 @@ Current controls:
 
 New login and registration continue to issue a fresh server-generated token.
 Idle and absolute expiry retain their existing boundaries, and logout-all issues
-no replacement. Transparent periodic rotation is intentionally deferred: future
-password, recovery and MFA-sensitive flows should confirm credentials and perform
-atomic session replacement/revocation. Ordinary profile and server/channel
-changes do not rotate sessions.
+no replacement. Email change and password recovery revoke account sessions;
+passkey login creates a fresh canonical session. Transparent periodic rotation
+is intentionally deferred. Ordinary profile and server/channel changes do not
+rotate sessions.
 
 Required controls should include:
 
@@ -201,7 +262,10 @@ Required controls should include:
 - logout-all
 - fixation resistance
 
-CSRF risks must be reviewed for cookie-authenticated state-changing routes.
+Cookie-authenticated browser mutations require an exact configured Origin;
+Fetch Metadata may restrict requests further. SameSite=Lax and HttpOnly are
+additional boundaries, not a substitute for origin checks. CSP limits browser
+script injection impact but does not make hostile user content trusted.
 
 ## Realtime
 
@@ -300,6 +364,9 @@ Future permission tests must cover:
 - former members
 - banned users
 
+Future link previews require SSRF-resistant URL fetching, redirect and address
+validation, content limits and safe rendering. They are not implemented now.
+
 ## Dependencies and supply chain
 
 Use minimal dependencies.
@@ -344,7 +411,7 @@ are especially unsafe when the path length can differ.
 
 Controls:
 
-- Fastify is pinned to the audited 5.12.4 security release
+- Fastify remains on the audited 5.12.x security line
 - numeric and unrestricted proxy trust are rejected
 - operators must provide explicit trusted proxy CIDRs
 - the public web proxy discards forwarded identity from peers outside that

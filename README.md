@@ -1,177 +1,70 @@
 # Cubic
 
-Cubic is being rebuilt as a fast, lightweight and self-hosted messenger with a reactive web UI, group conversations, low-latency voice rooms and screen sharing.
+Cubic is an open-source, self-hosted realtime messenger for direct messages, groups and servers. It combines persistent text conversations with voice, video and screen sharing in a responsive web app.
 
-> **Current version:** `v2.0.0-alpha.2` — identity & security. This alpha is still not a feature-complete replacement for Cubic v1.
+**Status:** active alpha, not a stable v2 release. The release version is in [`VERSION`](VERSION); package metadata and the API runtime version are checked against it by the web unit suite. This documentation describes the implementation on the current v2 development line, not a promise of future features.
 
-## What alpha.2 adds
+## Available now
 
-- PostgreSQL-backed users, settings and revocable sessions.
-- Argon2id password hashing for all new passwords.
-- Seamless bcrypt verification/rehash for imported Cubic v1 accounts.
-- Register, login, logout and current-session API routes.
-- Server-authoritative authentication middleware.
-- HttpOnly, SameSite session cookies; only token digests are stored in PostgreSQL.
-- Global and authentication-specific Fastify rate limits.
-- Protected SvelteKit `/app` route and functional login/register screens.
-- Same-origin SvelteKit `/api/*` proxy so the browser does not need to know the API container address.
-- User settings API for theme, compact/reduced-motion preferences and future voice input/output volume.
-- Cubic v1 user/config importer.
+- Direct messages and groups, friend requests and blocks, replies, reactions, editing, deletion, attachments, cursor-paginated history and realtime delivery.
+- Servers with membership, text channels, categories, audio-only voice channels, server icons and shareable invite links. The existing targeted server invitations are also still implemented.
+- Direct calls and group voice, camera video, screen sharing, media preflight, device preferences and per-stream audio controls where the browser supports them.
+- Registration and password login; verified email and email change; password recovery for eligible accounts; passkey enrollment, login, management and reauthentication; revocable sessions.
+- Onyx web UI for desktop and mobile browsers, with keyboard and accessibility work completed in Alpha 11.8.2.
 
-## Stack
+This is an alpha. Advanced server roles, channel permission overrides, Discover, rich-text messaging, native desktop packaging and localization are **planned**, not available. See [`ROADMAP.md`](ROADMAP.md) and [`PRODUCT_DIRECTION.md`](PRODUCT_DIRECTION.md).
 
-- Node.js 24 LTS
-- TypeScript
-- Svelte 5 + SvelteKit
-- Fastify
-- PostgreSQL 18
-- Drizzle ORM / Drizzle Kit
-- Argon2id
-- Docker Compose
+## Architecture
 
-Socket.IO is now wired into the authenticated session boundary for realtime messaging. LiveKit is now wired into the authenticated conversation boundary for direct/group voice; camera and screen sharing arrive in alpha.6.
+- Node.js 24 / TypeScript, Svelte 5 / SvelteKit web, Fastify API.
+- PostgreSQL 18 with Drizzle versioned migrations.
+- Socket.IO for authenticated messaging and presence; self-hosted LiveKit for voice and media.
+- Docker Compose services for web, API, migrations, PostgreSQL and LiveKit. An operator-managed HTTPS reverse proxy such as Traefik fronts the web service.
+- Local controlled media storage with authenticated access to private files.
 
-## Repository layout
+Browser requests use the same-origin web `/api/*` proxy. The API is not host-published in the production Compose configuration. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for implementation detail.
 
-```text
-apps/
-  api/          Fastify API, auth, import tooling
-  web/          SvelteKit web application + same-origin API proxy
-packages/
-  database/     PostgreSQL + Drizzle schema
-  shared/       shared contracts/version metadata
-infra/docker/   production Dockerfiles
-docs/           architecture, security, roadmap and migration notes
-```
+## Security model
 
-## Quick start with Docker
+Cubic uses opaque server-side sessions in HttpOnly cookies, server-side authorization and scoped LiveKit capabilities. Passwords use Argon2id; imported legacy bcrypt hashes are upgraded after successful login. Email and recovery tokens are stored as digests, and passkeys use verified WebAuthn ceremonies. See [`SECURITY.md`](SECURITY.md), [`THREAT_MODEL.md`](THREAT_MODEL.md) and [`docs/SECURITY.md`](docs/SECURITY.md).
 
-```bash
-cp .env.example .env
-# Fill every blank required credential with a unique value.
-# Generate URL-safe values with: openssl rand -hex 32
-docker compose config -q
-docker compose up -d --build
-```
+Production mail delivery uses an **external** SMTP-compatible service; `MAIL_TRANSPORT=disabled` is the backward-compatible default. A working email verification or recovery email requires configured SMTP delivery. See [`.env.example`](.env.example) for the provider-neutral contract. Keep all credentials out of Git and logs.
 
-The default Compose configuration is production-oriented and fails during
-configuration when `POSTGRES_PASSWORD`, `LIVEKIT_API_KEY`,
-`LIVEKIT_API_SECRET` or `SESSION_COOKIE_SECURE` is missing or empty. The API
-also refuses to start in production unless `SESSION_COOKIE_SECURE=true`.
-Repository examples are public information and must never be reused as
-production credentials.
+## Development
 
-The one-shot `migrate` service applies the committed, versioned Drizzle
-migrations before the API starts.
+Requirements: Node.js 24, npm 11+, PostgreSQL 18 (or the development Compose database). Start from the repository root:
 
-Open:
-
-- Web: `http://localhost:3010`
-- API health through the web proxy: `http://localhost:3010/api/v1/health`
-
-Create an account at `/register`, then verify protected routing at `/app`.
-
-Check the stack:
-
-```bash
-docker compose ps
-curl http://localhost:3010/api/v1/health
-```
-
-## Cookies and HTTPS
-
-When Cubic is behind Traefik or another HTTPS reverse proxy, production must
-use:
-
-```env
-SESSION_COOKIE_SECURE=true
-TRUST_PROXY_CIDRS=<dedicated Cubic Docker network CIDR>
-```
-
-Determine the exact subnet attached to both `web` and `api` with
-`docker network inspect <project>_cubic`; do not substitute a broad private
-network range. Both services reject missing or malformed CIDRs at startup.
-The web service accepts incoming forwarded headers only from this boundary,
-canonicalizes them, and the API accepts the canonical headers only from the
-same boundary. Numeric proxy-hop trust is not supported.
-
-Do not expose a production login over plain HTTP. The API is not published to
-the host by the default Compose stack; browser traffic goes through the
-SvelteKit `/api/*` proxy. Plain-HTTP development is isolated in the explicitly
-opt-in development configuration described below.
-
-## Local development
-
-Requirements: Node.js 24, npm 11+, PostgreSQL 18 (or Docker for PostgreSQL).
-
-```bash
+```sh
 npm ci
-
-docker compose --env-file docker-compose.dev.env \
-  -f docker-compose.yml -f docker-compose.dev.yml up -d db
-export DATABASE_URL='postgresql://cubic:cubic-local-development-only-password@localhost:5432/cubic'
-export LIVEKIT_PUBLIC_URL='ws://localhost:7880'
-export LIVEKIT_API_KEY='CUBIC_LOCAL_DEVELOPMENT_KEY'
-export LIVEKIT_API_SECRET='cubic-local-development-only-secret-000000000000'
-export SESSION_COOKIE_SECURE='false'
-export TRUST_PROXY_CIDRS='127.0.0.1/32,::1/128'
-npm run db:migrate
-npm run dev
-```
-
-`docker-compose.dev.env` contains public, development-only credentials. It is
-loaded only when named with `--env-file`; never use it for an exposed or
-production deployment. To run the complete local HTTP stack, use the same
-command without the trailing `db` service name and add `--build` as needed.
-
-See [`docs/SECURITY.md`](docs/SECURITY.md) for credential generation and
-rotation guidance.
-
-## Useful commands
-
-```bash
-npm run dev
 npm run check
-npm run test
+npm test
 npm run build
-npm run db:generate
-npm run db:migrate
-npm run db:push
-npm run db:studio
 ```
 
-## Import Cubic v1 accounts
+`npm run dev` starts web and API after building shared packages; configure the required local environment first. The explicitly selected `docker-compose.dev.yml` and `docker-compose.dev.env` support a local HTTP stack. Never use development credentials or insecure cookies on an exposed deployment.
 
-Export the old Mongo collections first, then run:
+Database changes require a **new** versioned Drizzle migration. Do not use `db:push` on a persistent database. Test migrations on disposable PostgreSQL before a production rollout. The v1 import scope is documented in [`docs/MIGRATION_V1.md`](docs/MIGRATION_V1.md).
 
-```bash
-DATABASE_URL='postgresql://...' \
-  npm run import:v1-users -- --users users.json --configs userconfigs.json
+## Browser testing
+
+Playwright runs from `apps/web` so its local config and fixture server load correctly:
+
+```sh
+cd apps/web
+PLAYWRIGHT_BROWSERS_PATH=/tmp/cubic-playwright npx playwright test --workers=1
 ```
 
-Imported bcrypt password hashes are not decrypted. On the user's first successful login, Cubic verifies the existing bcrypt hash and replaces it with Argon2id.
+The repository's five default viewport projects use Chromium. Firefox and WebKit require explicit local browser setup; Playwright WebKit does not replace physical iPhone Safari testing. Browser fixtures do not access production accounts or media. See [`apps/web/tests/browser/README.md`](apps/web/tests/browser/README.md).
 
-See [`docs/MIGRATION_V1.md`](docs/MIGRATION_V1.md) for the supported alpha.2 migration scope.
+## Deployment
 
-## Legacy v1
+Review [`.env.example`](.env.example), supply private values through your operator environment, and verify `docker compose config --quiet`. Production requires HTTPS and secure session cookies. Build the `migrate` image explicitly and confirm it contains the expected migration before running the one-shot migration service; back up the database first. Build and update only the affected `api` or `web` services, without recreating PostgreSQL or LiveKit. Health is exposed through the web proxy at **`/api/v1/health`**.
 
-Keep the original implementation available through:
+The development line is `refactor/v2`; work is prepared on scoped `codex/...` branches. This README does not authorize a production migration or deployment.
 
-```text
-tag:    v1.0.0-legacy
-branch: legacy/v1
-```
+## Project documents
 
-v2 development lives on `refactor/v2` until it is ready to replace `main`.
-
-## Release plan
-
-See [`docs/ROADMAP.md`](docs/ROADMAP.md).
-
-## Current alpha milestone
-
-`v2.0.0-alpha.5` completes the voice layer: authenticated LiveKit rooms, direct-call ringing lifecycle, group voice, mute/deafen, persisted call history, incremental message history and the unified message stream. Alpha.6 moves to camera and screen sharing.
-
-## Current alpha milestone
-
-`v2.0.0-alpha.6.1` completes Cubic's media interaction layer on top of alpha.6: camera/Go Live preflight quality selection, explicit shared-audio capability handling, and independent remote screen-share volume controls.
+- [`CHANGELOG.md`](CHANGELOG.md) — implemented historical changes.
+- [`RELEASE_NOTES.md`](RELEASE_NOTES.md) — tester-facing current alpha summary.
+- [`ROADMAP.md`](ROADMAP.md) — planned work, separate from implemented behavior.
+- [`PRODUCT_DIRECTION.md`](PRODUCT_DIRECTION.md) — approved product and UX decisions.

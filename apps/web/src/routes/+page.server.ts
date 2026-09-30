@@ -18,8 +18,10 @@ export const load: PageServerLoad = async ({ fetch, request }) => {
       signal: AbortSignal.timeout(2_000)
     });
 
-    const health = (await response.json()) as ApiHealth;
-    return { apiReachable: response.ok, health, user: await userPromise };
+    const result = (await response.json()) as Partial<ApiHealth>;
+    const health = response.ok && typeof result.version === 'string' && result.version.length > 0
+      ? result as ApiHealth : null;
+    return { apiReachable: health !== null, health, user: await userPromise };
   } catch {
     return {
       apiReachable: false,

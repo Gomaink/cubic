@@ -10,7 +10,7 @@
 6. **Stateless app processes where practical.** Ephemeral distributed state can move to Redis later.
 7. **TLS terminates at the reverse proxy.** Cubic serves plain HTTP inside the trusted container network.
 
-## Alpha.2 runtime
+## Foundation runtime (historical Alpha 2 view)
 
 ```text
 Browser
@@ -34,7 +34,9 @@ PostgreSQL 18
   sessions
 ```
 
-The SvelteKit proxy deliberately keeps API calls same-origin in the browser. The API remains independently reachable for health checks and future native/API clients.
+The SvelteKit proxy deliberately keeps API calls same-origin in the browser. The
+API is reachable on the private service network; the production Compose stack
+does not publish its port to the host.
 
 Forwarded identity crosses two explicit checks. The web proxy accepts edge
 forwarding only from operator-configured CIDRs and replaces incoming forwarding
@@ -59,7 +61,7 @@ protected request
 ```
 
 
-## Alpha.3 realtime runtime
+## Realtime runtime (introduced in Alpha 3)
 
 ```text
 Browser
@@ -83,15 +85,15 @@ The API is not published on a host port in the production Compose topology. Brow
 
 On mobile browser resume (`pageshow`, focus, visibility and online transitions), the client reconnects when necessary and refreshes social/conversation state plus the active history to close any suspension gap.
 
-## Planned realtime/media runtime
+## Current realtime/media boundary
 
 ```text
 Browser
-  |-- HTTPS / WebSocket --> Cubic API (messages, typing, presence, permissions)
+  |-- HTTPS / WebSocket --> Cubic web proxy --> API (messages, presence, authorization)
   |
   `-- WebRTC -----------> LiveKit SFU (voice, camera, screen share)
                               |
-                              `-- TURN / ICE path
+                              `-- ICE/TURN path when configured
 ```
 
 ## Core data model progression
@@ -176,3 +178,21 @@ and evicts sessions that have lost authorization. Signed LiveKit webhooks feed a
 bounded in-memory occupancy view, delivered only to authenticated server members
 over a focused Socket.IO subscription. Occupancy is not persisted; separate
 client instances may each connect, while one client keeps one voice context.
+
+## Current account, media and browser boundaries
+
+Alpha 11 adds private account-security state, verified email and change,
+password recovery, active-session management and passkeys. Email verification,
+change and reset tokens have separate digest-only PostgreSQL records. WebAuthn
+credential rows store public material and metadata; enrollment/reauthentication
+challenges bind to the current user/session, while discoverable-login challenges
+have no user until a verified credential identifies its owner. All successful
+logins create the same Cubic server session.
+
+Attachment staging/publication, authorized delivery, deletion queue and bounded
+reconciliation share the controlled media filesystem. The browser's messaging
+and Socket.IO path remains eager; the LiveKit browser client is dynamically
+loaded only when voice/media needs it. That split does not change LiveKit room
+authorization or incoming-call signaling. For security guarantees and residual
+risks see [../SECURITY.md](../SECURITY.md) and
+[../THREAT_MODEL.md](../THREAT_MODEL.md).
