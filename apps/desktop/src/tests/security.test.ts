@@ -22,6 +22,29 @@ test('navigation uses exact HTTPS origin and blocks unsafe schemes', () => {
   }
 });
 
+test('account routes and their same-origin redirects stay in the Cubic window', () => {
+  const routes = [
+    '/', '/login', '/app', '/verify-email', '/reset-password', '/invite',
+    '/forgot-password', '/register'
+  ];
+  for (const route of routes) {
+    assert.equal(classifyNavigation(new URL(route, 'https://cubic.goma.ink').href), 'internal', route);
+  }
+  for (const target of [
+    'https://cubic.goma.ink/login?returnTo=invite',
+    'https://cubic.goma.ink/invite#invitation',
+    'https://cubic.goma.ink/app'
+  ]) {
+    // will-frame-navigate and will-redirect use this same classifier.
+    assert.equal(classifyNavigation(target), 'internal', target);
+  }
+  assert.equal(classifyNavigation('https://github.com/'), 'external');
+  assert.notEqual(classifyNavigation('https://cubic.goma.ink.evil.example/login'), 'internal');
+  for (const target of ['javascript:location.href="/login"', 'data:text/html,login', 'file:///login']) {
+    assert.equal(classifyNavigation(target), 'blocked', target);
+  }
+});
+
 test('permissions require the main Cubic frame and a small capability set', () => {
   const origin = 'https://cubic.goma.ink/app';
   assert.equal(allowsPermission('media', origin, true, ['audio']), true);
