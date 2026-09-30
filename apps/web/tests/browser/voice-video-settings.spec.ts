@@ -8,8 +8,8 @@ const artifacts = '/tmp/cubic-alpha11-slice6';
 test.beforeEach(async ({ page, context, request }) => {
   await request.post(`${fixture}/__test/reset`);
   await context.addCookies([{ name: 'cubic_session', value: 'browser-fixture', domain: '127.0.0.1', path: '/' }]);
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator.mediaDevices, 'enumerateDevices', {
+  await context.addInitScript(() => {
+    Object.defineProperty(MediaDevices.prototype, 'enumerateDevices', {
       configurable: true,
       value: async () => [
         { kind: 'audioinput', deviceId: 'fixture-mic', groupId: 'fixture', label: 'Fixture microphone' },
@@ -33,7 +33,14 @@ test('Voice & Video saves browser-local choices and keeps the conversation', asy
   await expect(settings.getByRole('combobox', { name: 'Microphone' })).toBeEnabled();
   await settings.getByRole('combobox', { name: 'Microphone' }).selectOption('fixture-mic');
   await settings.getByRole('combobox', { name: 'Camera', exact: true }).selectOption('fixture-camera');
-  await settings.getByRole('combobox', { name: 'Output device' }).selectOption('fixture-speaker');
+  const outputDevice = settings.getByRole('combobox', { name: 'Output device' });
+  const audioOutputSupported = await page.evaluate(() => 'setSinkId' in HTMLMediaElement.prototype);
+  if (audioOutputSupported) {
+    await outputDevice.selectOption('fixture-speaker');
+  } else {
+    await expect(outputDevice).toBeDisabled();
+    await expect(outputDevice).toContainText('Browser default · selection unsupported');
+  }
   await expect(settings.getByText('This choice will apply when you next use voice or video.')).toBeVisible();
   await settings.getByRole('button', { name: /Smooth.*720p/ }).first().click();
   await expect(settings.getByRole('button', { name: /Smooth.*720p/ }).first()).toHaveAttribute('aria-pressed', 'true');
@@ -49,7 +56,7 @@ test('Voice & Video saves browser-local choices and keeps the conversation', asy
     quality: localStorage.getItem('cubic.cameraQuality'),
     share: localStorage.getItem('cubic.screenShareQuality'),
     processing: localStorage.getItem('cubic.browserVoiceProcessing')
-  }))).toEqual({ mic: 'fixture-mic', camera: 'fixture-camera', speaker: 'fixture-speaker', quality: 'smooth', share: 'motion', processing: 'false' });
+  }))).toEqual({ mic: 'fixture-mic', camera: 'fixture-camera', speaker: audioOutputSupported ? 'fixture-speaker' : null, quality: 'smooth', share: 'motion', processing: 'false' });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await settings.locator('.cubic-user-settings-content').evaluate((node) => { node.scrollTop = 0; });
   await page.screenshot({ path: `${artifacts}/${testInfo.project.name}-voice-video-settings.png` });
@@ -60,7 +67,7 @@ test('Voice & Video saves browser-local choices and keeps the conversation', asy
   await voiceNav.click();
   await expect(settings.getByRole('combobox', { name: 'Microphone' })).toHaveValue('fixture-mic');
   await expect(settings.getByRole('combobox', { name: 'Camera', exact: true })).toHaveValue('fixture-camera');
-  await expect(settings.getByRole('combobox', { name: 'Output device' })).toHaveValue('fixture-speaker');
+  await expect(settings.getByRole('combobox', { name: 'Output device' })).toHaveValue(audioOutputSupported ? 'fixture-speaker' : '');
   await expect(settings.getByRole('button', { name: /Smooth.*720p/ }).first()).toHaveAttribute('aria-pressed', 'true');
   await expect(settings.getByRole('button', { name: /Motion.*720p/ })).toHaveAttribute('aria-pressed', 'true');
   await expect(settings.getByRole('checkbox', { name: /Browser voice processing/ })).not.toBeChecked();

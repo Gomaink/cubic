@@ -79,6 +79,13 @@ test('cancellation and unsupported WebAuthn leave password login available', asy
     Object.defineProperty(navigator, 'credentials', { value: { get: async () => { throw new DOMException('Canceled', 'NotAllowedError'); } } });
   });
   await page.goto('http://localhost:3197/login');
+  if (!await page.evaluate(() => typeof PublicKeyCredential === 'function')) {
+    await expect(page.getByRole('button', { name: 'Sign in with passkey' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Log in' })).toBeVisible();
+    expect(completionRequests).toBe(0);
+    expect((await page.request.get('http://localhost:3197/api/v1/auth/me')).status()).toBe(401);
+    return;
+  }
   await page.getByRole('button', { name: 'Sign in with passkey' }).click();
   await expect(page.getByRole('status')).toContainText('Passkey prompt closed or unavailable. Try again or use your password.');
   await expect(page.getByRole('alert')).toHaveCount(0);
