@@ -1,0 +1,18 @@
+{
+  "name": "@cubic/desktop",
+  "version": "2.0.0-alpha.7",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "start": "electron dist/main.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "electron": "44.5.1",
+    "typescript": "^6.0.3"
+  }
+}

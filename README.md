@@ -14,6 +14,19 @@ Cubic is an open-source, self-hosted realtime messenger for direct messages, gro
 
 This is an alpha. Advanced server roles, channel permission overrides, Discover, rich-text messaging, native desktop packaging and localization are **planned**, not available. See [`ROADMAP.md`](ROADMAP.md) and [`PRODUCT_DIRECTION.md`](PRODUCT_DIRECTION.md).
 
+## Desktop Preview foundation
+
+`apps/desktop` contains a secure Electron shell that loads the existing production web app at `https://cubic.goma.ink`. It is source for an early Windows x64 preview, **not** a packaged installer or a tested Windows release. The browser renderer continues to use the existing Web/API/Socket.IO/LiveKit paths:
+
+```text
+Electron main process → sandboxed BrowserWindow → https://cubic.goma.ink
+                                              → existing Web/API/Socket.IO/LiveKit
+```
+
+The remote page has no Node integration, preload bridge or generic IPC. The shell keeps navigation on the exact Cubic HTTPS origin, sends external HTTP(S) links to the system browser and denies other schemes. Browser permissions are limited to the current Cubic main frame and necessary media/basic browser capabilities; screen capture and unrelated privileges remain denied pending later desktop media work. Chromium's persistent session holds the ordinary Cubic HttpOnly cookie; the shell never reads or copies it. TLS verification and web CSP remain intact.
+
+From the repository root, `npm run check`, `npm test` and `npm run build` include the desktop workspace. `npm run desktop:dev` compiles and opens the shell on a machine with a GUI. This slice does not add an updater, installer or bundled renderer. See [`apps/desktop/README.md`](apps/desktop/README.md) for the boundary and Windows smoke plan.
+
 ## Architecture
 
 - Node.js 24 / TypeScript, Svelte 5 / SvelteKit web, Fastify API.
