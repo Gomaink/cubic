@@ -76,7 +76,7 @@ test('owner creates a text channel, messages with an attachment, and returns to 
   await page.getByPlaceholder('Message…').fill('Channel hello');
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect(page.getByText('Channel hello')).toBeVisible();
-  await page.locator('.cubic-attachment-input').setInputFiles({ name: 'channel.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') });
+  await page.locator('.cubic-attachment-input').setInputFiles({ name: 'channel.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64') });
   await expect(page.getByText('channel.png')).toBeVisible();
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect(page.locator('.cubic-message-attachments img[alt="channel.png"]')).toBeVisible();

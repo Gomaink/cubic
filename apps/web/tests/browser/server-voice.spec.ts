@@ -206,6 +206,14 @@ test('member ticket joins the selected voice room, keeps text usable, and leaves
   await page.keyboard.press('Escape');
   await expect(volume).toHaveCount(0);
   await expect(remoteShare).toBeFocused();
+  await page.keyboard.press('ContextMenu');
+  await expect(volume).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(remoteShare).toBeFocused();
+  await remoteShare.click({ button: 'right' });
+  await expect(volume).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(remoteShare).toBeFocused();
   await page.evaluate(() => (window as any).__cubicVoiceTest.removeRemoteMedia());
   await expect(stage).not.toContainText('Remote member');
   await stage.getByRole('button', { name: 'Minimize media stage' }).click();

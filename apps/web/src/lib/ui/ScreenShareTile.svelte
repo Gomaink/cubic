@@ -29,6 +29,20 @@
       } catch {}
     };
   });
+
+  function openContextMenuFromKeyboard(event: KeyboardEvent) {
+    if (!oncontextmenu || (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey))) return;
+    if (!(event.currentTarget instanceof HTMLButtonElement)) return;
+    event.preventDefault();
+    const button = event.currentTarget;
+    const bounds = button.getBoundingClientRect();
+    button.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: bounds.left + bounds.width / 2,
+      clientY: bounds.top + bounds.height / 2
+    }));
+  }
 </script>
 
 <button
@@ -39,6 +53,7 @@
   title={`${focused ? 'Unfocus' : 'Focus'} ${name}'s screen share`}
   onclick={onclick}
   oncontextmenu={oncontextmenu}
+  onkeydown={openContextMenuFromKeyboard}
 >
   {#if track}
     <video bind:this={videoElement} autoplay playsinline muted={local}></video>

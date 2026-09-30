@@ -10,7 +10,7 @@ const user = { id: 'fixture-user', username: 'tester', displayName: 'Tester', av
 const peer = { id: 'fixture-peer', username: 'peer', displayName: 'Fixture DM', avatarUrl: null };
 const dm = '11111111-1111-4111-8111-111111111111';
 const group = '22222222-2222-4222-8222-222222222222';
-const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64');
 const fixtureIconWebp = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#f25252' } }).webp().toBuffer();
 const animatedGif = Buffer.from('47494638396101000100800000000000ffffff21f90400000000002c000000000100010000020244010021f90400000000002c00000000010001000002024c01003b', 'hex');
 let messages;

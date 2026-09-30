@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
 
 const fixture = 'http://127.0.0.1:3198';
@@ -155,30 +156,10 @@ test('slow images reserve height and broken images keep a usable fallback', asyn
 });
 
 test('native video decodes and plays an authenticated URL', async ({ page, request }) => {
-  // Generate a small real WebM in Chromium, avoiding external media downloads.
-  const bytes = await page.evaluate(async () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = 32;
-    const stream = canvas.captureStream(10);
-    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-    const chunks: Blob[] = [];
-    const recorded = new Promise<Blob>((resolve) => {
-      recorder.ondataavailable = (event) => chunks.push(event.data);
-      recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
-    });
-    recorder.start();
-    const context = canvas.getContext('2d')!;
-    for (let index = 0; index < 5; index++) {
-      context.fillStyle = index % 2 ? '#5865f2' : '#111214';
-      context.fillRect(0, 0, 32, 32);
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    recorder.stop();
-    const blob = await recorded;
-    stream.getTracks().forEach((track) => track.stop());
-    return [...new Uint8Array(await blob.arrayBuffer())];
-  });
-  await request.post(`${fixture}/__test/video`, { data: Buffer.from(bytes) });
+  // This tiny real WebM plays in Chromium, Firefox, and WebKit. WebKit does not
+  // expose MediaRecorder, so generating the fixture inside the page would skip playback.
+  const bytes = await readFile(new URL('./fixtures/native-video.webm', import.meta.url));
+  await request.post(`${fixture}/__test/video`, { data: bytes });
   const video = page.locator('.cubic-media-video').first();
   await video.scrollIntoViewIfNeeded();
   await video.evaluate(async (node: HTMLVideoElement) => {

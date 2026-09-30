@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { closeServerSettings, openMessages, openServerSettings, openServers } from './navigation';
 
-const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64');
 
 test.beforeEach(async ({ page, context, request }) => {
   await request.post('http://127.0.0.1:3198/__test/reset');
