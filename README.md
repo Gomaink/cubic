@@ -23,9 +23,9 @@ Electron main process → sandboxed BrowserWindow → https://cubic.goma.ink
                                               → existing Web/API/Socket.IO/LiveKit
 ```
 
-The remote page has no Node integration, preload bridge or generic IPC. The shell keeps navigation on the exact Cubic HTTPS origin, sends external HTTP(S) links to the system browser and denies other schemes. Browser permissions are limited to the current Cubic main frame and necessary media/basic browser capabilities; screen capture and unrelated privileges remain denied pending later desktop media work. Chromium's persistent session holds the ordinary Cubic HttpOnly cookie; the shell never reads or copies it. TLS verification and web CSP remain intact.
+The remote page has no Node integration, preload bridge or generic IPC. The shell keeps navigation on the exact Cubic HTTPS origin, sends external HTTP(S) links to the system browser and denies other schemes. Browser permissions are limited to the current Cubic main frame and necessary capabilities; Windows screen capture uses an explicit main-process source picker. Chromium's persistent session holds the ordinary Cubic HttpOnly cookie; the shell never reads or copies it. TLS verification and web CSP remain intact.
 
-From the repository root, `npm run check`, `npm test` and `npm run build` include the desktop workspace. `npm run desktop:dev` compiles and opens the shell on a machine with a GUI. This slice does not add an updater, installer or bundled renderer. See [`apps/desktop/README.md`](apps/desktop/README.md) for the boundary and Windows smoke plan.
+From the repository root, `npm run check`, `npm test` and `npm run build` include the desktop workspace. `npm run desktop:dev` compiles and opens the shell on a machine with a GUI. The desktop workspace now contains a main-process auto-update foundation and a signed NSIS packaging configuration; no certificate, installer, release or Windows smoke has been completed. See [`apps/desktop/README.md`](apps/desktop/README.md) for the boundary and release prerequisites.
 
 ## Architecture
 

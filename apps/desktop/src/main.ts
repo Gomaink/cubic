@@ -1,11 +1,24 @@
 import { app, BrowserWindow, Menu, shell, Tray } from 'electron';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { installDisplayCapture } from './display-capture.js';
 import { allowsDisplayCapture, allowsNotifications, allowsPermission, classifyNavigation, CUBIC_ORIGIN } from './security.js';
+import { updateMenuAction, type UpdateState } from './update-policy.js';
+import { createUpdateController } from './updates.js';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
-const trayIcon = fileURLToPath(new URL('../../web/static/favicon.ico', import.meta.url));
+const trayIcon = app.isPackaged
+  ? join(process.resourcesPath, 'icons', 'favicon.ico')
+  : fileURLToPath(new URL('../../web/static/favicon.ico', import.meta.url));
+let updateState: UpdateState = 'idle';
+let updaterActive = false;
+
+const updates = createUpdateController((state, active) => {
+  updateState = state;
+  updaterActive = active;
+  refreshTrayMenu();
+});
 
 function openCubic(): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -21,12 +34,23 @@ function createTray(): void {
   if (tray) return;
   tray = new Tray(trayIcon);
   tray.setToolTip('Cubic');
+  refreshTrayMenu();
+  tray.on('click', openCubic);
+}
+
+function refreshTrayMenu(): void {
+  if (!tray) return;
+  const updateAction = updateMenuAction(updateState, updaterActive);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open Cubic', click: openCubic },
+    { label: updateAction.label, enabled: updateAction.enabled,
+      click: () => {
+        if (updateAction.action === 'check') updates.check();
+        if (updateAction.action === 'install') updates.restartToUpdate();
+      } },
     { type: 'separator' },
     { label: 'Quit Cubic', click: () => app.quit() }
   ]));
-  tray.on('click', openCubic);
 }
 
 function openExternal(url: string): void {
@@ -146,11 +170,13 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform !== 'darwin') app.quit();
   });
   app.on('before-quit', () => {
+    updates.dispose();
     tray?.destroy();
     tray = null;
   });
   void app.whenReady().then(() => {
     createWindow();
     createTray();
+    updates.start();
   }).catch(() => app.quit());
 }

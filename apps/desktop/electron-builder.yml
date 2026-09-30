@@ -1,0 +1,27 @@
+appId: ink.goma.cubic.preview
+productName: Cubic
+directories:
+  output: release
+files:
+  - dist/**
+  - '!dist/tests/**'
+  - package.json
+extraResources:
+  - from: ../web/static/favicon.ico
+    to: icons/favicon.ico
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: ../web/static/favicon.ico
+  verifyUpdateCodeSignature: true
+nsis:
+  oneClick: true
+  perMachine: false
+publish:
+  provider: github
+  owner: Gomaink
+  repo: cubic
+  channel: alpha
+  releaseType: prerelease
+forceCodeSigning: true

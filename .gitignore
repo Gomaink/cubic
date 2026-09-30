@@ -4,6 +4,9 @@ node_modules/
 # Build output
 dist/
 build/
+apps/desktop/release/
+*.pfx
+*.p12
 .svelte-kit/
 
 # Environment
