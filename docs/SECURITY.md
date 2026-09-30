@@ -1,5 +1,9 @@
 # Cubic v2 security model
 
+This document covers operator and historical identity details. The current
+implemented control summary is in [../SECURITY.md](../SECURITY.md), with
+residual risks in [../THREAT_MODEL.md](../THREAT_MODEL.md).
+
 ## Identity boundary
 
 Cubic v1 frequently accepted user IDs supplied by the browser. v2 treats that as untrusted input.
@@ -15,7 +19,7 @@ HttpOnly cookie
     -> request.auth.user
 ```
 
-Future message, group and call writes must use `request.auth.user.id`. A `senderId` supplied in JSON must never become an authorization source.
+Message, group, server and call writes use the resolved authenticated identity. A `senderId` supplied in JSON must never become an authorization source.
 
 ## Passwords
 
@@ -29,7 +33,8 @@ Cubic v1 used bcryptjs. During migration, an imported bcrypt hash remains valid 
 - Database value: SHA-256 digest of the token, never the raw token.
 - Cookie: HttpOnly, SameSite=Lax, path `/`.
 - `Secure`: configurable because LAN alpha testing may use HTTP; it must be enabled behind production HTTPS.
-- Expiration: configurable, default 30 days.
+- Expiration: configurable absolute expiry (default 30 days) plus independent finite idle expiry.
+- Active-session listing and revocation are available to the authenticated owner.
 - Logout deletes the current server-side session.
 - Disabled users cannot resolve new or existing sessions.
 
@@ -165,5 +170,6 @@ remaining work on later intervals.
 The minimum-free-space check uses filesystem statistics from the attachment
 directory itself and reserves enough capacity for one maximum-size upload. It
 is deliberately a last-resort guard, not a perfect concurrent disk reservation.
-Crash-safe generalized orphan reconciliation and a durable deletion queue are
-deferred to the next storage-hardening slice.
+The current implementation also runs bounded reconciliation for media/DB
+orphans and uses a durable deletion queue for attachment cleanup. These controls
+reduce leftovers after crashes; operators still need filesystem monitoring.

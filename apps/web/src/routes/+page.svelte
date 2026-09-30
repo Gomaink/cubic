@@ -6,7 +6,7 @@
   <title>Cubic v2 — Realtime messenger</title>
   <meta
     name="description"
-    content="Cubic is a lightweight self-hosted messenger being rebuilt for groups, voice rooms and screen sharing."
+    content="Cubic is a self-hosted messenger for conversations, communities, voice and video."
   />
 </svelte:head>
 
@@ -28,11 +28,11 @@
   </nav>
 
   <section class="hero hero-alpha2">
-    <p class="eyebrow">v2.0.0-alpha.3 · conversation engine</p>
-    <h1>Your conversations are now live.</h1>
+    <p class="eyebrow">{data.health ? `v${data.health.version}` : 'Cubic early access'} · self-hosted messenger</p>
+    <h1>Your space to talk, together.</h1>
     <p class="lead">
-      Cubic now has a server-authoritative social graph, canonical direct messages,
-      persistent history and authenticated realtime delivery between devices.
+      Keep your conversations and communities on infrastructure you control.
+      Message friends, join server channels, and move into voice or video when words are not enough.
     </p>
 
     <div class="hero-actions">
@@ -47,44 +47,50 @@
     <div class="status-card" class:online={data.apiReachable}>
       <span class="status-dot" aria-hidden="true"></span>
       <div>
-        <strong>{data.apiReachable ? 'Conversation engine online' : 'Web online · API unavailable'}</strong>
+        <strong>{data.apiReachable ? 'Cubic is available' : 'Messaging is temporarily unavailable'}</strong>
         <span>
-          {#if data.health}
-            API {data.health.version} · PostgreSQL {data.health.database} · auth {data.health.auth ?? 'starting'}
-          {:else}
-            Start the API and PostgreSQL to complete the stack.
-          {/if}
+          {data.apiReachable ? 'Open the app to start a conversation.' : 'Please try again in a moment.'}
         </span>
       </div>
     </div>
   </section>
 
-  <section class="feature-grid" aria-label="Alpha 3 capabilities">
+  <section class="feature-grid" aria-label="What you can do with Cubic">
     <article class="feature-card">
       <span class="feature-index">01</span>
-      <h2>Social graph</h2>
-      <p>Search, friend requests, friendships and blocks now run on server-authoritative identity.</p>
+      <h2>Messaging</h2>
+      <p>Direct messages and groups with replies, reactions, attachments and history that stays with you.</p>
     </article>
     <article class="feature-card">
       <span class="feature-index">02</span>
-      <h2>Canonical direct messages</h2>
-      <p>Each pair of users shares one direct conversation with membership-based authorization and durable history.</p>
+      <h2>Servers</h2>
+      <p>Bring people together in text and voice channels, manage members and share invite links.</p>
     </article>
     <article class="feature-card">
       <span class="feature-index">03</span>
-      <h2>Authenticated realtime</h2>
-      <p>Socket.IO resolves the existing server session and delivers new messages instantly to conversation members.</p>
+      <h2>Voice &amp; media</h2>
+      <p>Talk, turn on your camera or share your screen. Choose media settings that work for your device.</p>
     </article>
     <article class="feature-card">
       <span class="feature-index">04</span>
-      <h2>Mobile-resilient UI</h2>
-      <p>The messenger resynchronizes after mobile tab suspension and keeps landing/auth pages independently scrollable.</p>
+      <h2>Account security</h2>
+      <p>Manage sessions, verify or change your email, recover your password and use passkeys.</p>
+    </article>
+    <article class="feature-card">
+      <span class="feature-index">05</span>
+      <h2>Across your browsers</h2>
+      <p>A responsive web experience for desktop and mobile, with your conversations kept in sync.</p>
+    </article>
+    <article class="feature-card">
+      <span class="feature-index">06</span>
+      <h2>Self-hosted</h2>
+      <p>Run Cubic on your own infrastructure and keep control of your service and data.</p>
     </article>
   </section>
 
   <section class="next next-wide">
-    <p class="eyebrow">Next milestone</p>
-    <h2>alpha.4 — groups & permissions</h2>
-    <p>Group creation, membership management, roles, permissions, invites and the first group-ready media boundary.</p>
+    <p class="eyebrow">Early access</p>
+    <h2>Built for real conversations. Still in alpha.</h2>
+    <p>Cubic is actively evolving. Browser and device capabilities can vary, especially for calls, screen sharing and passkeys.</p>
   </section>
 </main>

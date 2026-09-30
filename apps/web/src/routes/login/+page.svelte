@@ -124,8 +124,8 @@
     <p class="auth-switch">New to Cubic? <a href={data.continueInvite ? '/register?returnTo=invite' : '/register'}>Create an account</a>.</p>
   </section>
   <aside class="auth-aside" aria-hidden="true">
-    <span>alpha.2</span>
-    <strong>Identity first.<br />Messages next.</strong>
+    <span>Cubic</span>
+    <strong>Your conversations.<br />Your space.</strong>
   </aside>
 </main>
 
