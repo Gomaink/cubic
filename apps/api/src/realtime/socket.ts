@@ -9,6 +9,7 @@ import {
   resolveConversationAccess,
   resolveConversationMembership
 } from '../authorization/conversations.js';
+import { getEffectiveChannelPermissionsBatch, hasChannelPermission, requireChannelPermission } from '../authorization/channel-permissions.js';
 import type { SessionIdentity, SessionService } from '../security/session.js';
 import { createTrustedProxyCheck } from '../config/proxy.js';
 import { SessionSocketRegistry } from './session-sockets.js';
@@ -368,7 +369,9 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
           ownedFanout.activeRead = read;
           try {
             const memberships = await options.database.pool.query<{ conversation_id: string }>(
-              'select conversation_id from conversation_members where user_id = $1',
+              `select cm.conversation_id from conversation_members cm
+                 join conversations c on c.id = cm.conversation_id and c.kind in ('direct', 'group')
+                where cm.user_id = $1`,
               [userId]
             );
             if (version === ownedFanout.version && presence.status(userId) === currentStatus) {
@@ -650,18 +653,32 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
           eq(conversationMembers.userId, identity.userId),
           inArray(conversations.kind, ['direct', 'group'])
         ));
-      const channels = await options.database.pool.query<{ conversation_id: string }>(
-        `select channel.conversation_id
+      const channels = await options.database.pool.query<{ id: string; server_id: string; conversation_id: string }>(
+        `select channel.id, channel.server_id, channel.conversation_id
            from server_members member
            join server_text_channels channel on channel.server_id = member.server_id
            join conversations c on c.id = channel.conversation_id and c.kind = 'server_text'
           where member.user_id = $1`,
         [identity.userId]
       );
+      const channelsByServer = new Map<string, typeof channels.rows>();
+      for (const channel of channels.rows) {
+        const rows = channelsByServer.get(channel.server_id) ?? [];
+        rows.push(channel);
+        channelsByServer.set(channel.server_id, rows);
+      }
+      const visibleChannelIds = new Set<string>();
+      for (const [serverId, rows] of channelsByServer) {
+        const masks = await getEffectiveChannelPermissionsBatch(options.database.pool, serverId, identity.userId, 'text', rows.map((row) => row.id));
+        for (const row of rows) {
+          const mask = masks?.get(row.id);
+          if (mask !== undefined && hasChannelPermission(mask, 'VIEW_CHANNEL')) visibleChannelIds.add(row.conversation_id);
+        }
+      }
 
       const conversationIds = new Set([
         ...memberships.map((membership) => membership.conversationId),
-        ...channels.rows.map((channel) => channel.conversation_id)
+        ...visibleChannelIds
       ]);
       for (const conversationId of conversationIds) {
         if (initialAdmission.invalidFor(conversationId)) continue;
@@ -753,7 +770,13 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
           socket.leave(room);
           return acknowledge?.({ ok: false });
         }
-        acknowledge?.({ ok: true, presence: options.serverVoice.snapshot(parsed.data.serverId) });
+        const snapshot = options.serverVoice.snapshot(parsed.data.serverId);
+        const masks = await getEffectiveChannelPermissionsBatch(options.database.pool, parsed.data.serverId,
+          identity.userId, 'voice', snapshot.map((event) => event.channelId));
+        acknowledge?.({ ok: true, presence: snapshot.filter((event) => {
+          const mask = masks?.get(event.channelId);
+          return mask !== undefined && hasChannelPermission(mask, 'VIEW_CHANNEL');
+        }) });
       } catch {
         if (socket.connected) acknowledge?.({ ok: false });
       } finally {
@@ -778,7 +801,9 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
       if (!admission) return acknowledge?.({ ok: false });
       try {
         const members = await options.database.pool.query<{ user_id: string }>(
-          'select user_id from conversation_members where conversation_id = $1',
+          `select cm.user_id from conversation_members cm
+             join conversations c on c.id = cm.conversation_id and c.kind in ('direct', 'group')
+            where cm.conversation_id = $1`,
           [parsed.data.conversationId]
         );
         if (!members.rows.some((member) => member.user_id === identity.userId) ||
@@ -1005,20 +1030,40 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     );
   });
 
+  const emitAuthorizedConversationEvent = async (conversationId: string, name: string, payload: unknown) => {
+    const channel = await options.database.pool.query<{ id: string | null; server_id: string | null; kind: string }>(
+      `select channel.id, channel.server_id, conversation.kind from conversations conversation
+         left join server_text_channels channel on channel.conversation_id = conversation.id
+        where conversation.id = $1`, [conversationId]);
+    if (!channel.rows[0]) return;
+    if (channel.rows[0].kind !== 'server_text') { io.to(conversationRoom(conversationId)).emit(name, payload); return; }
+    if (!channel.rows[0].id || !channel.rows[0].server_id) return;
+    const room = conversationRoom(conversationId);
+    const sockets = [...io.sockets.sockets.values()].filter((socket) => socket.rooms.has(room));
+    const allowed = new Map<string, boolean>();
+    for (const socket of sockets) {
+      const identity = (socket.data as { identity?: SocketSessionIdentity }).identity;
+      if (!identity) continue;
+      if (!allowed.has(identity.userId)) allowed.set(identity.userId, Boolean(await requireChannelPermission(
+        options.database.pool, channel.rows[0].server_id, identity.userId, 'text', channel.rows[0].id, 'VIEW_CHANNEL')));
+      if (allowed.get(identity.userId)) socket.emit(name, payload);
+      else socket.leave(room);
+    }
+  };
   const unsubscribeMessage = options.events.onMessageCreated((event) => {
-    io.to(conversationRoom(event.conversationId)).emit('message:created', event.message);
+    void emitAuthorizedConversationEvent(event.conversationId, 'message:created', event.message).catch(() => {});
   });
 
   const unsubscribeMessageUpdated = options.events.onMessageUpdated((event) => {
-    io.to(conversationRoom(event.conversationId)).emit('message:updated', event.message);
+    void emitAuthorizedConversationEvent(event.conversationId, 'message:updated', event.message).catch(() => {});
   });
 
   const unsubscribeMessageDeleted = options.events.onMessageDeleted((event) => {
-    io.to(conversationRoom(event.conversationId)).emit('message:deleted', event.message);
+    void emitAuthorizedConversationEvent(event.conversationId, 'message:deleted', event.message).catch(() => {});
   });
 
   const unsubscribeMessageReactionsChanged = options.events.onMessageReactionsChanged((event) => {
-    io.to(conversationRoom(event.conversationId)).emit('message:reactions', event);
+    void emitAuthorizedConversationEvent(event.conversationId, 'message:reactions', event).catch(() => {});
   });
 
   const unsubscribeOpened = options.events.onConversationOpened((event) => {
@@ -1075,7 +1120,18 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
   });
 
   const unsubscribeServerVoicePresence = options.events.onServerVoicePresence((event) => {
-    io.to(serverVoicePresenceRoom(event.serverId)).emit('server:voice:presence', event);
+    void (async () => {
+      const room = serverVoicePresenceRoom(event.serverId);
+      const sockets = [...io.sockets.sockets.values()].filter((socket) => socket.rooms.has(room));
+      const allowed = new Map<string, boolean>();
+      for (const socket of sockets) {
+        const identity = (socket.data as { identity?: SocketSessionIdentity }).identity;
+        if (!identity) continue;
+        if (!allowed.has(identity.userId)) allowed.set(identity.userId, Boolean(await requireChannelPermission(
+          options.database.pool, event.serverId, identity.userId, 'voice', event.channelId, 'VIEW_CHANNEL')));
+        if (allowed.get(identity.userId)) socket.emit('server:voice:presence', event);
+      }
+    })().catch(() => {});
   });
 
   const unsubscribeServerMemberRemoved = options.events.onServerMemberRemoved((event) => {
@@ -1104,7 +1160,9 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
           let rooms: string[] = [];
           try {
             const memberships = await options.database.pool.query<{ conversation_id: string }>(
-              'select conversation_id from conversation_members where user_id = $1', [event.userId]
+              `select cm.conversation_id from conversation_members cm
+                 join conversations c on c.id = cm.conversation_id and c.kind in ('direct', 'group')
+                where cm.user_id = $1`, [event.userId]
             );
             rooms = memberships.rows.map((row) => row.conversation_id);
           } catch {

@@ -10,6 +10,8 @@ import {
 const conversationId = '20000000-0000-4000-8000-000000000001';
 const actorId = '10000000-0000-4000-8000-000000000001';
 const peerId = '10000000-0000-4000-8000-000000000002';
+const serverId = '30000000-0000-4000-8000-000000000001';
+const channelId = '40000000-0000-4000-8000-000000000001';
 
 class AuthorizationDatabase {
   membership: { kind: 'direct' | 'group'; role: string } | null = null;
@@ -36,10 +38,21 @@ class AuthorizationDatabase {
       }
 
       if (normalized.includes("c.kind = 'server_text'")) {
-        const rows = params[0] === conversationId && params[1] === actorId &&
-          this.channelMember && this.channelLinked
-          ? [{ conversation_id: conversationId, server_id: '30000000-0000-4000-8000-000000000001' }]
+        const rows = params[0] === conversationId && this.channelLinked
+          ? [{ conversation_id: conversationId, server_id: serverId, channel_id: channelId }]
           : [];
+        return { rows, rowCount: rows.length };
+      }
+
+      if (normalized.includes('from servers s') && normalized.includes('join server_members m')) {
+        const rows = this.channelMember && params[0] === serverId && params[1] === actorId
+          ? [{ owner_user_id: peerId, permissions_mask: '8001', highest_position: 0 }] : [];
+        return { rows, rowCount: rows.length };
+      }
+
+      if (normalized.includes('from server_text_channels channel')) {
+        const rows = params[0] === serverId && params[1] === actorId
+          ? [{ channel_id: channelId, role_id: null, member_user_id: null, allow_mask: null, deny_mask: null }] : [];
         return { rows, rowCount: rows.length };
       }
 
@@ -125,7 +138,8 @@ test('server text access requires a linked channel and current server membership
       membership: {
         conversationId,
         kind: 'server_text',
-        serverId: '30000000-0000-4000-8000-000000000001'
+        serverId,
+        channelId
       }
     }
   );

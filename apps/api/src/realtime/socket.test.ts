@@ -258,10 +258,12 @@ class RealtimeSessionRepository implements SessionRepository {
 }
 
 class RealtimeDatabase {
+  readonly channelServerId = '30000000-0000-4000-8000-000000000001';
   readonly selectResults: any[][] = [];
   readonly conversationMemberships = new Map<string, Set<string>>();
   readonly serverChannelMemberships = new Map<string, Set<string>>();
   readonly voiceServerMemberships = new Map<string, Set<string>>();
+  readonly hiddenChannels = new Set<string>();
   voiceMembershipReadGate: ((rows: any[]) => Promise<void>) | null = null;
   readonly directPairs = new Map<string, { lowId: string; highId: string }>();
   readonly blockedConversations = new Set<string>();
@@ -328,16 +330,16 @@ class RealtimeDatabase {
         await this.voiceMembershipReadGate?.(rows);
         return { rows, rowCount: rows.length };
       }
-      if (normalized === 'select conversation_id from conversation_members where user_id = $1') {
+      if (normalized.includes('select cm.conversation_id from conversation_members cm') && normalized.includes('where cm.user_id = $1')) {
         if (this.failPresenceReads) throw new Error('temporary database failure');
         const rows = [...this.conversationMemberships]
-          .filter(([, members]) => members.has(params[0]))
+          .filter(([id, members]) => members.has(params[0]) && !this.serverChannelMemberships.has(id))
           .map(([id]) => ({ conversation_id: id }));
         return { rows, rowCount: rows.length };
       }
-      if (normalized === 'select user_id from conversation_members where conversation_id = $1') {
+      if (normalized.includes('select cm.user_id from conversation_members cm') && normalized.includes('where cm.conversation_id = $1')) {
         if (this.failPresenceReads) throw new Error('temporary database failure');
-        const rows = [...(this.conversationMemberships.get(params[0]) ?? [])]
+        const rows = [...(!this.serverChannelMemberships.has(params[0]) ? this.conversationMemberships.get(params[0]) ?? [] : [])]
           .map((userId) => ({ user_id: userId }));
         await this.presenceSnapshotReadGate?.(rows);
         return { rows, rowCount: rows.length };
@@ -345,7 +347,33 @@ class RealtimeDatabase {
       if (normalized.includes('from server_members member join server_text_channels channel')) {
         const rows = [...this.serverChannelMemberships]
           .filter(([, members]) => members.has(params[0]))
-          .map(([id]) => ({ conversation_id: id }));
+          .map(([id]) => ({ id, server_id: this.channelServerId, conversation_id: id }));
+        return { rows, rowCount: rows.length };
+      }
+      if (normalized.includes('from servers s') && normalized.includes('join server_members m')) {
+        const member = params[0] === this.channelServerId
+          ? [...this.serverChannelMemberships.values()].some((members) => members.has(params[1]))
+          : this.voiceServerMemberships.get(params[0])?.has(params[1]);
+        const rows = member ? [{ owner_user_id: randomUUID(), permissions_mask: '8001', highest_position: 0 }] : [];
+        return { rows, rowCount: rows.length };
+      }
+      if (normalized.includes('from server_text_channels channel') && normalized.includes('left join server_channel_overrides')) {
+        const rows = (params[2] as string[]).map((id) => ({ channel_id: id,
+          role_id: null,
+          member_user_id: this.hiddenChannels.has(`${id}:${params[1]}`) ? params[1] : null,
+          allow_mask: null, deny_mask: this.hiddenChannels.has(`${id}:${params[1]}`) ? '4096' : null }));
+        return { rows, rowCount: rows.length };
+      }
+      if (normalized.includes('from server_voice_channels channel') && normalized.includes('left join server_channel_overrides')) {
+        const rows = (params[2] as string[]).map((id) => ({ channel_id: id, role_id: null,
+          member_user_id: this.hiddenChannels.has(`${id}:${params[1]}`) ? params[1] : null,
+          allow_mask: null, deny_mask: this.hiddenChannels.has(`${id}:${params[1]}`) ? '4096' : null }));
+        return { rows, rowCount: rows.length };
+      }
+      if (normalized.includes('from conversations conversation') && normalized.includes('left join server_text_channels channel')) {
+        const isServer = this.serverChannelMemberships.has(params[0]);
+        const rows = [{ id: isServer ? params[0] : null,
+          server_id: isServer ? this.channelServerId : null, kind: isServer ? 'server_text' : 'group' }];
         return { rows, rowCount: rows.length };
       }
       if (normalized.includes("c.kind in ('direct', 'group')")) {
@@ -363,7 +391,8 @@ class RealtimeDatabase {
       }
       if (normalized.includes('join server_text_channels channel on channel.conversation_id = c.id')) {
         const member = this.serverChannelMemberships.get(params[0])?.has(params[1]);
-        const rows = member ? [{ conversation_id: params[0], server_id: randomUUID() }] : [];
+        const rows = this.serverChannelMemberships.has(params[0])
+          ? [{ conversation_id: params[0], server_id: this.channelServerId, channel_id: params[0] }] : [];
         await this.membershipReadGate?.(rows);
         return { rows, rowCount: rows.length };
       }
@@ -1097,6 +1126,46 @@ test('server text channels admit current members through the existing room path 
   assert.equal(harness.database.callStatuses.size, 0);
 });
 
+test('hidden server text channels reject auto-join and explicit join, and stale rooms receive no later messages', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const channelId = randomUUID(), memberId = randomUUID();
+  const session = harness.repository.add('hidden-channel-member', memberId);
+  harness.database.serverChannelMemberships.set(channelId, new Set([memberId]));
+  harness.database.hiddenChannels.add(`${channelId}:${memberId}`);
+  const socket = await connectClient(harness, 'hidden-channel-member');
+  context.after(() => socket.close());
+  assert.equal(serverSocketIsInRoom(harness, session.session.id, channelId), false);
+  assert.deepEqual(await socketAck(socket, 'conversation:join', { conversationId: channelId }),
+    { ok: false, error: 'Conversation not found.' });
+  harness.database.hiddenChannels.delete(`${channelId}:${memberId}`);
+  assert.deepEqual(await socketAck(socket, 'conversation:join', { conversationId: channelId }), { ok: true });
+  assert.equal(serverSocketIsInRoom(harness, session.session.id, channelId), true);
+  harness.database.hiddenChannels.add(`${channelId}:${memberId}`);
+  const peerId = randomUUID();
+  harness.database.conversationMemberships.set(channelId, new Set([memberId, peerId]));
+  assert.deepEqual(await socketAck(socket, 'presence:snapshot', { conversationId: channelId }), { ok: false });
+  let presenceLeaked = false;
+  socket.on('presence:changed', () => { presenceLeaked = true; });
+  harness.repository.add('hidden-peer', peerId);
+  const peer = await connectClient(harness, 'hidden-peer');
+  context.after(() => peer.close());
+  await delay(20);
+  assert.equal(presenceLeaked, false);
+  let profileLeaked = false;
+  socket.on('profile:changed', () => { profileLeaked = true; });
+  harness.events.emitProfileChanged({ userId: peerId, displayName: 'Peer', avatarUrl: null });
+  await delay(20);
+  assert.equal(profileLeaked, false);
+  let received = false;
+  socket.on('message:created', () => { received = true; });
+  harness.events.emitMessageCreated({ conversationId: channelId,
+    message: { id: randomUUID(), conversationId: channelId } as never });
+  await delay(30);
+  assert.equal(received, false);
+  assert.equal(serverSocketIsInRoom(harness, session.session.id, channelId), false);
+});
+
 test('server membership addition admits channel rooms and leave revokes joined and in-flight channel admissions', async (context) => {
   const harness = await startRealtimeHarness();
   context.after(() => closeRealtimeHarness(harness));
@@ -1243,6 +1312,13 @@ test('server voice presence subscription is member-scoped and removal cancels in
   const published = waitForEvent(member, 'server:voice:presence');
   harness.events.emitServerVoicePresence({ serverId, channelId, occupants: [{ userId: memberId, displayName: 'Member' }] });
   await published;
+  harness.database.hiddenChannels.add(`${channelId}:${memberId}`);
+  assert.deepEqual(await socketAck(member, 'server:voice:subscribe', { serverId }), { ok: true, presence: [] });
+  let hiddenPresenceDelivered = false;
+  member.on('server:voice:presence', () => { hiddenPresenceDelivered = true; });
+  harness.events.emitServerVoicePresence({ serverId, channelId, occupants: [] });
+  await delay(30);
+  assert.equal(hiddenPresenceDelivered, false);
   const removed = waitForEvent(member, 'server:removed');
   harness.database.voiceServerMemberships.get(serverId)!.delete(memberId);
   harness.events.emitServerMemberRemoved({ serverId, userId: memberId });

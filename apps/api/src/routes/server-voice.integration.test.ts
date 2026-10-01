@@ -104,6 +104,27 @@ test('server voice management, mixed order, admission and member revocation use 
       assert.equal(ticketResponse.statusCode, 200, ticketResponse.body);
       const claims = await new TokenVerifier(apiKey, apiSecret).verify(ticketResponse.json().token);
       assert.equal(claims.video?.room, serverVoiceRoomName(channel.id));
+      const overrideId = randomUUID();
+      await pool.query(`insert into server_channel_overrides(id,server_id,voice_channel_id,member_user_id,deny)
+        values($1,$2,$3,$4,256)`, [overrideId, serverId, channel.id, memberId]);
+      assert.equal((await send('GET', `${base}/voice-channels`, 'member')).json().channels.length, 2);
+      assert.equal((await send('POST', tokenRoute, 'member')).statusCode, 404);
+      await pool.query('update server_channel_overrides set deny=4096 where id=$1', [overrideId]);
+      assert.equal((await send('GET', `${base}/voice-channels`, 'member')).json().channels
+        .some((item: { id: string }) => item.id === channel.id), false);
+      assert.equal((await send('POST', tokenRoute, 'member')).statusCode, 404);
+      assert.equal((await send('POST', tokenRoute, 'owner')).statusCode, 200);
+      await pool.query('update server_channel_overrides set deny=3584 where id=$1', [overrideId]);
+      const listenOnly = await send('POST', tokenRoute, 'member');
+      assert.equal(listenOnly.statusCode, 200, listenOnly.body);
+      const listenOnlyClaims = await new TokenVerifier(apiKey, apiSecret).verify(listenOnly.json().token);
+      assert.equal(listenOnlyClaims.video?.canPublish, false);
+      assert.deepEqual(listenOnlyClaims.video?.canPublishSources ?? [], []);
+      await pool.query('update server_channel_overrides set deny=3072 where id=$1', [overrideId]);
+      const micOnly = await send('POST', tokenRoute, 'member');
+      const micOnlyClaims = await new TokenVerifier(apiKey, apiSecret).verify(micOnly.json().token);
+      assert.deepEqual(micOnlyClaims.video?.canPublishSources, ['microphone']);
+      await pool.query('delete from server_channel_overrides where id=$1', [overrideId]);
       participants.set(serverVoiceRoomName(channel.id), [{ identity: claims.sub!, attributes: {
         cubicUserId: memberId, cubicServerVoiceChannelId: channel.id
       } }]);

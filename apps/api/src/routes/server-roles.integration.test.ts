@@ -96,7 +96,7 @@ test('role model enforces default, hierarchy, assignment boundaries, cascades, a
       assert.deepEqual(Object.keys(roles.json().roles[0]).sort(), ['id', 'isDefault', 'name', 'permissions', 'position', 'serverId']);
       assert.deepEqual(roles.json().roles[0].permissions, []);
       assert.deepEqual(roles.json().roles.at(-1).permissions,
-        ['VIEW_SERVER', 'SEND_MESSAGES', 'CONNECT', 'SPEAK', 'VIDEO', 'SCREEN_SHARE']);
+        ['VIEW_SERVER', 'SEND_MESSAGES', 'CONNECT', 'SPEAK', 'VIDEO', 'SCREEN_SHARE', 'VIEW_CHANNEL']);
       const memberUrl = `${url}/members/${member}/roles`;
       assert.equal((await app.inject({ method: 'GET', url: memberUrl })).statusCode, 401);
       assert.equal((await app.inject({ method: 'GET', url: memberUrl, headers: outsiderHeader })).statusCode, 404);

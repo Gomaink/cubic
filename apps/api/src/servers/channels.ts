@@ -1,5 +1,6 @@
 import type { Database } from '@cubic/database';
 import { compactLayoutScope } from './layout.js';
+import { getEffectiveChannelPermissionsBatch, hasChannelPermission } from '../authorization/channel-permissions.js';
 
 export interface ServerTextChannelRecord {
   id: string;
@@ -117,5 +118,10 @@ export async function listMemberTextChannels(
       order by channel.position, channel.created_at, channel.id`,
     [serverId, actorUserId]
   );
-  return result.rows.map(channelRecord);
+  const permissions = await getEffectiveChannelPermissionsBatch(database.pool, serverId, actorUserId, 'text', result.rows.map((row) => row.id));
+  if (!permissions) return [];
+  return result.rows.filter((row) => {
+    const mask = permissions.get(row.id);
+    return mask !== undefined && hasChannelPermission(mask, 'VIEW_CHANNEL');
+  }).map(channelRecord);
 }

@@ -14,7 +14,7 @@ export interface ServerAuthority {
 const entries = Object.entries(SERVER_PERMISSION_BITS) as Array<[ServerPermissionName, number]>;
 export const ALL_SERVER_PERMISSIONS = entries.reduce((mask, [, bit]) => mask | (1n << BigInt(bit)), 0n);
 export const DEFAULT_SERVER_PERMISSIONS = serverPermissionMask([
-  'VIEW_SERVER', 'SEND_MESSAGES', 'CONNECT', 'SPEAK', 'VIDEO', 'SCREEN_SHARE'
+  'VIEW_SERVER', 'SEND_MESSAGES', 'CONNECT', 'SPEAK', 'VIDEO', 'SCREEN_SHARE', 'VIEW_CHANNEL'
 ])!;
 
 export function serverPermissionMask(names: readonly unknown[]): bigint | null {

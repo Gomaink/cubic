@@ -23,6 +23,7 @@ export async function createServerVoiceToken(input: {
   userId: string;
   displayName: string;
   sessionId: string;
+  publishSources?: TrackSource[];
 }) {
   const roomName = serverVoiceRoomName(input.channelId);
   const identity = voiceParticipantIdentity(
@@ -37,19 +38,16 @@ export async function createServerVoiceToken(input: {
       cubicServerVoiceChannelId: input.channelId
     }
   });
+  const publishSources = input.publishSources ?? [TrackSource.MICROPHONE, TrackSource.CAMERA,
+    TrackSource.SCREEN_SHARE, TrackSource.SCREEN_SHARE_AUDIO];
   accessToken.addGrant({
     roomJoin: true,
     room: roomName,
     canSubscribe: true,
-    canPublish: true,
+    canPublish: publishSources.length > 0,
     canPublishData: false,
     canUpdateOwnMetadata: false,
-    canPublishSources: [
-      TrackSource.MICROPHONE,
-      TrackSource.CAMERA,
-      TrackSource.SCREEN_SHARE,
-      TrackSource.SCREEN_SHARE_AUDIO
-    ]
+    canPublishSources: publishSources
   });
   return { url: input.publicUrl, token: await accessToken.toJwt(), identity };
 }

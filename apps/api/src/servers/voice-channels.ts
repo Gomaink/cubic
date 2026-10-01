@@ -1,5 +1,6 @@
 import type { Database } from '@cubic/database';
 import { compactLayoutScope, withOwnerLock } from './layout.js';
+import { getEffectiveChannelPermissionsBatch, hasChannelPermission } from '../authorization/channel-permissions.js';
 
 export interface ServerVoiceChannelRecord {
   id: string;
@@ -41,7 +42,12 @@ export async function listMemberVoiceChannels(database: Database, serverId: stri
       order by voice.position, voice.created_at, voice.id`,
     [serverId, actorId]
   );
-  return result.rows.map(record);
+  const permissions = await getEffectiveChannelPermissionsBatch(database.pool, serverId, actorId, 'voice', result.rows.map((row) => row.id));
+  if (!permissions) return [];
+  return result.rows.filter((row) => {
+    const mask = permissions.get(row.id);
+    return mask !== undefined && hasChannelPermission(mask, 'VIEW_CHANNEL');
+  }).map(record);
 }
 
 export async function createVoiceChannel(database: Database, serverId: string, actorId: string, name: string, categoryId: string | null) {

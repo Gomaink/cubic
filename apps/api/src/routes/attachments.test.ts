@@ -11,6 +11,8 @@ const outsider = '10000000-0000-4000-8000-000000000003';
 const conversation = '20000000-0000-4000-8000-000000000001';
 const attachmentId = '50000000-0000-4000-8000-000000000001';
 const messageId = '30000000-0000-4000-8000-000000000001';
+const serverId = '40000000-0000-4000-8000-000000000001';
+const channelId = '60000000-0000-4000-8000-000000000001';
 
 type AttachmentRow = {
   id: string;
@@ -70,10 +72,21 @@ class AttachmentRouteDatabase {
       }
 
       if (normalized.includes("c.kind = 'server_text'")) {
-        const rows = params[0] === conversation && this.members.has(params[1]) && this.conversationKind === 'server_text'
-          ? [{ conversation_id: conversation, server_id: '40000000-0000-4000-8000-000000000001' }]
+        const rows = params[0] === conversation && this.conversationKind === 'server_text'
+          ? [{ conversation_id: conversation, server_id: serverId, channel_id: channelId }]
           : [];
         return { rows, rowCount: rows.length };
+      }
+
+      if (normalized.includes('from servers s') && normalized.includes('join server_members m')) {
+        const rows = params[0] === serverId && this.members.has(params[1])
+          ? [{ owner_user_id: outsider, permissions_mask: '8001', highest_position: 0 }] : [];
+        return { rows, rowCount: rows.length };
+      }
+
+      if (normalized.includes('from server_text_channels channel') && normalized.includes('left join server_channel_overrides')) {
+        return { rows: [{ channel_id: channelId, role_id: null, member_user_id: null,
+          allow_mask: null, deny_mask: null }], rowCount: 1 };
       }
 
       if (normalized.includes('from direct_conversation_pairs dp')) {

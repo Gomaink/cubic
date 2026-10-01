@@ -118,6 +118,30 @@ test('server text channels use owner creation, member content access and no lega
       assert.equal((await app.inject({ method: 'GET', url: contentUrl, headers: owner })).statusCode, 200);
       assert.equal((await app.inject({ method: 'GET', url: contentUrl, headers: outsider })).statusCode, 404);
 
+      const overrideId = randomUUID();
+      await pool.query(
+        `insert into server_channel_overrides(id, server_id, text_channel_id, member_user_id, deny)
+         values($1,$2,$3,$4,$5)`, [overrideId, serverId, channel.id, memberId, 4096]
+      );
+      // A stale/materialized legacy membership must not expose the channel's
+      // last message through the direct/group conversation list.
+      await pool.query('insert into conversation_members(conversation_id,user_id) values($1,$2)',
+        [channel.conversationId, memberId]);
+      const conversationList = (await app.inject({ method: 'GET', url: '/api/v1/conversations', headers: member })).json().conversations;
+      assert.equal(conversationList.some((item: { id: string }) => item.id === channel.conversationId), false);
+      const hiddenList = (await app.inject({ method: 'GET', url: channelsUrl, headers: member })).json().channels;
+      assert.equal(hiddenList.some((item: { id: string }) => item.id === channel.id), false);
+      assert.equal((await app.inject({ method: 'GET', url: messagesUrl, headers: member })).statusCode, 404);
+      assert.equal((await app.inject({ method: 'POST', url: messagesUrl, headers: member,
+        payload: { clientMessageId: randomUUID(), body: 'Hidden' } })).statusCode, 404);
+      assert.equal((await app.inject({ method: 'GET', url: contentUrl, headers: member })).statusCode, 404);
+      assert.equal((await app.inject({ method: 'GET', url: messagesUrl, headers: owner })).statusCode, 200);
+      await pool.query('update server_channel_overrides set deny = 64 where id = $1', [overrideId]);
+      assert.equal((await app.inject({ method: 'GET', url: messagesUrl, headers: member })).statusCode, 200);
+      assert.equal((await app.inject({ method: 'POST', url: messagesUrl, headers: member,
+        payload: { clientMessageId: randomUUID(), body: 'Read only' } })).statusCode, 404);
+      await pool.query('delete from server_channel_overrides where id = $1', [overrideId]);
+
       await pool.query('insert into conversations (id, kind) values ($1, $2)', [orphanId, 'server_text']);
       assert.equal((await app.inject({ method: 'GET', url: `/api/v1/conversations/${orphanId}/messages`, headers: owner })).statusCode, 404);
       assert.equal((await app.inject({ method: 'POST', url: `/api/v1/conversations/${orphanId}/messages`, headers: owner, payload: { clientMessageId: randomUUID(), body: 'No mapping' } })).statusCode, 404);

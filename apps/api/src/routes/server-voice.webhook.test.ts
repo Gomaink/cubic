@@ -49,6 +49,12 @@ test('HTTP LiveKit webhook requires a valid raw-body signature and reconciles ca
     }
   };
   const database = { pool: { query: async (sql: string, params: unknown[]) => {
+    if (sql.includes('from servers s') && sql.includes('join server_members m'))
+      return { rows: params[1] === memberId ? [{ owner_user_id: outsiderId, permissions_mask: '8001', highest_position: 0 }] : [],
+        rowCount: params[1] === memberId ? 1 : 0 };
+    if (sql.includes('from server_voice_channels channel') && sql.includes('left join server_channel_overrides'))
+      return { rows: [{ channel_id: channelId, role_id: null, member_user_id: null,
+        allow_mask: null, deny_mask: null }], rowCount: 1 };
     if (sql.includes('from server_voice_channels voice'))
       return { rows: params[0] === channelId ? [{ server_id: serverId }] : [], rowCount: params[0] === channelId ? 1 : 0 };
     if (sql.includes('from server_members'))

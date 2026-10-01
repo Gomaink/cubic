@@ -12,7 +12,7 @@ function authority(userId: string, position: number, permissions: bigint, isOwne
 }
 
 test('server permission names have fixed distinct bits and unknown names fail closed', () => {
-  assert.deepEqual(Object.values(SERVER_PERMISSION_BITS), Array.from({ length: 12 }, (_, index) => index));
+  assert.deepEqual(Object.values(SERVER_PERMISSION_BITS), Array.from({ length: 13 }, (_, index) => index));
   for (const [name, bit] of Object.entries(SERVER_PERMISSION_BITS)) {
     assert.equal(serverPermissionMask([name]), 1n << BigInt(bit));
     assert.deepEqual(serverPermissionNames(1n << BigInt(bit)), [name]);
@@ -24,20 +24,20 @@ test('server permission names have fixed distinct bits and unknown names fail cl
   assert.equal(serverPermissionMask(['VIEW_SERVER', 'VIEW_SERVER']), 1n);
   assert.equal(serverPermissionMask(['VIEW_SERVER', 'NOT_REAL']), null);
   assert.equal(serverPermissionMask(['VIEW_SERVER', 3]), null);
-  assert.equal(ALL_SERVER_PERMISSIONS, 4095n);
-  assert.equal(DEFAULT_SERVER_PERMISSIONS, 3905n);
+  assert.equal(ALL_SERVER_PERMISSIONS, 8191n);
+  assert.equal(DEFAULT_SERVER_PERMISSIONS, 8001n);
   assert.deepEqual(serverPermissionNames(DEFAULT_SERVER_PERMISSIONS),
-    ['VIEW_SERVER', 'SEND_MESSAGES', 'CONNECT', 'SPEAK', 'VIDEO', 'SCREEN_SHARE']);
+    ['VIEW_SERVER', 'SEND_MESSAGES', 'CONNECT', 'SPEAK', 'VIDEO', 'SCREEN_SHARE', 'VIEW_CHANNEL']);
   assert.deepEqual(serverPermissionNames(1n | (1n << 11n)), ['VIEW_SERVER', 'SCREEN_SHARE']);
-  assert.throws(() => serverPermissionNames(1n << 12n), /Unknown server permission bits/);
+  assert.throws(() => serverPermissionNames(1n << 13n), /Unknown server permission bits/);
   assert.throws(() => serverPermissionNames(1n << 53n), /Unknown server permission bits/);
   assert.throws(() => serverPermissionNames(-1n), /Unknown server permission bits/);
-  assert.equal(serverPermissionNames(ALL_SERVER_PERMISSIONS).length, 12);
+  assert.equal(serverPermissionNames(ALL_SERVER_PERMISSIONS).length, 13);
   assert.equal(JSON.stringify({ permissions: serverPermissionNames(DEFAULT_SERVER_PERMISSIONS) }).includes('VIEW_SERVER'), true);
 });
 
 test('invalid database masks reject authorization before a JSON boundary', async () => {
-  for (const permissions_mask of ['4096', '9007199254740992', '-1', 'not-a-mask']) {
+  for (const permissions_mask of ['8192', '9007199254740992', '-1', 'not-a-mask']) {
     const executor = { query: async () => ({ rows: [{ owner_user_id: 'other', permissions_mask, highest_position: 0 }] }) } as unknown as ServerPermissionExecutor;
     await assert.rejects(getEffectiveServerPermissions(executor, 'server-a', 'member'), /Invalid server permission mask|Unknown server permission bits/);
   }

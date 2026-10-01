@@ -95,14 +95,14 @@ test('PostgreSQL permission aggregation, default changes, owner bypass, and hier
       assert.equal((await getEffectiveServerPermissions(pool, first.id, high))?.effectivePermissions, ALL_SERVER_PERMISSIONS);
       assert.equal((await getEffectiveServerPermissions(pool, first.id, owner))?.isOwner, false);
       await pool.query('update servers set owner_user_id=$2 where id=$1', [first.id, owner]);
-      await assert.rejects(pool.query('update server_roles set permissions=$2 where id=$1', [first.id, '4096']),
+      await assert.rejects(pool.query('update server_roles set permissions=$2 where id=$1', [first.id, '8192']),
         (error: any) => error.code === '23514');
       await assert.rejects(pool.query('update server_roles set permissions=$2 where id=$1', [first.id, '-1']),
         (error: any) => error.code === '23514');
       await assert.rejects(pool.query('update server_roles set permissions=$2 where id=$1', [first.id, '9007199254740992']),
         (error: any) => error.code === '23514');
-      await pool.query('update server_roles set permissions=$2 where id=$1', [foreign.value.id, '4095']);
-      assert.equal((await pool.query('select permissions from server_roles where id=$1', [foreign.value.id])).rows[0].permissions, '4095');
+      await pool.query('update server_roles set permissions=$2 where id=$1', [foreign.value.id, '8191']);
+      assert.equal((await pool.query('select permissions from server_roles where id=$1', [foreign.value.id])).rows[0].permissions, '8191');
     } finally {
       await pool.query('delete from servers where id=any($1::uuid[])', [serverIds]).catch(() => {});
       await pool.query('delete from users where id=any($1::uuid[])', [users]).catch(() => {});

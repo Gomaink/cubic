@@ -14,6 +14,18 @@ const apiSecret = 'voice-test-secret-with-more-than-thirty-two-characters';
 const channelId = '11111111-1111-4111-8111-111111111111';
 const serverId = '22222222-2222-4222-8222-222222222222';
 
+function permissionFixtureRows(sql: string, isMember: boolean): { rows: unknown[]; rowCount: number } | null {
+  if (sql.includes('from servers s') && sql.includes('join server_members m')) {
+    const rows = isMember ? [{ owner_user_id: 'other-user', permissions_mask: '8001', highest_position: 0 }] : [];
+    return { rows, rowCount: rows.length };
+  }
+  if (sql.includes('from server_voice_channels channel') && sql.includes('left join server_channel_overrides')) {
+    const rows = [{ channel_id: channelId, role_id: null, member_user_id: null, allow_mask: null, deny_mask: null }];
+    return { rows, rowCount: rows.length };
+  }
+  return null;
+}
+
 test('only signed LiveKit webhook bodies can trigger server-voice reconciliation', async () => {
   let reads = 0;
   const database = { pool: { query: async () => ({ rows: [{ server_id: serverId }] }) } } as unknown as Database;
@@ -56,6 +68,8 @@ test('reconciliation dedupes two devices, retains the other when one leaves, and
   let isMember = true;
   const removed: string[] = [];
   const database = { pool: { query: async (sql: string) => {
+    const permissions = permissionFixtureRows(sql, isMember);
+    if (permissions) return permissions;
     if (sql.includes('from server_voice_channels voice')) return { rows: [{ server_id: serverId }], rowCount: 1 };
     if (sql.includes('from server_members')) return { rows: isMember ? [{}] : [], rowCount: isMember ? 1 : 0 };
     if (sql.includes('from users')) return { rows: [{ display_name: 'Member' }], rowCount: 1 };
@@ -104,6 +118,8 @@ test('reconciliation clears stale occupancy when a voice channel fails canonical
   let current = [participant];
   const removed: string[] = [];
   const database = { pool: { query: async (sql: string) => {
+    const permissions = permissionFixtureRows(sql, true);
+    if (permissions) return permissions;
     if (sql.includes('from server_voice_channels voice')) return { rows: validChannel ? [{ server_id: serverId }] : [] };
     if (sql.includes('from server_members')) return { rows: [{}], rowCount: 1 };
     if (sql.includes('from users')) return { rows: [{ display_name: 'Member' }], rowCount: 1 };
@@ -152,6 +168,8 @@ test('overlapping signed events cannot leave an older presence snapshot applied 
     },
     removeParticipant: async () => {} };
   const database = { pool: { query: async (sql: string) => {
+    const permissions = permissionFixtureRows(sql, true);
+    if (permissions) return permissions;
     if (sql.includes('from server_voice_channels voice')) return { rows: [{ server_id: serverId }] };
     if (sql.includes('from server_members')) return { rows: [{}], rowCount: 1 };
     if (sql.includes('from users')) return { rows: [{ display_name: 'Member' }], rowCount: 1 };
