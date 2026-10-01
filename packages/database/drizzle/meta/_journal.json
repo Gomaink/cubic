@@ -148,6 +148,13 @@
       "when": 1790631093656,
       "tag": "0020_skinny_guardsmen",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1790858822474,
+      "tag": "0021_ambitious_beast",
+      "breakpoints": true
     }
   ]
 }

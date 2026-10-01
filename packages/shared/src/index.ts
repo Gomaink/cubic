@@ -24,6 +24,19 @@ export interface AuthResponse {
   user: PublicUser;
 }
 
+// Server roles are read-only in Alpha 12.1. Ownership remains on the server.
+export interface ServerRole {
+  id: string;
+  serverId: string;
+  name: string;
+  position: number;
+  isDefault: boolean;
+}
+
+export interface ServerRolesResponse {
+  roles: ServerRole[];
+}
+
 export interface HealthResponse {
   status: HealthStatus;
   service: 'cubic-api';

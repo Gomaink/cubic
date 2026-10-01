@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -166,6 +167,44 @@ export const serverMembers = pgTable(
   (table) => [
     uniqueIndex('server_members_pair_uq').on(table.serverId, table.userId),
     index('server_members_user_idx').on(table.userId)
+  ]
+);
+
+// Higher position means higher hierarchy. Position zero is reserved for the
+// implicit @everyone role, whose UUID is the server UUID.
+export const serverRoles = pgTable(
+  'server_roles',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 64 }).notNull(),
+    position: integer('position').notNull(),
+    isDefault: boolean('is_default').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex('server_roles_server_id_id_uq').on(table.serverId, table.id),
+    uniqueIndex('server_roles_server_position_uq').on(table.serverId, table.position),
+    uniqueIndex('server_roles_one_default_uq').on(table.serverId).where(sql`${table.isDefault}`),
+    check('server_roles_name_ck', sql`length(btrim(${table.name})) between 1 and 64 and ${table.name} = btrim(${table.name})`),
+    check('server_roles_identity_ck', sql`(${table.isDefault} and ${table.id} = ${table.serverId} and ${table.position} = 0) or (not ${table.isDefault} and ${table.id} <> ${table.serverId} and ${table.position} > 0)`)
+  ]
+);
+
+export const serverMemberRoles = pgTable(
+  'server_member_roles',
+  {
+    serverId: uuid('server_id').notNull(),
+    userId: uuid('user_id').notNull(),
+    roleId: uuid('role_id').notNull(),
+    assignedAt: timestamp('assigned_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex('server_member_roles_pair_uq').on(table.serverId, table.userId, table.roleId),
+    index('server_member_roles_role_idx').on(table.serverId, table.roleId),
+    foreignKey({ columns: [table.serverId, table.userId], foreignColumns: [serverMembers.serverId, serverMembers.userId], name: 'server_member_roles_member_fk' }).onDelete('cascade'),
+    foreignKey({ columns: [table.serverId, table.roleId], foreignColumns: [serverRoles.serverId, serverRoles.id], name: 'server_member_roles_role_fk' }).onDelete('cascade')
   ]
 );
 

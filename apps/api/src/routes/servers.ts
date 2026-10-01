@@ -16,6 +16,7 @@ import { createServerInviteLink, listOwnedServerInviteLinks, revokeServerInviteL
 import { ServerIconStore, SERVER_ICON_MAX_BYTES, InvalidServerIconError } from '../server-icons/storage.js';
 import { checkIconOwner, replaceServerIcon, removeServerIcon } from '../server-icons/service.js';
 import type { ServerVoiceService } from '../server-voice/service.js';
+import { listMemberRoles, listServerRoles } from '../servers/roles.js';
 
 export interface ServerRoutesOptions {
   database: Database;
@@ -309,6 +310,24 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     const result = await listServerMembers(options.database, params.data.serverId, request.auth.user.id);
     if ('denied' in result) return reply.code(404).send({ error: 'Server not found.' });
     return { members: result.value };
+  });
+
+  app.get('/:serverId/roles', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = serverParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid server.' });
+    const result = await listServerRoles(options.database, params.data.serverId, request.auth.user.id);
+    if ('denied' in result) return reply.code(404).send({ error: 'Server not found.' });
+    return { roles: result.value };
+  });
+
+  app.get('/:serverId/members/:userId/roles', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = memberParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid server member.' });
+    const result = await listMemberRoles(options.database, params.data.serverId, request.auth.user.id, params.data.userId);
+    if ('denied' in result) return reply.code(404).send({ error: 'Server member not found.' });
+    return { roles: result.value };
   });
 
   app.delete('/:serverId/members/:userId', { preHandler: requireAuth }, async (request, reply) => {
