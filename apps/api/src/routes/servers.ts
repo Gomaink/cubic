@@ -12,7 +12,7 @@ import {
   listOwnedServerInvites, listReceivedServerInvites, listServerMembers
 } from '../servers/invites.js';
 import type { RealtimeEvents } from '../realtime/events.js';
-import { createServerInviteLink, listOwnedServerInviteLinks, revokeServerInviteLink } from '../servers/invite-links.js';
+import { createServerInviteLink, listManagedServerInviteLinks, revokeServerInviteLink } from '../servers/invite-links.js';
 import { ServerIconStore, SERVER_ICON_MAX_BYTES, InvalidServerIconError } from '../server-icons/storage.js';
 import { checkIconOwner, replaceServerIcon, removeServerIcon } from '../server-icons/service.js';
 import type { ServerVoiceService } from '../server-voice/service.js';
@@ -278,7 +278,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     const params = serverParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid server.' });
     const result = await createServerInviteLink(options.database, params.data.serverId, request.auth.user.id);
-    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Only the server owner can create invite links.' : 'Server not found.' });
+    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Invite link management denied.' : 'Server not found.' });
     reply.header('cache-control', 'no-store');
     return reply.code(201).send(result.value);
   });
@@ -287,7 +287,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
     const params = serverParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid server.' });
-    const result = await listOwnedServerInviteLinks(options.database, params.data.serverId, request.auth.user.id);
+    const result = await listManagedServerInviteLinks(options.database, params.data.serverId, request.auth.user.id);
     if ('denied' in result) return reply.code(404).send({ error: 'Server not found.' });
     reply.header('cache-control', 'no-store');
     return { inviteLinks: result.value };
@@ -298,7 +298,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     const params = inviteLinkParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid invite link.' });
     const result = await revokeServerInviteLink(options.database, params.data.serverId, params.data.linkId, request.auth.user.id);
-    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Only the server owner can revoke invite links.' : 'Invite link not found.' });
+    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Invite link management denied.' : 'Invite link not found.' });
     reply.header('cache-control', 'no-store');
     return { inviteLink: result.value };
   });

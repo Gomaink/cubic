@@ -1,5 +1,8 @@
 export const CUBIC_VERSION = '2.0.0-alpha.7' as const;
 export const CUBIC_NAME = 'Cubic' as const;
+export { SERVER_PERMISSION_BITS, parseServerPermissionName } from './server-permissions.js';
+export type { ServerPermissionName } from './server-permissions.js';
+import type { ServerPermissionName } from './server-permissions.js';
 
 export type HealthStatus = 'ok' | 'degraded';
 export type UserTheme = 'dark' | 'light' | 'system';
@@ -24,13 +27,14 @@ export interface AuthResponse {
   user: PublicUser;
 }
 
-// Server roles are read-only in Alpha 12.1. Ownership remains on the server.
+// Server roles remain read-only at the API boundary. Ownership remains on the server.
 export interface ServerRole {
   id: string;
   serverId: string;
   name: string;
   position: number;
   isDefault: boolean;
+  permissions: ServerPermissionName[];
 }
 
 export interface ServerRolesResponse {

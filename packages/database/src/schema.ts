@@ -180,6 +180,7 @@ export const serverRoles = pgTable(
     name: varchar('name', { length: 64 }).notNull(),
     position: integer('position').notNull(),
     isDefault: boolean('is_default').notNull().default(false),
+    permissions: bigint('permissions', { mode: 'bigint' }).notNull().default(sql`0`),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
   },
@@ -188,6 +189,7 @@ export const serverRoles = pgTable(
     uniqueIndex('server_roles_server_position_uq').on(table.serverId, table.position),
     uniqueIndex('server_roles_one_default_uq').on(table.serverId).where(sql`${table.isDefault}`),
     check('server_roles_name_ck', sql`length(btrim(${table.name})) between 1 and 64 and ${table.name} = btrim(${table.name})`),
+    check('server_roles_permissions_ck', sql`${table.permissions} >= 0 and (${table.permissions} & ~4095::bigint) = 0`),
     check('server_roles_identity_ck', sql`(${table.isDefault} and ${table.id} = ${table.serverId} and ${table.position} = 0) or (not ${table.isDefault} and ${table.id} <> ${table.serverId} and ${table.position} > 0)`)
   ]
 );

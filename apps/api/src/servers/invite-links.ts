@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import type { Database } from '@cubic/database';
+import { requireServerPermission } from '../authorization/server-permissions.js';
 
 const LINK_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -56,10 +57,8 @@ async function withLockedServer<T>(database: Database, serverId: string, action:
 export async function createServerInviteLink(database: Database, serverId: string, actorId: string): Promise<Result<{ inviteLink: InviteLinkMetadata; token: string }>> {
   return withLockedServer(database, serverId, async (client, ownerId) => {
     if (!ownerId) return { denied: 'not_found' };
-    if (ownerId !== actorId) {
-      const member = await client.query('select 1 from server_members where server_id = $1 and user_id = $2', [serverId, actorId]);
-      return { denied: member.rowCount ? 'not_owner' : 'not_found' };
-    }
+    const authority = await requireServerPermission(client, serverId, actorId, 'MANAGE_INVITES');
+    if ('denied' in authority) return { denied: authority.denied === 'forbidden' ? 'not_owner' : 'not_found' };
     const createdAt = new Date();
     const expiresAt = new Date(createdAt.getTime() + LINK_LIFETIME_MS);
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -77,25 +76,24 @@ export async function createServerInviteLink(database: Database, serverId: strin
   });
 }
 
-export async function listOwnedServerInviteLinks(database: Database, serverId: string, actorId: string): Promise<Result<InviteLinkMetadata[]>> {
-  const result = await database.pool.query(
-    `select l.id, l.created_at, l.expires_at, l.revoked_at
-       from server_invite_links l join servers s on s.id = l.server_id
-      where l.server_id = $1 and s.owner_user_id = $2
-      order by l.created_at desc, l.id desc`, [serverId, actorId]
-  );
-  const owner = await database.pool.query('select 1 from servers where id = $1 and owner_user_id = $2', [serverId, actorId]);
-  if (!owner.rowCount) return { denied: 'not_found' };
-  return { value: result.rows.map(metadata) };
+export async function listManagedServerInviteLinks(database: Database, serverId: string, actorId: string): Promise<Result<InviteLinkMetadata[]>> {
+  return withLockedServer(database, serverId, async (client, ownerId) => {
+    if (!ownerId) return { denied: 'not_found' };
+    const authority = await requireServerPermission(client, serverId, actorId, 'MANAGE_INVITES');
+    if ('denied' in authority) return { denied: 'not_found' };
+    const result = await client.query(
+      `select id, created_at, expires_at, revoked_at from server_invite_links
+        where server_id = $1 order by created_at desc, id desc`, [serverId]
+    );
+    return { value: result.rows.map(metadata) };
+  });
 }
 
 export async function revokeServerInviteLink(database: Database, serverId: string, linkId: string, actorId: string): Promise<Result<InviteLinkMetadata>> {
   return withLockedServer(database, serverId, async (client, ownerId) => {
     if (!ownerId) return { denied: 'not_found' };
-    if (ownerId !== actorId) {
-      const member = await client.query('select 1 from server_members where server_id = $1 and user_id = $2', [serverId, actorId]);
-      return { denied: member.rowCount ? 'not_owner' : 'not_found' };
-    }
+    const authority = await requireServerPermission(client, serverId, actorId, 'MANAGE_INVITES');
+    if ('denied' in authority) return { denied: authority.denied === 'forbidden' ? 'not_owner' : 'not_found' };
     const result = await client.query(
       `update server_invite_links set revoked_at = coalesce(revoked_at, now())
         where id = $1 and server_id = $2 returning id, created_at, expires_at, revoked_at`, [linkId, serverId]

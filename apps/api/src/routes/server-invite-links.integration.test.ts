@@ -93,6 +93,16 @@ test('shareable links are digest-only, owner-managed and grant normal removable 
       assert.equal((await pool.query('select count(*)::int n from conversation_members where conversation_id=$1', [conversationId])).rows[0].n, 0);
       assert.equal((await app.inject({ method: 'GET', url: `${base}/channels`, headers: actor('joiner') })).statusCode, 200);
       assert.equal((await app.inject({ method: 'POST', url: createUrl, headers: actor('joiner') })).statusCode, 403);
+      const delegatedRole = (await pool.query(
+        'insert into server_roles (server_id,name,position,permissions) values ($1,$2,1,16) returning id',
+        [serverId, 'Invites']
+      )).rows[0].id;
+      await pool.query('insert into server_member_roles (server_id,user_id,role_id) values ($1,$2,$3)', [serverId, joiner, delegatedRole]);
+      const delegated = await app.inject({ method: 'POST', url: createUrl, headers: actor('joiner'), payload: { creatorUserId: outsider } });
+      assert.equal(delegated.statusCode, 201);
+      assert.equal((await pool.query('select creator_user_id from server_invite_links where id=$1', [delegated.json().inviteLink.id])).rows[0].creator_user_id, joiner);
+      assert.equal((await app.inject({ method: 'GET', url: createUrl, headers: actor('joiner') })).statusCode, 200);
+      assert.equal((await app.inject({ method: 'POST', url: `${base}/invite-links/${delegated.json().inviteLink.id}/revoke`, headers: actor('joiner') })).statusCode, 200);
       assert.equal((await app.inject({ method: 'GET', url: `/api/v1/conversations/${conversationId}/messages`, headers: actor('joiner') })).statusCode, 200);
       assert.equal((await app.inject({ method: 'POST', url: previewUrl, headers: actor('joiner'), payload: { token } })).json().alreadyMember, true);
       assert.equal((await app.inject({ method: 'DELETE', url: `${base}/members/${joiner}`, headers: actor('owner') })).statusCode, 204);

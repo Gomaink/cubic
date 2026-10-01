@@ -1,17 +1,19 @@
 import type { Database } from '@cubic/database';
 import type { PoolClient } from 'pg';
 import type { ServerRole } from '@cubic/shared';
+import { serverPermissionNames } from '../authorization/server-permissions.js';
 
 type Denied = { denied: 'not_found' | 'not_owner' | 'invalid_role' | 'invalid_member' };
 type Result<T> = { value: T } | Denied;
 
 function role(row: any): ServerRole {
-  return { id: row.id, serverId: row.server_id, name: row.name, position: row.position, isDefault: row.is_default };
+  return { id: row.id, serverId: row.server_id, name: row.name, position: row.position, isDefault: row.is_default,
+    permissions: serverPermissionNames(BigInt(row.permissions)) };
 }
 
 export async function listServerRoles(database: Database, serverId: string, actorId: string): Promise<Result<ServerRole[]>> {
   const result = await database.pool.query(
-    `select r.id, r.server_id, r.name, r.position, r.is_default
+    `select r.id, r.server_id, r.name, r.position, r.is_default, r.permissions
        from server_members actor join server_roles r on r.server_id = actor.server_id
       where actor.server_id = $1 and actor.user_id = $2
       order by r.position desc, r.id`, [serverId, actorId]
@@ -22,7 +24,7 @@ export async function listServerRoles(database: Database, serverId: string, acto
 
 export async function listMemberRoles(database: Database, serverId: string, actorId: string, memberId: string): Promise<Result<ServerRole[]>> {
   const result = await database.pool.query(
-    `select r.id, r.server_id, r.name, r.position, r.is_default
+    `select r.id, r.server_id, r.name, r.position, r.is_default, r.permissions
        from server_members actor
        join server_members member on member.server_id = actor.server_id and member.user_id = $3
        join server_roles r on r.server_id = actor.server_id
@@ -61,7 +63,7 @@ export async function createCustomRole(database: Database, serverId: string, act
     const inserted = await client.query(
       `insert into server_roles (server_id, name, position)
        select $1, $2, coalesce(max(position), 0) + 1 from server_roles where server_id = $1
-       returning id, server_id, name, position, is_default`, [serverId, cleanName]
+       returning id, server_id, name, position, is_default, permissions`, [serverId, cleanName]
     );
     return { value: role(inserted.rows[0]) };
   });
