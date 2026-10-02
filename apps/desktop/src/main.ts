@@ -2,7 +2,7 @@ import { app, BrowserWindow, Menu, shell, Tray } from 'electron';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { installDisplayCapture } from './display-capture.js';
-import { allowsDisplayCapture, allowsNotifications, allowsPermission, classifyNavigation, CUBIC_ORIGIN } from './security.js';
+import { allowsDisplayCapture, allowsElectron44LegacyDisplayPermission, allowsNotifications, allowsPermission, classifyNavigation, CUBIC_ORIGIN } from './security.js';
 import { updateMenuAction, type UpdateState } from './update-policy.js';
 import { createUpdateController } from './updates.js';
 
@@ -87,13 +87,30 @@ function createWindow(): void {
   const browserSession = contents.session; // Default persistent Chromium profile; no cookie copy or custom auth.
 
   browserSession.setPermissionCheckHandler((requester, permission, origin, details) => {
-    if (requester !== contents || !details.isMainFrame) return false;
-    if (details.securityOrigin && classifyNavigation(details.securityOrigin) !== 'internal') return false;
     if (permission === 'display-capture') {
-      return process.platform === 'win32' &&
+      return requester === contents && details.isMainFrame &&
+        (!details.securityOrigin || classifyNavigation(details.securityOrigin) === 'internal') &&
+        process.platform === 'win32' &&
         (!details.securityOrigin || details.securityOrigin === CUBIC_ORIGIN) &&
         allowsDisplayCapture(origin, details.requestingUrl, true);
     }
+    if (permission === 'media') {
+      const normalMediaAllowed = requester === contents && details.isMainFrame &&
+        (!details.securityOrigin || classifyNavigation(details.securityOrigin) === 'internal') &&
+        (!details.requestingUrl || classifyNavigation(details.requestingUrl) === 'internal') &&
+        allowsPermission(permission, origin, true, details.mediaType ? [details.mediaType] : undefined);
+      const legacyDisplayAllowed = allowsElectron44LegacyDisplayPermission({
+        phase: 'check', electronVersion: process.versions.electron, permission,
+        mediaType: details.mediaType, requesterMatches: requester === contents,
+        isMainFrame: details.isMainFrame, requestingOrigin: origin,
+        requestingUrl: details.requestingUrl, currentDocumentUrl: contents.getURL(),
+        isWindows: process.platform === 'win32'
+      }) && (details.securityOrigin === undefined ||
+        (details.securityOrigin !== '' && classifyNavigation(details.securityOrigin) === 'internal'));
+      return normalMediaAllowed || legacyDisplayAllowed;
+    }
+    if (requester !== contents || !details.isMainFrame) return false;
+    if (details.securityOrigin && classifyNavigation(details.securityOrigin) !== 'internal') return false;
     if (permission === 'notifications') {
       return allowsNotifications(origin, details.requestingUrl, true);
     }
@@ -106,13 +123,22 @@ function createWindow(): void {
     const requestOrigin = 'securityOrigin' in details && details.securityOrigin
       ? details.securityOrigin
       : classifyNavigation(details.requestingUrl) === 'internal' ? CUBIC_ORIGIN : undefined;
+    const mediaTypes = 'mediaTypes' in details ? details.mediaTypes : undefined;
+    const legacyDisplayAllowed = allowsElectron44LegacyDisplayPermission({
+      phase: 'request', electronVersion: process.versions.electron, permission,
+      mediaTypes, requesterMatches: requester === contents, isMainFrame: details.isMainFrame,
+      requestingOrigin: requestOrigin, requestingUrl: details.requestingUrl,
+      currentDocumentUrl: contents.getURL(), isWindows: process.platform === 'win32'
+    }) && (!('securityOrigin' in details) ||
+      (typeof details.securityOrigin === 'string' && details.securityOrigin !== '' &&
+        classifyNavigation(details.securityOrigin) === 'internal'));
     let allowed = requester === contents && (permission === 'display-capture'
       ? process.platform === 'win32' &&
         allowsDisplayCapture(requestOrigin, details.requestingUrl, details.isMainFrame)
       : permission === 'notifications'
         ? allowsNotifications(requestOrigin, details.requestingUrl, details.isMainFrame)
-        : allowsPermission(permission, details.requestingUrl, details.isMainFrame,
-            'mediaTypes' in details ? details.mediaTypes : undefined));
+        : allowsPermission(permission, details.requestingUrl, details.isMainFrame, mediaTypes) ||
+          legacyDisplayAllowed);
     if ('securityOrigin' in details && details.securityOrigin &&
         classifyNavigation(details.securityOrigin) !== 'internal') allowed = false;
     callback(allowed);

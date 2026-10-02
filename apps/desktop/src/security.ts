@@ -35,14 +35,79 @@ export function allowsPermission(
     permission === 'fullscreen';
 }
 
+/** Parse an Electron security origin without accepting a different authority. */
+export function inspectCubicSecurityOrigin(value: unknown): {
+  present: boolean;
+  parseable: boolean;
+  normalizedMatches: boolean;
+} {
+  if (typeof value !== 'string' || value.length === 0) {
+    return { present: false, parseable: false, normalizedMatches: false };
+  }
+  try {
+    const parsed = new URL(value);
+    return {
+      present: true,
+      parseable: true,
+      normalizedMatches: parsed.protocol === 'https:' &&
+        parsed.hostname === 'cubic.goma.ink' && parsed.port === '' &&
+        parsed.username === '' && parsed.password === '' &&
+        parsed.origin === CUBIC_ORIGIN
+    };
+  } catch {
+    return { present: true, parseable: false, normalizedMatches: false };
+  }
+}
+
 /** Display capture has a separate, stricter grant path than camera/microphone. */
 export function allowsDisplayCapture(
   requestingOrigin: string | undefined,
   requestingUrl: string | undefined,
   isMainFrame: boolean
 ): boolean {
-  return isMainFrame && requestingOrigin === CUBIC_ORIGIN &&
+  return isMainFrame && inspectCubicSecurityOrigin(requestingOrigin).normalizedMatches &&
     requestingUrl !== undefined && classifyNavigation(requestingUrl) === 'internal';
+}
+
+/**
+ * Electron 44 reports getDisplayMedia as media with an empty mediaTypes list.
+ * Electron 45+ reports it as display-capture. This allowance only lets Chromium
+ * continue to the separately secured setDisplayMediaRequestHandler; it does not
+ * choose or grant a capture source.
+ */
+export interface LegacyDisplayPermissionContext {
+  phase: 'check' | 'request';
+  electronVersion: string | undefined;
+  permission: string;
+  mediaType?: string | undefined;
+  mediaTypes?: readonly string[] | undefined;
+  requesterMatches: boolean;
+  isMainFrame: boolean;
+  requestingOrigin: string | undefined;
+  requestingUrl: string | undefined;
+  currentDocumentUrl: string | undefined;
+  isWindows: boolean;
+}
+
+export function allowsElectron44LegacyDisplayPermission(context: LegacyDisplayPermissionContext): boolean {
+  const { phase, electronVersion, permission, mediaType, mediaTypes, requesterMatches,
+    isMainFrame, requestingOrigin, requestingUrl, currentDocumentUrl, isWindows } = context;
+  if (!/^44\.(?:\d+\.)*\d+$/.test(electronVersion ?? '') ||
+      permission !== 'media' || !isWindows || !requesterMatches || !isMainFrame) return false;
+  if (phase === 'check'
+    ? mediaType !== undefined || mediaTypes !== undefined
+    : mediaType !== undefined || mediaTypes === undefined || mediaTypes.length !== 0) {
+    return false;
+  }
+  if (!requestingOrigin || !requestingUrl || !currentDocumentUrl) return false;
+  try {
+    const origin = new URL(requestingOrigin);
+    if (origin.username || origin.password || origin.origin !== CUBIC_ORIGIN) return false;
+  } catch {
+    return false;
+  }
+  return classifyNavigation(requestingUrl) === 'internal' &&
+    classifyNavigation(currentDocumentUrl) === 'internal';
 }
 
 /** Web notifications are eligible only from the current Cubic document. */
