@@ -2834,7 +2834,7 @@ body { background: var(--cubic-onyx-0); }
 @media (max-width: 680px) {
   .video-stage.cubic-server-voice-stage {
     right: 8px;
-    bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(var(--cubic-voice-dock-height, 140px) + max(8px, env(safe-area-inset-bottom)) + 8px);
     width: calc(100vw - 16px);
     height: min(38dvh, 300px);
     min-height: 112px;
