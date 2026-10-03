@@ -22,14 +22,36 @@ test('member profile is read-only and closes back to the member panel', async ({
   await expect(profile.getByText('Fixture DM')).toBeVisible();
   await expect(profile.getByText('@peer')).toBeVisible();
   await expect(profile.getByRole('button', { name: 'Edit display name' })).toHaveCount(0);
+  const firstDialog = await profile.elementHandle();
   await profile.getByRole('button', { name: 'Close profile' }).click();
   await expect(panel).toBeVisible();
   await expect(member).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(profile).toBeVisible();
+  // A queued close event from the removed dialog must not close the new one.
+  await firstDialog!.evaluate((node) => node.dispatchEvent(new Event('close')));
+  await expect(profile).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(profile).toHaveCount(0);
   await expect(member).toBeFocused();
+});
+
+test('switching profile generation remounts the dialog and ignores the old close', async ({ page }) => {
+  await page.getByRole('button', { name: 'Members', exact: true }).click();
+  const member = page.getByRole('complementary', { name: 'Group members' }).getByRole('button', { name: 'Fixture DM, member, offline' });
+  await member.click();
+  const profile = page.locator('dialog.cubic-profile-dialog');
+  await expect(profile).toBeVisible();
+  const firstDialog = await profile.elementHandle();
+
+  // Exercise a parent state change while selectedProfile remains non-null.
+  await member.evaluate((node) => node.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  await expect(profile).toBeVisible();
+  expect(await profile.evaluate((node, previous) => node !== previous, firstDialog)).toBe(true);
+  await firstDialog!.evaluate((node) => node.dispatchEvent(new Event('close')));
+  await expect(profile).toBeVisible();
+  await profile.getByRole('button', { name: 'Close profile' }).click();
+  await expect(profile).toHaveCount(0);
 });
 
 test('own profile opens Settings and edits display name without losing context', async ({ page }) => {

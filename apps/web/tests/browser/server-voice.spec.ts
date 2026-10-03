@@ -210,6 +210,34 @@ test('member ticket joins the selected voice room, keeps text usable, and leaves
   await expect(volume).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(remoteShare).toBeFocused();
+  if (testInfo.project.name === 'small-phone') {
+    const geometry = () => page.evaluate(() => {
+      const selectors = {
+        tile: '.cubic-server-voice-stage .screen-share-tile[aria-label="Focus Remote member\'s screen share"]',
+        stage: '.cubic-server-voice-stage',
+        dock: '.voice-dock',
+        head: '.voice-dock-head'
+      };
+      const boxes = Object.fromEntries(Object.entries(selectors).map(([name, selector]) => {
+        const element = document.querySelector(selector);
+        if (!element) throw new Error(`Missing ${name}`);
+        const rect = element.getBoundingClientRect();
+        return [name, { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, height: rect.height }];
+      }));
+      return boxes as Record<keyof typeof selectors, { top: number; bottom: number; left: number; right: number; height: number }>;
+    });
+    await expect.poll(async () => {
+      const { stage, dock } = await geometry();
+      return dock.top - stage.bottom;
+    }).toBeGreaterThanOrEqual(7);
+    const { tile, stage, dock, head } = await geometry();
+    expect(Math.min(tile.bottom, stage.bottom)).toBeLessThan(dock.top);
+    expect(head.top).toBeGreaterThanOrEqual(dock.top);
+    expect(await remoteShare.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+    })).toBe(true);
+  }
   await remoteShare.click({ button: 'right' });
   await expect(volume).toBeVisible();
   await page.keyboard.press('Escape');
