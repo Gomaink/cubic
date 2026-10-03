@@ -1,10 +1,12 @@
 # Cubic v2 roadmap
 
-**Status of this document: PLANNED work.** It does not describe features available today. The current documentation-sync checkpoint is **Alpha 11.8.5** on the `2.0.0-alpha.7` development line. For implemented capabilities see [README](README.md), [CHANGELOG](CHANGELOG.md) and [RELEASE_NOTES](RELEASE_NOTES.md). Exact scope and order can change before release.
+**Status of this document: PLANNED work.** It does not describe features available today. Desktop Preview 11.9.1–11.9.4 and the screen-share fixes passed functional Windows smoke on the `2.0.0-alpha.7` development line. Alpha 11.9 remains open: signed installer, protected release, real A-to-B auto-update and distribution negative cases are pending. For implemented capabilities see [README](README.md), [CHANGELOG](CHANGELOG.md) and [RELEASE_NOTES](RELEASE_NOTES.md). Exact scope and order can change before release.
 
-## 11.9 — Desktop Preview Foundation (planned)
+## 11.9 — Desktop Preview Foundation (in progress)
 
 Begin a secure Electron preview in parallel with the web app. This is not the production desktop hardening milestone; see Alpha 17 and [Product Direction](PRODUCT_DIRECTION.md).
+
+The functional Windows preview passed shell/auth/navigation, Windows Hello passkey, session persistence, mic/camera/output, voice, native Window/Screen sharing, Tray and external links. The Web app does not yet emit native notifications. The 11.9.5 updater and 11.9.6 distribution pipeline are statically reviewed; a real Authenticode certificate, signed NSIS installer, installed executable signature verification, protected GitHub release, A-to-B update and negative-case smoke are still required. The operational version plan is A=`2.0.0-alpha.8` after integration into `refactor/v2`, then B=`2.0.0-alpha.9` only after installing and validating A; `VERSION` remains `2.0.0-alpha.7` until a separately approved bump.
 
 ## Alpha 12 — Advanced Server Experience (planned)
 
@@ -59,7 +61,7 @@ Translation architecture and packs, locale formatting, language preference and R
 
 ## Alpha 17 — Desktop Production Hardening (planned)
 
-Electron **begins in 11.9**, not here. Alpha 17 covers signing, final update channels, deep links, tray/startup, installer polish, crash recovery and cross-platform packaging.
+Electron **begins in 11.9**, not here. Alpha 17 covers production signing and final update channels, deep links, tray/startup polish, installer polish, crash recovery and cross-platform packaging.
 
 ## Release path (planned)
 

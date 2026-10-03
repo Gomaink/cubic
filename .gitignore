@@ -4,6 +4,11 @@ node_modules/
 # Build output
 dist/
 build/
+apps/desktop/release/
+apps/desktop/*.exe
+apps/desktop/*.blockmap
+*.pfx
+*.p12
 .svelte-kit/
 
 # Environment
