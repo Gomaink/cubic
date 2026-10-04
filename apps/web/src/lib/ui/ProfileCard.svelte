@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
 
   export type ProfileIdentity = {
     id: string;
@@ -8,13 +8,16 @@
     avatarUrl: string | null;
   };
 
-  let { profile, onclose }: {
+  let { profile, generation, onclose }: {
     profile: ProfileIdentity;
-    onclose: () => void;
+    generation: number;
+    onclose: (generation: number) => void;
   } = $props();
 
   let dialog: HTMLDialogElement;
   let failedAvatarUrl = $state<string | null>(null);
+  const ownedGeneration = untrack(() => generation);
+  const closeCurrentDialog = () => onclose(ownedGeneration);
 
   onMount(() => {
     const previousFocus = document.activeElement;
@@ -28,10 +31,10 @@
 
 </script>
 
-<dialog bind:this={dialog} class="cubic-profile-dialog" aria-label={`${profile.displayName}'s profile`} onclose={onclose} onkeydown={(event) => { if (event.key === 'Escape') event.stopPropagation(); }}>
+<dialog bind:this={dialog} class="cubic-profile-dialog" aria-label={`${profile.displayName}'s profile`} onclose={closeCurrentDialog} onkeydown={(event) => { if (event.key === 'Escape') event.stopPropagation(); }}>
   <header class="cubic-profile-head">
     <strong>USER PROFILE</strong>
-    <button type="button" aria-label="Close profile" onclick={onclose}>×</button>
+    <button type="button" aria-label="Close profile" onclick={closeCurrentDialog}>×</button>
   </header>
   <div class="cubic-profile-body">
     <div class="cubic-profile-avatar">

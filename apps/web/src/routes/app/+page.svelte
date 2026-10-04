@@ -41,6 +41,7 @@
   let currentUser = $derived(updatedCurrentUser ?? data.user);
   type ProfileIdentity = { id: string; username: string; displayName: string; avatarUrl: string | null };
   let selectedProfile = $state<ProfileIdentity | null>(null);
+  let profileGeneration = $state(0);
   let loggingOut = $state(false);
   let userSettingsOpen = $state(false);
   type AppPreferences = { compactMode: boolean; reduceMotion: boolean };
@@ -1095,6 +1096,20 @@
     return { destroy: () => { if (node.open) node.close(); } };
   }
 
+  function reserveVoiceDockSpace(node: HTMLElement) {
+    const shell = node.closest<HTMLElement>('.cubic-app-shell');
+    const update = () => shell?.style.setProperty('--cubic-voice-dock-height', `${node.getBoundingClientRect().height}px`);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return {
+      destroy() {
+        observer.disconnect();
+        shell?.style.removeProperty('--cubic-voice-dock-height');
+      }
+    };
+  }
+
   async function refreshGroupDetails() {
     if (!activeConversation || activeConversation.kind !== 'group') {
       groupDetails = null;
@@ -1115,7 +1130,12 @@
       userSettingsOpen = true;
       return;
     }
+    profileGeneration += 1;
     selectedProfile = { id: user.id, username: user.username, displayName: user.displayName, avatarUrl: user.avatarUrl };
+  }
+
+  function closeProfile(generation: number) {
+    if (generation === profileGeneration) selectedProfile = null;
   }
 
   function hideFailedUserAvatar(event: Event) {
@@ -5565,7 +5585,7 @@
   {/if}
 
   {#if voiceStatus !== 'idle' || voiceError}
-    <section class="voice-dock" aria-label="Voice room">
+    <section class="voice-dock" use:reserveVoiceDockSpace aria-label="Voice room">
       <div class="voice-dock-head">
         <span class="voice-dock-icon" aria-hidden="true"><Icon name="headphones" size={20} /></span>
         <div>
@@ -5964,8 +5984,11 @@
   {/if}
 </main>
 {#if selectedProfile}
-  <ProfileCard
-    profile={selectedProfile}
-    onclose={() => selectedProfile = null}
-  />
+  {#key profileGeneration}
+    <ProfileCard
+      profile={selectedProfile}
+      generation={profileGeneration}
+      onclose={closeProfile}
+    />
+  {/key}
 {/if}

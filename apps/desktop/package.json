@@ -1,0 +1,27 @@
+{
+  "name": "@cubic/desktop",
+  "version": "2.0.0-alpha.7",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/tests/*.test.js scripts/*.test.mjs",
+    "start": "electron dist/main.js",
+    "package:win": "npm run build && electron-builder --win nsis --x64 --publish never",
+    "verify:release-source": "node scripts/release-guard.mjs source",
+    "verify:release-artifacts": "node scripts/release-guard.mjs artifacts"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "4.0.9",
+    "@types/node": "^24.3.0",
+    "electron": "44.5.1",
+    "electron-builder": "26.17.0",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.10",
+    "js-yaml": "4.3.2"
+  }
+}
