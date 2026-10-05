@@ -12,7 +12,7 @@ Cubic is an open-source, self-hosted realtime messenger for direct messages, gro
 - Registration and password login; verified email and email change; password recovery for eligible accounts; passkey enrollment, login, management and reauthentication; revocable sessions.
 - Onyx web UI for desktop and mobile browsers, with keyboard and accessibility work completed in Alpha 11.8.2.
 
-This is an alpha. Advanced server roles, channel permission overrides, Discover, rich-text messaging, native desktop packaging and localization are **planned**, not available. See [`ROADMAP.md`](ROADMAP.md) and [`PRODUCT_DIRECTION.md`](PRODUCT_DIRECTION.md).
+This is an alpha. Servers have basic role and member management, including server permission masks and hierarchy enforcement. A visual channel override editor, Discover, rich-text messaging, native desktop packaging and localization are **planned**, not available. See [`ROADMAP.md`](ROADMAP.md) and [`PRODUCT_DIRECTION.md`](PRODUCT_DIRECTION.md).
 
 ## Desktop Preview foundation
 

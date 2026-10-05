@@ -27,7 +27,7 @@ export interface AuthResponse {
   user: PublicUser;
 }
 
-// Server roles remain read-only at the API boundary. Ownership remains on the server.
+// Ownership remains on the server, independent of roles.
 export interface ServerRole {
   id: string;
   serverId: string;
@@ -39,6 +39,7 @@ export interface ServerRole {
 
 export interface ServerRolesResponse {
   roles: ServerRole[];
+  permissionNames: ServerPermissionName[];
 }
 
 export interface HealthResponse {

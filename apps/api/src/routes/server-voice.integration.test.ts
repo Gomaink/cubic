@@ -40,10 +40,12 @@ test('server voice management, mixed order, admission and member revocation use 
     } as SessionService;
     const participants = new Map<string, Array<{ identity: string; attributes: Record<string, string> }>>();
     const removed: string[] = [];
+    let failRemove = false;
     const admin = {
       listRooms: async () => [...participants.keys()].map((name) => ({ name })),
       listParticipants: async (room: string) => participants.get(room) ?? [],
       removeParticipant: async (room: string, identity: string) => {
+        if (failRemove) throw new Error('control plane unavailable');
         removed.push(identity);
         participants.set(room, (participants.get(room) ?? []).filter((item) => item.identity !== identity));
       }
@@ -128,8 +130,13 @@ test('server voice management, mixed order, admission and member revocation use 
       participants.set(serverVoiceRoomName(channel.id), [{ identity: claims.sub!, attributes: {
         cubicUserId: memberId, cubicServerVoiceChannelId: channel.id
       } }]);
+      failRemove = true;
       const removal = await send('DELETE', `${base}/members/${memberId}`);
-      assert.equal(removal.statusCode, 204, removal.body);
+      assert.equal(removal.statusCode, 200, removal.body);
+      assert.deepEqual(removal.json(), { removed: true, voiceRevocationPending: true });
+      assert.equal(removed.length, 0);
+      failRemove = false;
+      await voice.reconcile();
       assert.equal(removed.length, 1);
       assert.equal((await send('POST', tokenRoute, 'member')).statusCode, 404);
       assert.equal((await send('GET', `${base}/voice-channels`, 'member')).statusCode, 404);

@@ -6,6 +6,7 @@ import Fastify from 'fastify';
 import { Pool } from 'pg';
 import type { Database } from '@cubic/database';
 import type { SessionService } from '../security/session.js';
+import type { ServerVoiceService } from '../server-voice/service.js';
 import { assignCustomRole, createCustomRole, deleteCustomRole } from '../servers/roles.js';
 import { createOwnedServer } from '../servers/store.js';
 import { serverRoutes } from './servers.js';
@@ -46,7 +47,7 @@ test('role model enforces default, hierarchy, assignment boundaries, cascades, a
       await rejectsCode('delete from server_roles where id = $1', [first.id], '23514');
       await rejectsCode('update server_roles set name = $1 where id = $2', ['Changed', first.id], '23514');
       assert.deepEqual(await deleteCustomRole(database, first.id, owner, first.id), { denied: 'invalid_role' });
-      assert.deepEqual(await createCustomRole(database, first.id, outsider, 'No'), { denied: 'not_owner' });
+      assert.deepEqual(await createCustomRole(database, first.id, outsider, 'No'), { denied: 'not_found' });
       assert.deepEqual(await createCustomRole(database, first.id, owner, '  '), { denied: 'invalid_role' });
       const low = await createCustomRole(database, first.id, owner, 'Low');
       const high = await createCustomRole(database, first.id, owner, 'High');
@@ -113,6 +114,121 @@ test('role model enforces default, hierarchy, assignment boundaries, cascades, a
       servers.shift();
       assert.equal((await pool.query('select 1 from server_roles where server_id = $1', [first.id])).rowCount, 0);
       assert.equal((await pool.query('select 1 from server_member_roles where server_id = $1', [first.id])).rowCount, 0);
+    } finally {
+      await app.close();
+      await pool.query('delete from servers where id = any($1::uuid[])', [servers]).catch(() => {});
+      await pool.query('delete from users where id = any($1::uuid[])', [ids]).catch(() => {});
+      await pool.end();
+    }
+  });
+
+test('role write API enforces permissions, hierarchy, owner and server scoping in PostgreSQL',
+  { skip: !connectionString, timeout: 30_000 }, async () => {
+    const pool = new Pool({ connectionString, max: 4 });
+    const database = { pool } as Database;
+    const [owner, manager, member, outsider] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+    const ids = [owner, manager, member, outsider];
+    const servers: string[] = [];
+    const app = Fastify({ logger: false });
+    let voiceFails = false;
+    const voiceRevocations: string[] = [];
+    try {
+      for (const [i, id] of ids.entries()) await pool.query(
+        `insert into users (id, email, email_normalized, username, username_normalized, display_name, password_hash)
+         values ($1, $2, $2, $3, $3, $4, 'test-only')`,
+        [id, `${id}@integration.invalid`, `writes_${i}_${id.slice(0, 8)}`, `Writer ${i}`]
+      );
+      const first = await createOwnedServer(database, owner, 'Role writes');
+      const second = await createOwnedServer(database, owner, 'Other role writes');
+      servers.push(first.id, second.id);
+      await pool.query('insert into server_members (server_id, user_id) values ($1, $2), ($1, $3), ($4, $5)', [first.id, manager, member, second.id, outsider]);
+      await app.register(cookie);
+      app.decorateRequest('auth', null);
+      await app.register(serverRoutes, { prefix: '/api/v1/servers', database, cookieName: 'session',
+        serverVoice: { revokeMember: async (_serverId: string, userId: string) => {
+          voiceRevocations.push(userId);
+          if (voiceFails) throw new Error('control plane unavailable');
+        } } as ServerVoiceService,
+        sessionService: { resolveToken: async (token: string) => {
+          const id = token === 'owner' ? owner : token === 'manager' ? manager : token === 'member' ? member : token === 'outsider' ? outsider : null;
+          return id ? { user: { id } } : null;
+        } } as SessionService });
+      const base = `/api/v1/servers/${first.id}`;
+      const send = (method: 'POST' | 'PATCH' | 'PUT' | 'DELETE' | 'GET', path: string, who: string, payload?: object) =>
+        app.inject({ method, url: `${base}${path}`, headers: { cookie: `session=${who}` }, ...(payload ? { payload } : {}) });
+      assert.equal((await send('POST', '/roles', 'outsider', { name: 'No' })).statusCode, 404);
+      assert.equal((await send('POST', '/roles', 'member', { name: 'No' })).statusCode, 403);
+      assert.equal((await send('POST', '/roles', 'owner', { name: 'Invalid', permissions: ['UNKNOWN'] })).statusCode, 400);
+      const lowResponse = await send('POST', '/roles', 'owner', { name: 'Low', permissions: ['VIEW_SERVER'] });
+      assert.equal(lowResponse.statusCode, 201);
+      const low = lowResponse.json().role;
+      const managerResponse = await send('POST', '/roles', 'owner', { name: 'Manager', permissions: ['MANAGE_ROLES'] });
+      const managerRole = managerResponse.json().role;
+      const highResponse = await send('POST', '/roles', 'owner', { name: 'High', permissions: ['MANAGE_ROLES'] });
+      const high = highResponse.json().role;
+      assert.equal((await send('PUT', `/members/${manager}/roles/${managerRole.id}`, 'owner')).statusCode, 200);
+      assert.equal((await send('POST', '/roles', 'manager', { name: 'Above me' })).statusCode, 403);
+      assert.equal((await send('PATCH', `/roles/${high.id}`, 'manager', { name: 'Too high' })).statusCode, 403);
+      assert.equal((await send('DELETE', `/roles/${managerRole.id}`, 'manager')).statusCode, 403);
+      assert.equal((await send('PATCH', `/roles/${first.id}`, 'manager', { permissions: [] })).statusCode, 403);
+      assert.equal((await send('PUT', `/members/${manager}/roles/${low.id}`, 'manager')).statusCode, 403);
+      assert.equal((await send('PUT', `/members/${owner}/roles/${low.id}`, 'manager')).statusCode, 403);
+      assert.equal((await send('PUT', `/members/${member}/roles/${high.id}`, 'manager')).statusCode, 403);
+      assert.equal((await send('PATCH', `/roles/${low.id}`, 'manager', { permissions: ['KICK_MEMBERS'] })).statusCode, 403);
+      assert.equal((await send('PATCH', `/roles/${low.id}`, 'manager', { name: 'Low renamed', permissions: ['VIEW_SERVER'] })).statusCode, 200);
+      assert.equal((await send('PUT', `/members/${manager}/roles/${low.id}`, 'owner')).statusCode, 200);
+      assert.equal((await send('PATCH', `/roles/${low.id}`, 'manager', { permissions: ['VIEW_SERVER', 'MANAGE_ROLES'] })).statusCode, 403);
+      assert.equal((await send('DELETE', `/members/${manager}/roles/${low.id}`, 'owner')).statusCode, 200);
+      assert.equal((await send('PUT', `/members/${member}/roles/${low.id}`, 'manager')).statusCode, 200);
+      const memberList = await send('GET', '/members', 'owner');
+      assert.equal(memberList.statusCode, 200);
+      assert.deepEqual(memberList.json().members.find((item: { id: string }) => item.id === member).roleIds, [low.id]);
+      assert.equal((await send('PUT', `/members/${member}/roles/${low.id}`, 'manager')).json().assigned, false);
+      assert.equal((await send('DELETE', `/members/${member}/roles/${low.id}`, 'manager')).json().removed, true);
+      assert.equal((await send('DELETE', `/members/${member}/roles/${low.id}`, 'manager')).json().removed, false);
+      assert.equal((await send('PUT', `/members/${member}/roles/${first.id}`, 'owner')).statusCode, 404);
+      assert.equal((await send('PUT', `/members/${outsider}/roles/${low.id}`, 'owner')).statusCode, 404);
+      const foreign = await createCustomRole(database, second.id, owner, 'Foreign');
+      assert.ok('value' in foreign);
+      if (!('value' in foreign)) throw new Error('Foreign role missing');
+      assert.equal((await send('PUT', `/members/${member}/roles/${foreign.value.id}`, 'owner')).statusCode, 404);
+      const defaultUpdate = await send('PATCH', `/roles/${first.id}`, 'owner', { permissions: ['VIEW_SERVER', 'VIEW_CHANNEL'] });
+      assert.equal(defaultUpdate.statusCode, 200);
+      assert.deepEqual(defaultUpdate.json().role.permissions, ['VIEW_SERVER', 'VIEW_CHANNEL']);
+      assert.equal((await send('PATCH', `/roles/${first.id}`, 'owner', { name: 'Everyone' })).statusCode, 404);
+      assert.equal((await pool.query('select permissions::text from server_roles where id = $1', [first.id])).rows[0].permissions, '4097');
+      await assert.rejects(pool.query('update server_roles set permissions = 8192 where id = $1', [low.id]), (error: any) => error.code === '23514');
+      assert.deepEqual((await send('GET', '/roles', 'owner')).json().roles.find((item: { id: string }) => item.id === low.id).permissions, ['VIEW_SERVER']);
+      assert.equal((await send('DELETE', `/members/${manager}/roles/${managerRole.id}`, 'owner')).statusCode, 200);
+      assert.equal((await send('PATCH', `/roles/${low.id}`, 'manager', { name: 'Stale authority' })).statusCode, 403);
+      assert.equal((await send('PUT', `/members/${manager}/roles/${managerRole.id}`, 'owner')).statusCode, 200);
+      const lockClient = await pool.connect();
+      try {
+        await lockClient.query('begin');
+        await lockClient.query('select 1 from servers where id = $1 for update', [first.id]);
+        const waitingWrite = send('PATCH', `/roles/${low.id}`, 'manager', { name: 'Concurrent stale authority' });
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        await lockClient.query('delete from server_member_roles where server_id = $1 and user_id = $2 and role_id = $3', [first.id, manager, managerRole.id]);
+        await lockClient.query('commit');
+        assert.equal((await waitingWrite).statusCode, 403);
+      } finally {
+        await lockClient.query('rollback').catch(() => {});
+        lockClient.release();
+      }
+      assert.equal((await send('DELETE', `/roles/${low.id}`, 'owner')).statusCode, 204);
+      assert.equal((await pool.query('select 1 from server_member_roles where role_id = $1', [low.id])).rowCount, 0);
+      const pendingRole = (await send('POST', '/roles', 'owner', { name: 'Pending voice' })).json().role;
+      voiceFails = true;
+      const committedAssignment = await send('PUT', `/members/${member}/roles/${pendingRole.id}`, 'owner');
+      assert.equal(committedAssignment.statusCode, 200);
+      assert.deepEqual(committedAssignment.json(), { assigned: true, voiceRevocationPending: true });
+      assert.equal((await pool.query('select 1 from server_member_roles where server_id = $1 and user_id = $2 and role_id = $3', [first.id, member, pendingRole.id])).rowCount, 1);
+      assert.deepEqual((await send('PUT', `/members/${member}/roles/${pendingRole.id}`, 'owner')).json(), { assigned: false, voiceRevocationPending: false });
+      const committedDelete = await send('DELETE', `/roles/${pendingRole.id}`, 'owner');
+      assert.equal(committedDelete.statusCode, 200);
+      assert.deepEqual(committedDelete.json(), { deleted: true, voiceRevocationPending: true });
+      assert.equal((await pool.query('select 1 from server_roles where server_id = $1 and id = $2', [first.id, pendingRole.id])).rowCount, 0);
+      assert.ok(voiceRevocations.includes(member));
     } finally {
       await app.close();
       await pool.query('delete from servers where id = any($1::uuid[])', [servers]).catch(() => {});

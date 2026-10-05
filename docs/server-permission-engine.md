@@ -6,7 +6,7 @@ Server role permissions are a nonnegative PostgreSQL `BIGINT` mask. The shared c
 | ---: | --- | --- |
 | 0 | `VIEW_SERVER` | View the server and its basic read model. |
 | 1 | `MANAGE_SERVER` | Change server identity and settings in later slices. |
-| 2 | `MANAGE_ROLES` | Manage custom roles and assignments in Alpha 12.4. |
+| 2 | `MANAGE_ROLES` | Manage eligible custom roles and assignments. |
 | 3 | `MANAGE_CHANNELS` | Manage server channels when routes are migrated. |
 | 4 | `MANAGE_INVITES` | Create, list and revoke server invite links. |
 | 5 | `KICK_MEMBERS` | Remove a lower member when the route is migrated. |

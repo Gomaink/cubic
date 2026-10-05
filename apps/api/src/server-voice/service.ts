@@ -10,6 +10,7 @@ interface Participant {
   identity: string;
   name?: string;
   attributes?: Record<string, string>;
+  permission?: { canPublish: boolean; canPublishData: boolean; canPublishSources: TrackSource[] };
 }
 
 export interface ServerVoiceAdmin {
@@ -201,7 +202,7 @@ export class ServerVoiceService {
       const userId = participant.attributes?.cubicUserId;
       if (!userId || !UUID_PATTERN.test(userId) ||
           participant.attributes?.cubicServerVoiceChannelId !== channelId ||
-          !await this.isAuthorizedParticipant(roomName, serverId, userId, participant.identity)) {
+          !await this.isAuthorizedParticipant(roomName, serverId, userId, participant)) {
         await this.removeParticipant(roomName, participant.identity);
         continue;
       }
@@ -220,8 +221,8 @@ export class ServerVoiceService {
     }
   }
 
-  private async isAuthorizedParticipant(roomName: string, serverId: string, userId: string, identity: string): Promise<boolean> {
-    const parsed = parseVoiceParticipantIdentity(identity);
+  private async isAuthorizedParticipant(roomName: string, serverId: string, userId: string, participant: Participant): Promise<boolean> {
+    const parsed = parseVoiceParticipantIdentity(participant.identity);
     if (!parsed) return false;
     const member = await this.options.database.pool.query(
       `select 1 from server_members where server_id = $1 and user_id = $2`, [serverId, userId]
@@ -231,6 +232,20 @@ export class ServerVoiceService {
     if (!channelId) return false;
     const permissions = await getEffectiveChannelPermissions(this.options.database.pool, serverId, userId, 'voice', channelId);
     if (permissions === null || !hasChannelPermission(permissions, 'VIEW_CHANNEL') || !hasChannelPermission(permissions, 'CONNECT')) return false;
+    // A role change can remove publishing rights without removing CONNECT. Evict
+    // participants still carrying broader LiveKit grants, including after restart.
+    const grant = participant.permission;
+    if (!grant || grant.canPublishData || !Array.isArray(grant.canPublishSources)) return false;
+    const allowedSources = new Set<TrackSource>();
+    if (hasChannelPermission(permissions, 'SPEAK')) allowedSources.add(TrackSource.MICROPHONE);
+    if (hasChannelPermission(permissions, 'VIDEO')) allowedSources.add(TrackSource.CAMERA);
+    if (hasChannelPermission(permissions, 'SCREEN_SHARE')) {
+      allowedSources.add(TrackSource.SCREEN_SHARE);
+      allowedSources.add(TrackSource.SCREEN_SHARE_AUDIO);
+    }
+    if (grant.canPublish && grant.canPublishSources.length === 0) return false; // Empty source list means unrestricted publishing.
+    if (!grant.canPublish && grant.canPublishSources.length > 0) return false;
+    if (grant.canPublishSources.some((source) => !allowedSources.has(source))) return false;
     const sessions = await this.options.sessions.listActiveForUser(userId);
     for (const session of sessions) {
       if (roomScopedSessionTag(this.options.apiSecret, roomName, session.id) !== parsed.sessionTag) continue;

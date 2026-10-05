@@ -4674,6 +4674,25 @@ main.cubic-app-shell.cubic-app-reduce-motion *::after {
 .cubic-settings-member-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 8px; border-bottom: 1px solid #ffffff12; }
 .cubic-settings-member-row:last-child { border-bottom: 0; }
 .cubic-settings-member-row .cubic-server-member-entry { flex: 1 1 auto; min-width: 0; }
+.cubic-role-layout { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); gap: 14px; margin-bottom: 12px; }
+.cubic-role-list-item { display: grid; gap: 3px; width: 100%; min-height: 52px; padding: 9px 12px; border: 0; border-bottom: 1px solid #ffffff12; background: transparent; color: var(--cubic-text); font: inherit; text-align: left; cursor: pointer; }
+.cubic-role-list-item:last-child { border-bottom: 0; }
+.cubic-role-list-item:hover, .cubic-role-list-item:focus-visible, .cubic-role-list-item[aria-current="true"] { background: var(--cubic-brand-soft); }
+.cubic-role-list-item small, .cubic-member-roles small { color: var(--cubic-muted); }
+.cubic-role-form { display: grid; gap: 12px; }
+.cubic-role-form > input { min-height: var(--cubic-control-height); padding: 8px 10px; border: 1px solid var(--cubic-control-border); border-radius: var(--cubic-control-radius); background: var(--cubic-bg-1); color: var(--cubic-text); font: inherit; }
+.cubic-role-form fieldset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 12px; min-width: 0; margin: 0; padding: 10px; border: 1px solid var(--cubic-control-border); border-radius: var(--cubic-control-radius); }
+.cubic-role-form legend { padding: 0 5px; font-weight: 700; }
+.cubic-role-permission { display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 5px; border-radius: var(--cubic-control-radius); font-size: .84rem; cursor: pointer; }
+.cubic-role-permission:hover { background: var(--cubic-bg-hover); }
+.cubic-role-permission input { width: 19px; height: 19px; margin: 0; accent-color: var(--cubic-brand-active); }
+.cubic-role-permission input:focus-visible, .cubic-role-list-item:focus-visible, .cubic-role-form input:focus-visible { outline: 2px solid var(--cubic-brand-active); outline-offset: 2px; }
+.cubic-role-form button { width: fit-content; min-height: var(--cubic-control-height); padding: 8px 12px; border: 1px solid var(--cubic-control-border); border-radius: var(--cubic-control-radius); background: var(--cubic-control-bg); color: var(--cubic-text); font: inherit; cursor: pointer; }
+.cubic-role-form button.cubic-control-danger { border-color: #713b43; background: #25181b; color: #e7a6ad; }
+.cubic-member-roles { display: grid; justify-items: end; gap: 3px; min-width: 132px; }
+.cubic-member-roles small { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.cubic-member-roles button { white-space: nowrap; }
+.cubic-member-role-options { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 12px; border-bottom: 1px solid #ffffff12; background: #15171d; }
 .cubic-settings-empty { margin: 0; padding: 18px; color: var(--cubic-muted); text-align: center; }
 .cubic-settings-form-card { display: grid; gap: 10px; padding: 14px; }
 .cubic-settings-form-card h3 { margin: 0; font-size: .9rem; }
@@ -4688,6 +4707,10 @@ main.cubic-app-shell.cubic-app-reduce-motion *::after {
 .cubic-channel-settings-content { padding-top: 24px; }
 .cubic-channel-settings-surface .chat-heading small { text-transform: none; }
 @media (max-width: 760px) {
+  .cubic-role-layout { grid-template-columns: minmax(0, 1fr); }
+  .cubic-role-form fieldset { grid-template-columns: minmax(0, 1fr); }
+  .cubic-settings-member-row { flex-wrap: wrap; }
+  .cubic-member-roles { justify-items: start; min-width: 0; }
   .cubic-server-settings-layout { grid-template-columns: 148px minmax(0, 1fr); }
   .cubic-settings-nav { padding: 12px 8px; }
   .cubic-settings-nav button { padding: 8px; font-size: .82rem; }

@@ -1,6 +1,7 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Database } from '@cubic/database';
+import { SERVER_PERMISSION_BITS, parseServerPermissionName } from '@cubic/shared';
 import { createRequireAuth } from '../auth/guard.js';
 import type { SessionService } from '../security/session.js';
 import { createOwnedServer, listMemberServers, resolveMemberServer } from '../servers/store.js';
@@ -16,7 +17,7 @@ import { createServerInviteLink, listManagedServerInviteLinks, revokeServerInvit
 import { ServerIconStore, SERVER_ICON_MAX_BYTES, InvalidServerIconError } from '../server-icons/storage.js';
 import { checkIconOwner, replaceServerIcon, removeServerIcon } from '../server-icons/service.js';
 import type { ServerVoiceService } from '../server-voice/service.js';
-import { listMemberRoles, listServerRoles } from '../servers/roles.js';
+import { assignCustomRole, createCustomRole, deleteCustomRole, listMemberRoles, listServerRoles, removeCustomRoleAssignment, updateServerRole } from '../servers/roles.js';
 
 export interface ServerRoutesOptions {
   database: Database;
@@ -39,10 +40,25 @@ const moveChannelSchema = z.object({ targetCategoryId: z.string().uuid().nullabl
 const inviteParamsSchema = z.object({ inviteId: z.string().uuid() });
 const inviteTargetSchema = z.object({ userId: z.string().uuid() });
 const memberParamsSchema = serverParamsSchema.extend({ userId: z.string().uuid() });
+const roleParamsSchema = serverParamsSchema.extend({ roleId: z.string().uuid() });
+const memberRoleParamsSchema = memberParamsSchema.extend({ roleId: z.string().uuid() });
+const rolePermissionsSchema = z.array(z.string().refine((value) => parseServerPermissionName(value) !== null)).max(13);
+const createRoleSchema = z.strictObject({ name: z.string().trim().min(1).max(64), permissions: rolePermissionsSchema.optional() });
+const updateRoleSchema = z.strictObject({ name: z.string().trim().min(1).max(64).optional(), permissions: rolePermissionsSchema.optional() }).refine((value) => value.name !== undefined || value.permissions !== undefined);
 const inviteLinkParamsSchema = serverParamsSchema.extend({ linkId: z.string().uuid() });
 
 export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app, options) => {
   const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
+  const revokeRoleVoice = async (serverId: string, userId?: string): Promise<boolean> => {
+    if (!options.serverVoice) return true;
+    try {
+      const users = userId ? [userId] : (await options.database.pool.query<{ user_id: string }>(
+        'select user_id from server_members where server_id = $1', [serverId]
+      )).rows.map((row) => row.user_id);
+      for (const id of users) await options.serverVoice.revokeMember(serverId, id);
+      return true;
+    } catch { return false; }
+  };
   const revokeChannelRooms = (conversationIds: string[], userId: string) => {
     for (const conversationId of conversationIds) {
       options.realtimeEvents?.emitConversationRemoved({ conversationId, removedUserIds: [userId], remainingUserIds: [] });
@@ -318,7 +334,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     if (!params.success) return reply.code(400).send({ error: 'Invalid server.' });
     const result = await listServerRoles(options.database, params.data.serverId, request.auth.user.id);
     if ('denied' in result) return reply.code(404).send({ error: 'Server not found.' });
-    return { roles: result.value };
+    return { roles: result.value, permissionNames: Object.keys(SERVER_PERMISSION_BITS) };
   });
 
   app.get('/:serverId/members/:userId/roles', { preHandler: requireAuth }, async (request, reply) => {
@@ -328,6 +344,59 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     const result = await listMemberRoles(options.database, params.data.serverId, request.auth.user.id, params.data.userId);
     if ('denied' in result) return reply.code(404).send({ error: 'Server member not found.' });
     return { roles: result.value };
+  });
+
+  const roleDenial = (reply: FastifyReply, denied: string) => reply.code(denied === 'not_found' || denied === 'invalid_member' || denied === 'invalid_role' ? 404 : 403).send({ error: 'Role management denied or resource not found.' });
+
+  app.post('/:serverId/roles', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = serverParamsSchema.safeParse(request.params);
+    const body = createRoleSchema.safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid role.' });
+    const result = await createCustomRole(options.database, params.data.serverId, request.auth.user.id, body.data.name, body.data.permissions ?? []);
+    if ('denied' in result) return roleDenial(reply, result.denied);
+    return reply.code(201).send({ role: result.value });
+  });
+
+  app.patch('/:serverId/roles/:roleId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = roleParamsSchema.safeParse(request.params);
+    const body = updateRoleSchema.safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid role.' });
+    const result = await updateServerRole(options.database, params.data.serverId, request.auth.user.id, params.data.roleId, body.data);
+    if ('denied' in result) return roleDenial(reply, result.denied);
+    const voiceRevocationPending = body.data.permissions !== undefined && !await revokeRoleVoice(params.data.serverId);
+    return { role: result.value, voiceRevocationPending };
+  });
+
+  app.delete('/:serverId/roles/:roleId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = roleParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid role.' });
+    const result = await deleteCustomRole(options.database, params.data.serverId, request.auth.user.id, params.data.roleId);
+    if ('denied' in result) return roleDenial(reply, result.denied);
+    if (!await revokeRoleVoice(params.data.serverId)) return { deleted: true, voiceRevocationPending: true };
+    return reply.code(204).send();
+  });
+
+  app.put('/:serverId/members/:userId/roles/:roleId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = memberRoleParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid role assignment.' });
+    const result = await assignCustomRole(options.database, params.data.serverId, request.auth.user.id, params.data.userId, params.data.roleId);
+    if ('denied' in result) return roleDenial(reply, result.denied);
+    const voiceRevocationPending = result.value && !await revokeRoleVoice(params.data.serverId, params.data.userId);
+    return { assigned: result.value, voiceRevocationPending };
+  });
+
+  app.delete('/:serverId/members/:userId/roles/:roleId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = memberRoleParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid role assignment.' });
+    const result = await removeCustomRoleAssignment(options.database, params.data.serverId, request.auth.user.id, params.data.userId, params.data.roleId);
+    if ('denied' in result) return roleDenial(reply, result.denied);
+    const voiceRevocationPending = result.value && !await revokeRoleVoice(params.data.serverId, params.data.userId);
+    return { removed: result.value, voiceRevocationPending };
   });
 
   app.delete('/:serverId/members/:userId', { preHandler: requireAuth }, async (request, reply) => {
@@ -344,7 +413,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     options.realtimeEvents?.emitServerMemberRemoved({ serverId: params.data.serverId, userId: params.data.userId });
     if (options.serverVoice) {
       try { await options.serverVoice.revokeMember(params.data.serverId, params.data.userId); }
-      catch { return reply.code(503).send({ error: 'Membership removed; voice revocation is retrying.' }); }
+      catch { return { removed: true, voiceRevocationPending: true }; }
     }
     return reply.code(204).send();
   });
@@ -395,7 +464,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     options.realtimeEvents?.emitServerMemberRemoved({ serverId: params.data.serverId, userId: actorId });
     if (options.serverVoice) {
       try { await options.serverVoice.revokeMember(params.data.serverId, actorId); }
-      catch { return reply.code(503).send({ error: 'Membership removed; voice revocation is retrying.' }); }
+      catch { return { left: true, voiceRevocationPending: true }; }
     }
     return reply.code(204).send();
   });

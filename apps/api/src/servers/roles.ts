@@ -2,8 +2,9 @@ import type { Database } from '@cubic/database';
 import type { PoolClient } from 'pg';
 import type { ServerRole } from '@cubic/shared';
 import { serverPermissionNames } from '../authorization/server-permissions.js';
+import { canActOnServerMember, getEffectiveServerPermissions, hasServerPermission, serverPermissionMask } from '../authorization/server-permissions.js';
 
-type Denied = { denied: 'not_found' | 'not_owner' | 'invalid_role' | 'invalid_member' };
+type Denied = { denied: 'not_found' | 'forbidden' | 'invalid_role' | 'invalid_member' };
 type Result<T> = { value: T } | Denied;
 
 function role(row: any): ServerRole {
@@ -37,14 +38,16 @@ export async function listMemberRoles(database: Database, serverId: string, acto
   return { value: result.rows.map(role) };
 }
 
-async function withOwnerTransaction<T>(database: Database, serverId: string, actorId: string, action: (client: PoolClient) => Promise<Result<T>>): Promise<Result<T>> {
+async function withRoleTransaction<T>(database: Database, serverId: string, actorId: string, action: (client: PoolClient, authority: NonNullable<Awaited<ReturnType<typeof getEffectiveServerPermissions>>>) => Promise<Result<T>>): Promise<Result<T>> {
   const client = await database.pool.connect();
   try {
     await client.query('begin');
-    const server = await client.query<{ owner_user_id: string }>('select owner_user_id from servers where id = $1 for update', [serverId]);
+    const server = await client.query('select 1 from servers where id = $1 for update', [serverId]);
     if (!server.rows[0]) { await client.query('commit'); return { denied: 'not_found' }; }
-    if (server.rows[0].owner_user_id !== actorId) { await client.query('commit'); return { denied: 'not_owner' }; }
-    const result = await action(client);
+    const authority = await getEffectiveServerPermissions(client, serverId, actorId);
+    if (!authority) { await client.query('commit'); return { denied: 'not_found' }; }
+    if (!hasServerPermission(authority, 'MANAGE_ROLES')) { await client.query('commit'); return { denied: 'forbidden' }; }
+    const result = await action(client, authority);
     await client.query('commit');
     return result;
   } catch (error) {
@@ -55,26 +58,30 @@ async function withOwnerTransaction<T>(database: Database, serverId: string, act
   }
 }
 
-// Domain operations for later slices. No public mutation route is exposed in 12.1.
-export async function createCustomRole(database: Database, serverId: string, actorId: string, name: string): Promise<Result<ServerRole>> {
+export async function createCustomRole(database: Database, serverId: string, actorId: string, name: string, permissions: readonly unknown[] = []): Promise<Result<ServerRole>> {
   const cleanName = name.trim();
-  if (!cleanName || cleanName.length > 64) return { denied: 'invalid_role' };
-  return withOwnerTransaction(database, serverId, actorId, async (client) => {
+  const mask = serverPermissionMask(permissions);
+  if (!cleanName || cleanName.length > 64 || mask === null) return { denied: 'invalid_role' };
+  return withRoleTransaction(database, serverId, actorId, async (client, actor) => {
+    // New roles occupy the highest position. A non-owner cannot create one above themselves.
+    if (!actor.isOwner) return { denied: 'forbidden' };
     const inserted = await client.query(
-      `insert into server_roles (server_id, name, position)
-       select $1, $2, coalesce(max(position), 0) + 1 from server_roles where server_id = $1
-       returning id, server_id, name, position, is_default, permissions`, [serverId, cleanName]
+      `insert into server_roles (server_id, name, position, permissions)
+       select $1, $2, coalesce(max(position), 0) + 1, $3::bigint from server_roles where server_id = $1
+       returning id, server_id, name, position, is_default, permissions`, [serverId, cleanName, mask.toString()]
     );
     return { value: role(inserted.rows[0]) };
   });
 }
 
 export async function assignCustomRole(database: Database, serverId: string, actorId: string, memberId: string, roleId: string): Promise<Result<boolean>> {
-  return withOwnerTransaction(database, serverId, actorId, async (client) => {
-    const member = await client.query('select 1 from server_members where server_id = $1 and user_id = $2', [serverId, memberId]);
-    if (!member.rowCount) return { denied: 'invalid_member' };
-    const target = await client.query('select 1 from server_roles where server_id = $1 and id = $2 and not is_default', [serverId, roleId]);
-    if (!target.rowCount) return { denied: 'invalid_role' };
+  return withRoleTransaction(database, serverId, actorId, async (client, actor) => {
+    const targetMember = await getEffectiveServerPermissions(client, serverId, memberId);
+    if (!targetMember) return { denied: 'invalid_member' };
+    const target = await client.query<{ position: number; permissions: string }>('select position, permissions::text from server_roles where server_id = $1 and id = $2 and not is_default', [serverId, roleId]);
+    if (!target.rows[0]) return { denied: 'invalid_role' };
+    serverPermissionNames(BigInt(target.rows[0].permissions)); // A corrupted stored mask cannot be assigned, even by the owner.
+    if (!canActOnServerMember(actor, targetMember, 'MANAGE_ROLES') || (!actor.isOwner && (target.rows[0].position >= actor.highestRolePosition || (BigInt(target.rows[0].permissions) & ~actor.effectivePermissions) !== 0n))) return { denied: 'forbidden' };
     const inserted = await client.query(
       `insert into server_member_roles (server_id, user_id, role_id) values ($1, $2, $3)
        on conflict (server_id, user_id, role_id) do nothing returning role_id`, [serverId, memberId, roleId]
@@ -84,8 +91,49 @@ export async function assignCustomRole(database: Database, serverId: string, act
 }
 
 export async function deleteCustomRole(database: Database, serverId: string, actorId: string, roleId: string): Promise<Result<boolean>> {
-  return withOwnerTransaction(database, serverId, actorId, async (client) => {
+  return withRoleTransaction(database, serverId, actorId, async (client, actor) => {
+    const target = await client.query<{ position: number }>('select position from server_roles where server_id = $1 and id = $2 and not is_default', [serverId, roleId]);
+    if (!target.rows[0]) return { denied: 'invalid_role' };
+    if (!actor.isOwner && target.rows[0].position >= actor.highestRolePosition) return { denied: 'forbidden' };
     const deleted = await client.query('delete from server_roles where server_id = $1 and id = $2 and not is_default returning id', [serverId, roleId]);
     return deleted.rowCount ? { value: true } : { denied: 'invalid_role' };
+  });
+}
+
+export async function updateServerRole(database: Database, serverId: string, actorId: string, roleId: string, patch: { name?: string | undefined; permissions?: readonly unknown[] | undefined }): Promise<Result<ServerRole>> {
+  const name = patch.name?.trim();
+  const mask = patch.permissions === undefined ? undefined : serverPermissionMask(patch.permissions);
+  if ((name !== undefined && (!name || name.length > 64)) || mask === null || (name === undefined && mask === undefined)) return { denied: 'invalid_role' };
+  return withRoleTransaction(database, serverId, actorId, async (client, actor) => {
+    const found = await client.query<{ position: number; is_default: boolean; permissions: string }>('select position, is_default, permissions::text from server_roles where server_id = $1 and id = $2', [serverId, roleId]);
+    const target = found.rows[0];
+    if (!target) return { denied: 'invalid_role' };
+    if (target.is_default && name !== undefined) return { denied: 'invalid_role' };
+    if (!actor.isOwner) {
+      if (target.is_default || target.position >= actor.highestRolePosition) return { denied: 'forbidden' };
+      if (mask !== undefined && (mask & ~actor.effectivePermissions) !== 0n) return { denied: 'forbidden' };
+      if (mask !== undefined) {
+        const assigned = await client.query('select 1 from server_member_roles where server_id = $1 and user_id = $2 and role_id = $3', [serverId, actorId, roleId]);
+        if (assigned.rowCount) return { denied: 'forbidden' };
+      }
+    }
+    const updated = await client.query(
+      `update server_roles set name = coalesce($3, name), permissions = coalesce($4::bigint, permissions), updated_at = now()
+        where server_id = $1 and id = $2 returning id, server_id, name, position, is_default, permissions`,
+      [serverId, roleId, name ?? null, mask?.toString() ?? null]
+    );
+    return { value: role(updated.rows[0]) };
+  });
+}
+
+export async function removeCustomRoleAssignment(database: Database, serverId: string, actorId: string, memberId: string, roleId: string): Promise<Result<boolean>> {
+  return withRoleTransaction(database, serverId, actorId, async (client, actor) => {
+    const targetMember = await getEffectiveServerPermissions(client, serverId, memberId);
+    if (!targetMember) return { denied: 'invalid_member' };
+    const target = await client.query<{ position: number }>('select position from server_roles where server_id = $1 and id = $2 and not is_default', [serverId, roleId]);
+    if (!target.rows[0]) return { denied: 'invalid_role' };
+    if (!canActOnServerMember(actor, targetMember, 'MANAGE_ROLES') || (!actor.isOwner && target.rows[0].position >= actor.highestRolePosition)) return { denied: 'forbidden' };
+    const removed = await client.query('delete from server_member_roles where server_id = $1 and user_id = $2 and role_id = $3 returning role_id', [serverId, memberId, roleId]);
+    return { value: Boolean(removed.rowCount) };
   });
 }

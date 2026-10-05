@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { AccessToken } from 'livekit-server-sdk';
+import { AccessToken, TrackSource } from 'livekit-server-sdk';
 import type { Database } from '@cubic/database';
 import type { SessionService } from '../security/session.js';
 import { createRealtimeEvents } from '../realtime/events.js';
@@ -14,9 +14,13 @@ const apiSecret = 'voice-test-secret-with-more-than-thirty-two-characters';
 const channelId = '11111111-1111-4111-8111-111111111111';
 const serverId = '22222222-2222-4222-8222-222222222222';
 
-function permissionFixtureRows(sql: string, isMember: boolean): { rows: unknown[]; rowCount: number } | null {
+const fullPublishGrant = { canPublish: true, canPublishData: false, canPublishSources: [
+  TrackSource.MICROPHONE, TrackSource.CAMERA, TrackSource.SCREEN_SHARE, TrackSource.SCREEN_SHARE_AUDIO
+] };
+
+function permissionFixtureRows(sql: string, isMember: boolean, mask = '8001'): { rows: unknown[]; rowCount: number } | null {
   if (sql.includes('from servers s') && sql.includes('join server_members m')) {
-    const rows = isMember ? [{ owner_user_id: 'other-user', permissions_mask: '8001', highest_position: 0 }] : [];
+    const rows = isMember ? [{ owner_user_id: 'other-user', permissions_mask: mask, highest_position: 0 }] : [];
     return { rows, rowCount: rows.length };
   }
   if (sql.includes('from server_voice_channels channel') && sql.includes('left join server_channel_overrides')) {
@@ -62,7 +66,7 @@ test('reconciliation dedupes two devices, retains the other when one leaves, and
   const tag = roomScopedSessionTag(apiSecret, room, sessionId);
   const make = (instanceId: string) => ({
     identity: voiceParticipantIdentity(tag, instanceId),
-    attributes: { cubicUserId: userId, cubicServerVoiceChannelId: channelId }
+    attributes: { cubicUserId: userId, cubicServerVoiceChannelId: channelId }, permission: fullPublishGrant
   });
   let current = [make('55555555-5555-4555-8555-555555555551'), make('55555555-5555-4555-8555-555555555552')];
   let isMember = true;
@@ -105,6 +109,48 @@ test('reconciliation dedupes two devices, retains the other when one leaves, and
   await service.stop();
 });
 
+test('reconciliation evicts stale publishing grants after immediate revocation fails', async () => {
+  const userId = '33333333-3333-4333-8333-333333333333';
+  const sessionId = '44444444-4444-4444-8444-444444444444';
+  const room = serverVoiceRoomName(channelId);
+  const participant = { identity: voiceParticipantIdentity(roomScopedSessionTag(apiSecret, room, sessionId),
+    '55555555-5555-4555-8555-555555555551'),
+    attributes: { cubicUserId: userId, cubicServerVoiceChannelId: channelId }, permission: fullPublishGrant };
+  let current = [participant];
+  let mask = '8001';
+  let failRemove = false;
+  const removed: string[] = [];
+  const database = { pool: { query: async (sql: string) => {
+    const permissions = permissionFixtureRows(sql, true, mask);
+    if (permissions) return permissions;
+    if (sql.includes('from server_voice_channels voice')) return { rows: [{ server_id: serverId }], rowCount: 1 };
+    if (sql.includes('from server_voice_channels where')) return { rows: [{ id: channelId }], rowCount: 1 };
+    if (sql.includes('from server_members')) return { rows: [{}], rowCount: 1 };
+    if (sql.includes('from users')) return { rows: [{ display_name: 'Member' }], rowCount: 1 };
+    throw new Error('Unexpected fixture query');
+  } } } as unknown as Database;
+  const sessions = { listActiveForUser: async () => [{ id: sessionId }],
+    validateId: async () => ({ user: { id: userId } }) } as unknown as SessionService;
+  const admin = { listRooms: async () => [{ name: room }], listParticipants: async () => current,
+    removeParticipant: async (_room: string, identity: string) => {
+      if (failRemove) throw new Error('control plane unavailable');
+      removed.push(identity);
+      current = current.filter((item) => item.identity !== identity);
+    } };
+  const service = new ServerVoiceService({ database, sessions, events: createRealtimeEvents(),
+    apiKey, apiSecret, apiUrl: 'http://unused.invalid', publicUrl: 'wss://unused.invalid', admin });
+  await service.reconcile();
+  assert.equal(service.snapshot(serverId)[0]?.occupants.length, 1);
+  mask = '7489'; // SPEAK removed; CONNECT and VIEW_CHANNEL remain.
+  failRemove = true;
+  await assert.rejects(service.revokeMember(serverId, userId));
+  failRemove = false;
+  await service.reconcile();
+  assert.deepEqual(removed, [participant.identity]);
+  assert.equal(service.snapshot(serverId).length, 0);
+  await service.stop();
+});
+
 test('reconciliation clears stale occupancy when a voice channel fails canonical lookup', async () => {
   const userId = '33333333-3333-4333-8333-333333333333';
   const sessionId = '44444444-4444-4444-8444-444444444444';
@@ -112,7 +158,7 @@ test('reconciliation clears stale occupancy when a voice channel fails canonical
   const participant = {
     identity: voiceParticipantIdentity(roomScopedSessionTag(apiSecret, room, sessionId),
       '55555555-5555-4555-8555-555555555551'),
-    attributes: { cubicUserId: userId, cubicServerVoiceChannelId: channelId }
+    attributes: { cubicUserId: userId, cubicServerVoiceChannelId: channelId }, permission: fullPublishGrant
   };
   let validChannel = true;
   let current = [participant];
@@ -153,7 +199,7 @@ test('overlapping signed events cannot leave an older presence snapshot applied 
   const participant = {
     identity: voiceParticipantIdentity(roomScopedSessionTag(apiSecret, room, sessionId),
       '55555555-5555-4555-8555-555555555551'),
-    attributes: { cubicUserId: userId, cubicServerVoiceChannelId: channelId }
+    attributes: { cubicUserId: userId, cubicServerVoiceChannelId: channelId }, permission: fullPublishGrant
   };
   let firstRead!: () => void;
   let releaseFirst!: () => void;

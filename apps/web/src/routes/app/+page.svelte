@@ -40,6 +40,8 @@
   let updatedCurrentUser = $state<typeof data.user | null>(null);
   let currentUser = $derived(updatedCurrentUser ?? data.user);
   type ProfileIdentity = { id: string; username: string; displayName: string; avatarUrl: string | null };
+  type ServerMemberWithRoles = ProfileIdentity & { owner?: boolean; roleIds?: string[]; highestRolePosition?: number };
+  type ServerRole = { id: string; name: string; position: number; isDefault: boolean; permissions: string[] };
   let selectedProfile = $state<ProfileIdentity | null>(null);
   let profileGeneration = $state(0);
   let loggingOut = $state(false);
@@ -131,7 +133,17 @@
   let serverIconFile = $state<File | null>(null);
   let serverIconBusy = $state(false);
   let serverIconError = $state('');
-  let serverMembers = $state<ProfileIdentity[]>([]);
+  let serverMembers = $state<ServerMemberWithRoles[]>([]);
+  let serverRoles = $state<ServerRole[]>([]);
+  let rolePermissionNames = $state<string[]>([]);
+  let rolesError = $state('');
+  let rolesNotice = $state('');
+  let rolesBusy = $state(false);
+  let roleName = $state('');
+  let rolePermissions = $state<string[]>([]);
+  let selectedRoleId = $state<string | null>(null);
+  let selectedMemberId = $state<string | null>(null);
+  let rolesSequence = 0;
   let pendingServerInvites = $state<any[]>([]);
   let shareInviteLinks = $state<ShareInviteLink[]>([]);
   let showRevokedInviteLinks = $state(false);
@@ -146,7 +158,7 @@
   let serverMembersOpen = $state(false);
   let serverMembersReturnFocus: HTMLElement | null = null;
   let memberRemovalTarget = $state<ProfileIdentity | null>(null);
-  type ServerSurface = 'overview' | 'members' | 'invites';
+  type ServerSurface = 'overview' | 'roles' | 'members' | 'invites';
   type ChannelSettingsTarget = { kind: 'text' | 'voice'; id: string };
   let serverMenuOpen = $state(false);
   let serverSurface = $state<ServerSurface | null>(null);
@@ -431,6 +443,108 @@
     }
   }
 
+  async function refreshServerRoles(server: ServerSummary) {
+    const sequence = ++rolesSequence;
+    rolesError = '';
+    try {
+      const payload = await api(`/api/v1/servers/${server.id}/roles`);
+      if (sequence !== rolesSequence || activeServer?.id !== server.id) return;
+      serverRoles = payload.roles;
+      rolePermissionNames = payload.permissionNames;
+      if (selectedRoleId && !serverRoles.some((role) => role.id === selectedRoleId)) selectedRoleId = null;
+    } catch (cause) {
+      if (sequence === rolesSequence && activeServer?.id === server.id) rolesError = cause instanceof Error ? cause.message : 'Could not load roles.';
+    }
+  }
+
+  function currentRoleAuthority() {
+    const server = activeServer;
+    if (!server) return { owner: false, manage: false, position: 0, permissions: [] as string[] };
+    if (server.ownerUserId === currentUser.id) return { owner: true, manage: true, position: Number.MAX_SAFE_INTEGER, permissions: rolePermissionNames };
+    const member = serverMembers.find((item) => item.id === currentUser.id);
+    const assigned = serverRoles.filter((role) => role.isDefault || member?.roleIds?.includes(role.id));
+    const permissions = [...new Set(assigned.flatMap((role) => role.permissions))];
+    return { owner: false, manage: permissions.includes('MANAGE_ROLES'), position: member?.highestRolePosition ?? 0, permissions };
+  }
+
+  function canManageRole(role: ServerRole) {
+    const actor = currentRoleAuthority();
+    return actor.manage && (actor.owner || (!role.isDefault && actor.position > role.position &&
+      !serverMembers.find((member) => member.id === currentUser.id)?.roleIds?.includes(role.id) &&
+      role.permissions.every((name) => actor.permissions.includes(name))));
+  }
+
+  function canManageMemberRole(member: ServerMemberWithRoles, role: ServerRole) {
+    const actor = currentRoleAuthority();
+    return actor.manage && !role.isDefault && member.id !== currentUser.id && !member.owner &&
+      (actor.owner || (actor.position > (member.highestRolePosition ?? 0) && actor.position > role.position && role.permissions.every((name) => actor.permissions.includes(name))));
+  }
+
+  function selectServerRole(role: ServerRole) {
+    selectedRoleId = role.id;
+    roleName = role.name;
+    rolePermissions = [...role.permissions];
+    rolesError = '';
+    rolesNotice = '';
+  }
+
+  async function createServerRole(event: SubmitEvent) {
+    event.preventDefault();
+    const server = activeServer;
+    if (!server || !currentRoleAuthority().owner || rolesBusy) return;
+    rolesBusy = true; rolesError = ''; rolesNotice = '';
+    try {
+      const result = await api(`/api/v1/servers/${server.id}/roles`, { method: 'POST', body: JSON.stringify({ name: roleName, permissions: [] }) });
+      await refreshServerRoles(server);
+      selectServerRole(result.role);
+    } catch (cause) { rolesError = cause instanceof Error ? cause.message : 'Could not create role.'; }
+    finally { rolesBusy = false; }
+  }
+
+  async function saveServerRole(event: SubmitEvent) {
+    event.preventDefault();
+    const server = activeServer;
+    const selected = serverRoles.find((role) => role.id === selectedRoleId);
+    if (!server || !selected || !canManageRole(selected) || rolesBusy) return;
+    rolesBusy = true; rolesError = ''; rolesNotice = '';
+    try {
+      const permissionsChanged = rolePermissions.length !== selected.permissions.length || rolePermissions.some((name) => !selected.permissions.includes(name));
+      const patch = { ...(!selected.isDefault && roleName !== selected.name ? { name: roleName } : {}), ...(permissionsChanged ? { permissions: rolePermissions } : {}) };
+      if (!Object.keys(patch).length) return;
+      const result = await api(`/api/v1/servers/${server.id}/roles/${selected.id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+      await refreshServerRoles(server);
+      await refreshServerMembership(server);
+      selectServerRole(result.role);
+      if (result.voiceRevocationPending) rolesNotice = 'Role saved. Active voice access is pending reconciliation.';
+    } catch (cause) { rolesError = cause instanceof Error ? cause.message : 'Could not save role.'; }
+    finally { rolesBusy = false; }
+  }
+
+  async function deleteServerRole(role: ServerRole) {
+    const server = activeServer;
+    if (!server || role.isDefault || !canManageRole(role) || rolesBusy || !confirm(`Delete ${role.name}? Members will lose this role.`)) return;
+    rolesBusy = true; rolesError = ''; rolesNotice = '';
+    try {
+      const result = await api(`/api/v1/servers/${server.id}/roles/${role.id}`, { method: 'DELETE' });
+      selectedRoleId = null;
+      await Promise.all([refreshServerRoles(server), refreshServerMembership(server)]);
+      if (result?.voiceRevocationPending) rolesNotice = 'Role deleted. Active voice access is pending reconciliation.';
+    } catch (cause) { rolesError = cause instanceof Error ? cause.message : 'Could not delete role.'; }
+    finally { rolesBusy = false; }
+  }
+
+  async function setMemberRole(member: ServerMemberWithRoles, role: ServerRole, assigned: boolean) {
+    const server = activeServer;
+    if (!server || !canManageMemberRole(member, role) || rolesBusy) return;
+    rolesBusy = true; rolesError = ''; rolesNotice = '';
+    try {
+      const result = await api(`/api/v1/servers/${server.id}/members/${member.id}/roles/${role.id}`, { method: assigned ? 'DELETE' : 'PUT' });
+      await refreshServerMembership(server);
+      if (result?.voiceRevocationPending) rolesNotice = 'Member role updated. Active voice access is pending reconciliation.';
+    } catch (cause) { rolesError = cause instanceof Error ? cause.message : 'Could not update member roles.'; }
+    finally { rolesBusy = false; }
+  }
+
   async function refreshConversations() {
     const payload = await api('/api/v1/conversations');
     conversations = payload.conversations;
@@ -560,6 +674,7 @@
     channelSettingsError = '';
     serverSurface = view;
     void refreshServerMembership(server);
+    if (view === 'roles' || view === 'members') void refreshServerRoles(server);
     if (view === 'invites') void refreshShareInviteLinks(server);
   }
 
@@ -4668,6 +4783,7 @@
         <div class="cubic-server-settings-layout">
           <nav class="cubic-settings-nav" aria-label="Server settings sections">
             <button type="button" aria-current={serverSurface === 'overview' ? 'page' : undefined} onclick={() => openServerSurface('overview')}><Icon name="server" size={17} /> Overview</button>
+            <button type="button" aria-current={serverSurface === 'roles' ? 'page' : undefined} onclick={() => openServerSurface('roles')}><Icon name="shield" size={17} /> Roles</button>
             <button type="button" aria-current={serverSurface === 'members' ? 'page' : undefined} onclick={() => openServerSurface('members')}><Icon name="users" size={17} /> Members <span>{serverMembers.length}</span></button>
             {#if activeServer.ownerUserId === currentUser.id}
               <button type="button" aria-current={serverSurface === 'invites' ? 'page' : undefined} onclick={() => openServerSurface('invites')}><Icon name="user-plus" size={17} /> Invites</button>
@@ -4697,6 +4813,41 @@
                 {/if}
                 {#if serverMembershipError}<p class="inline-error" role="alert">{serverMembershipError}</p>{/if}
               </section>
+            {:else if serverSurface === 'roles'}
+              <section class="cubic-settings-section" aria-labelledby="cubic-server-roles-title">
+                <div class="cubic-settings-title"><div><small>SERVER</small><h2 id="cubic-server-roles-title">Roles</h2><p>Permissions apply to everyone with a role. Higher roles have more management authority.</p></div><button class="cubic-settings-secondary" type="button" onclick={() => refreshServerRoles(activeServer!)}>Refresh</button></div>
+                <div class="cubic-role-layout">
+                  <div class="cubic-settings-member-list" aria-label="Server roles">
+                    {#each serverRoles as role (role.id)}
+                      <button class="cubic-role-list-item" type="button" aria-current={selectedRoleId === role.id ? 'true' : undefined} onclick={() => selectServerRole(role)}><strong>{role.name}</strong><small>{role.isDefault ? 'Default · everyone' : `Position ${role.position}`}</small></button>
+                    {/each}
+                    {#if !serverRoles.length}<p class="cubic-settings-empty">No roles are available.</p>{/if}
+                  </div>
+                  <div class="cubic-settings-card cubic-settings-form-card">
+                    {#if selectedRoleId && serverRoles.some((role) => role.id === selectedRoleId)}
+                      {@const selectedRole = serverRoles.find((role) => role.id === selectedRoleId)!}
+                      <h3>{selectedRole.name}</h3>
+                      {#if selectedRole.isDefault}<p>The default role applies to every member. Its name and position are fixed.</p>{/if}
+                      <form class="cubic-role-form" onsubmit={saveServerRole}>
+                        {#if !selectedRole.isDefault}<label for="cubic-role-name">Role name</label><input id="cubic-role-name" bind:value={roleName} maxlength="64" required disabled={!canManageRole(selectedRole) || rolesBusy} />{/if}
+                        <fieldset disabled={!canManageRole(selectedRole) || rolesBusy}>
+                          <legend>Permissions</legend>
+                          {#each rolePermissionNames as permission (permission)}
+                            <label class="cubic-role-permission"><input type="checkbox" value={permission} checked={rolePermissions.includes(permission)} disabled={!currentRoleAuthority().owner && !currentRoleAuthority().permissions.includes(permission)} onchange={(event) => { rolePermissions = event.currentTarget.checked ? [...rolePermissions, permission] : rolePermissions.filter((name) => name !== permission); }} /><span>{permission.replaceAll('_', ' ').toLowerCase()}</span></label>
+                          {/each}
+                        </fieldset>
+                        {#if canManageRole(selectedRole)}<div class="cubic-settings-actions"><button type="submit" disabled={rolesBusy}>{rolesBusy ? 'Saving…' : 'Save role'}</button>{#if !selectedRole.isDefault}<button class="cubic-control-danger" type="button" onclick={() => deleteServerRole(selectedRole)} disabled={rolesBusy}>Delete role</button>{/if}</div>{:else}<p class="cubic-settings-empty">You cannot manage this role.</p>{/if}
+                      </form>
+                    {:else if currentRoleAuthority().owner}
+                      <h3>Create role</h3>
+                      <form class="cubic-role-form" onsubmit={createServerRole}><label for="cubic-new-role-name">Role name</label><input id="cubic-new-role-name" bind:value={roleName} maxlength="64" required disabled={rolesBusy} /><button type="submit" disabled={rolesBusy}>{rolesBusy ? 'Creating…' : 'Create role'}</button></form>
+                    {:else}<p class="cubic-settings-empty">Select a role to view its permissions.</p>{/if}
+                  </div>
+                </div>
+                {#if selectedRoleId && currentRoleAuthority().owner}<button class="cubic-settings-secondary" type="button" onclick={() => { selectedRoleId = null; roleName = ''; rolePermissions = []; }}>New role</button>{/if}
+                {#if rolesNotice}<p role="status">{rolesNotice}</p>{/if}
+                {#if rolesError}<p class="inline-error" role="alert">{rolesError} <button type="button" onclick={() => refreshServerRoles(activeServer!)}>Retry</button></p>{/if}
+              </section>
             {:else if serverSurface === 'members'}
               <section class="cubic-settings-section" aria-labelledby="cubic-server-members-title">
                 <div class="cubic-settings-title"><div><small>SERVER</small><h2 id="cubic-server-members-title">Members · {serverMembers.length}</h2><p>People with access to {activeServer.name}.</p></div><button type="button" class="cubic-settings-secondary cubic-server-member-refresh" onclick={() => refreshServerMembership(activeServer!)}>Refresh</button></div>
@@ -4707,12 +4858,19 @@
                         <span class="avatar cubic-user-avatar-shell">{member.displayName.slice(0,1).toUpperCase()}{#if member.avatarUrl}{#key member.avatarUrl}<img src={member.avatarUrl} alt="" onerror={hideFailedUserAvatar} />{/key}{/if}</span>
                         <span><strong>{member.displayName}</strong><small>@{member.username} · {member.id === activeServer.ownerUserId ? 'Owner' : 'Member'}</small></span>
                       </button>
+                      <div class="cubic-member-roles">
+                        <small>{[...serverRoles.filter((role) => role.isDefault || member.roleIds?.includes(role.id)).map((role) => role.name)].join(' · ') || '@everyone'}</small>
+                        {#if serverRoles.some((role) => canManageMemberRole(member, role))}<button class="cubic-settings-secondary" type="button" aria-expanded={selectedMemberId === member.id} onclick={() => selectedMemberId = selectedMemberId === member.id ? null : member.id}>Manage roles</button>{/if}
+                      </div>
                       {#if activeServer.ownerUserId === currentUser.id && member.id !== activeServer.ownerUserId}<button class="cubic-server-member-remove" type="button" aria-label={`Remove ${member.displayName} from server`} onclick={(event) => confirmMemberRemoval(member, event)} disabled={serverMembershipBusy}>Remove</button>{/if}
                     </div>
+                    {#if selectedMemberId === member.id}<div class="cubic-member-role-options" aria-label={`Roles for ${member.displayName}`}>{#each serverRoles.filter((role) => canManageMemberRole(member, role)) as role (role.id)}<label class="cubic-role-permission"><input type="checkbox" checked={member.roleIds?.includes(role.id) ?? false} disabled={rolesBusy} onchange={() => setMemberRole(member, role, member.roleIds?.includes(role.id) ?? false)} /><span>{role.name}</span></label>{/each}</div>{/if}
                   {/each}
                   {#if !serverMembers.length}<p class="cubic-settings-empty">No members are available right now.</p>{/if}
                 </div>
                 {#if serverMembershipError}<p class="inline-error" role="alert">{serverMembershipError} <button type="button" onclick={() => refreshServerMembership(activeServer!)}>Retry</button></p>{/if}
+                {#if rolesError}<p class="inline-error" role="alert">{rolesError} <button type="button" onclick={() => refreshServerRoles(activeServer!)}>Retry</button></p>{/if}
+                {#if rolesNotice}<p role="status">{rolesNotice}</p>{/if}
               </section>
             {:else if serverSurface === 'invites' && activeServer.ownerUserId === currentUser.id}
               <section class="cubic-settings-section" aria-labelledby="cubic-server-invites-title">
