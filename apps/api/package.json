@@ -26,7 +26,7 @@
     "fastify": "5.12.5",
     "livekit-server-sdk": "^2.19.0",
     "nodemailer": "^10.0.11",
-    "sharp": "^0.35.4",
+    "sharp": "^0.35.5",
     "socket.io": "^4.8.1",
     "zod": "^4.4.3"
   },
