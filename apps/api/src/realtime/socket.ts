@@ -1143,6 +1143,20 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
     io.to(room).emit('server:removed', { serverId: event.serverId });
   });
 
+  const unsubscribeServerLayoutChanged = options.events.onServerLayoutChanged((event) => {
+    void (async () => {
+      if (event.deletedConversationId) {
+        const room = conversationRoom(event.deletedConversationId);
+        io.to(room).emit('conversation:removed', { conversationId: event.deletedConversationId });
+        io.in(room).socketsLeave(room);
+      }
+      const members = await options.database.pool.query<{ user_id: string }>(
+        'select user_id from server_members where server_id = $1', [event.serverId]
+      );
+      for (const member of members.rows) io.to(userRoom(member.user_id)).emit('server:layout:changed', { serverId: event.serverId });
+    })().catch(() => {});
+  });
+
   const unsubscribeProfileChanged = options.events.onProfileChanged((event) => {
     const existing = profileFanouts.get(event.userId);
     if (existing) {
@@ -1240,6 +1254,7 @@ export function attachRealtime(options: AttachRealtimeOptions): RealtimeServer {
       unsubscribeRemoved();
       unsubscribeServerVoicePresence();
       unsubscribeServerMemberRemoved();
+      unsubscribeServerLayoutChanged();
       unsubscribeInvites();
       unsubscribeSessionRevoked();
       unsubscribeProfileChanged();

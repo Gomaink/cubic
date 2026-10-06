@@ -325,6 +325,14 @@ class RealtimeDatabase {
     },
     query: async (sql: string, params: any[] = []) => {
       const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (normalized === 'select user_id from server_members where server_id = $1') {
+        const users = new Set<string>();
+        if (params[0] === this.channelServerId)
+          for (const members of this.serverChannelMemberships.values()) for (const id of members) users.add(id);
+        for (const id of this.voiceServerMemberships.get(params[0]) ?? []) users.add(id);
+        const rows = [...users].map((user_id) => ({ user_id }));
+        return { rows, rowCount: rows.length };
+      }
       if (normalized === 'select 1 from server_members where server_id = $1 and user_id = $2') {
         const rows = this.voiceServerMemberships.get(params[0])?.has(params[1]) ? [{ '?column?': 1 }] : [];
         await this.voiceMembershipReadGate?.(rows);
@@ -1992,4 +2000,31 @@ test('profile changes reach current conversation peers but not outsiders or remo
   assert.equal((await ownUpdate as { displayName: string }).displayName, 'Again');
   assert.deepEqual(removedEvents, []);
   assert.deepEqual(outsiderEvents, []);
+});
+
+test('committed layout fanout is generic and closes a deleted conversation room', async (context) => {
+  const harness = await startRealtimeHarness();
+  context.after(() => closeRealtimeHarness(harness));
+  const managerId = randomUUID();
+  const hiddenId = randomUUID();
+  const channelId = randomUUID();
+  const managerSession = harness.repository.add('layout-manager', managerId);
+  harness.repository.add('layout-hidden', hiddenId);
+  harness.database.serverChannelMemberships.set(channelId, new Set([managerId, hiddenId]));
+  harness.database.hiddenChannels.add(`${channelId}:${hiddenId}`);
+  const manager = await connectClient(harness, 'layout-manager');
+  const hidden = await connectClient(harness, 'layout-hidden');
+  assert.deepEqual(await socketAck(manager, 'conversation:join', { conversationId: channelId }), { ok: true });
+  assert.equal(serverSocketIsInRoom(harness, managerSession.session.id, channelId), true);
+  assert.deepEqual(await socketAck(hidden, 'conversation:join', { conversationId: channelId }), { ok: false, error: 'Conversation not found.' });
+  const managerLayout = waitForEvent(manager, 'server:layout:changed');
+  const hiddenLayout = waitForEvent(hidden, 'server:layout:changed');
+  const removed = waitForEvent(manager, 'conversation:removed');
+  harness.events.emitServerLayoutChanged({ serverId: harness.database.channelServerId, deletedConversationId: channelId });
+  assert.deepEqual(await managerLayout, { serverId: harness.database.channelServerId });
+  assert.deepEqual(await hiddenLayout, { serverId: harness.database.channelServerId });
+  assert.deepEqual(await removed, { conversationId: channelId });
+  assert.equal(serverSocketIsInRoom(harness, managerSession.session.id, channelId), false);
+  manager.close();
+  hidden.close();
 });

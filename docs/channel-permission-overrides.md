@@ -1,4 +1,4 @@
-# Channel permission overrides (Alpha 12.3)
+# Channel permission overrides (Alpha 12.4)
 
 `VIEW_CHANNEL` is bit 12. It controls text and voice channel discovery and access independently of `VIEW_SERVER`. Migration 0023 adds it to every existing default role and to the default role trigger (mask 8001), so channels retain their previous visibility until an override changes it. Custom roles remain unchanged. The owner comes only from `servers.owner_user_id` and, while still a member, bypasses all channel overrides.
 
@@ -22,6 +22,6 @@ Socket.IO initial server text room joins and explicit joins require visibility. 
 
 Server voice ticket issuance requires `VIEW_CHANNEL` and `CONNECT` after locking the server and rechecking membership. The LiveKit token grants only the publish sources allowed by `SPEAK` (microphone), `VIDEO` (camera), and `SCREEN_SHARE` (screen video and audio). A member with `CONNECT` and no publish permissions may join to listen. Periodic reconciliation removes participants who lose visibility or connect permission. Issued tokens expire after 60 seconds; obtaining a new token requires the same server-side authorization again. Expiry does not disconnect a participant who already joined. Immediate revocation of individual publish sources for an already connected participant requires additional LiveKit control-plane updates and is not claimed here.
 
-Overrides belong only to individual text or voice channels. Categories are layout containers and have no inherited permissions in 12.3. Alpha 12.4 can add role/member management UI and override editing against this model; any future category inheritance needs an explicit ordering rule and migration. Channel lists resolve masks with one server authority query and one batched channel/override query per channel kind, avoiding a query per channel or assigned role.
+Overrides belong only to individual text or voice channels. Categories are layout containers and have no inherited permissions in 12.4. Override editing remains a future slice; any future category inheritance needs an explicit ordering rule and migration. Channel lists resolve masks with one server authority query and one batched channel/override query per channel kind, avoiding a query per channel or assigned role.
 
 No override write API exists in this slice. A future writer must validate canonical permission names, derive the actor from the session, authorize the server and channel, and lock the server row before changing overrides. The voice ticket path already holds that lock while checking permissions and issuing the token. Direct database writes outside this locking convention are operational changes and cannot provide the same ordering guarantee.

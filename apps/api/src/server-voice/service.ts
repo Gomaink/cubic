@@ -146,6 +146,10 @@ export class ServerVoiceService {
     }
   }
 
+  async revokeDeletedChannel(channelId: string): Promise<void> {
+    await this.refreshChannel(channelId);
+  }
+
   reconcile(): Promise<void> {
     if (this.reconciling) return this.reconciling;
     this.reconciling = this.runReconciliation().finally(() => { this.reconciling = null; });

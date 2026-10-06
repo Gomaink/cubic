@@ -5,9 +5,9 @@ import { SERVER_PERMISSION_BITS, parseServerPermissionName } from '@cubic/shared
 import { createRequireAuth } from '../auth/guard.js';
 import type { SessionService } from '../security/session.js';
 import { createOwnedServer, listMemberServers, resolveMemberServer } from '../servers/store.js';
-import { createOwnedTextChannel, listMemberTextChannels } from '../servers/channels.js';
-import { createCategory, deleteCategory, listMemberCategories, moveCategory, moveTypedChannel, renameCategory } from '../servers/layout.js';
-import { createVoiceChannel, listMemberVoiceChannels, renameVoiceChannel } from '../servers/voice-channels.js';
+import { createOwnedTextChannel, deleteTextChannel, listMemberTextChannels, renameTextChannel } from '../servers/channels.js';
+import { createCategory, deleteCategory, listMemberCategories, moveCategory, moveTypedChannel, renameCategory, withChannelManagementLock } from '../servers/layout.js';
+import { createVoiceChannel, deleteVoiceChannel, listMemberVoiceChannels, renameVoiceChannel } from '../servers/voice-channels.js';
 import {
   acceptServerInvite, cancelServerInvite, createServerInvite, leaveServer, removeServerMember,
   listOwnedServerInvites, listReceivedServerInvites, listServerMembers
@@ -64,6 +64,11 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
       options.realtimeEvents?.emitConversationRemoved({ conversationId, removedUserIds: [userId], remainingUserIds: [] });
     }
   };
+  const layoutChanged = (serverId: string, deletedConversationId?: string) =>
+    options.realtimeEvents?.emitServerLayoutChanged(deletedConversationId ? { serverId, deletedConversationId } : { serverId });
+  const channelDenial = (reply: FastifyReply, denied: string) =>
+    reply.code(denied === 'not_owner' ? 403 : denied === 'invalid_index' ? 400 : 404)
+      .send({ error: 'Channel management denied or resource not found.' });
 
   app.post('/', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
@@ -154,6 +159,31 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     return { channels: await listMemberTextChannels(options.database, server.id, request.auth.user.id) };
   });
 
+  app.get('/:serverId/channel-management', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = serverParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid server.' });
+    const result = await withChannelManagementLock(options.database, params.data.serverId, request.auth.user.id, async (client) => {
+      const text = await client.query(`select channel.id, channel.server_id as "serverId", channel.conversation_id as "conversationId",
+          channel.category_id as "categoryId", channel.name, channel.position, channel.created_at as "createdAt", channel.updated_at as "updatedAt"
+          from server_text_channels channel
+          join conversations conversation on conversation.id = channel.conversation_id and conversation.kind = 'server_text'
+          left join server_channel_categories category on category.id = channel.category_id and category.server_id = channel.server_id
+          where channel.server_id = $1 and (channel.category_id is null or category.id is not null)
+          order by channel.position, channel.id`, [params.data.serverId]);
+      const voice = await client.query(`select channel.id, channel.server_id as "serverId", channel.category_id as "categoryId",
+          channel.name, channel.position, channel.created_at as "createdAt", channel.updated_at as "updatedAt"
+          from server_voice_channels channel
+          left join server_channel_categories category on category.id = channel.category_id and category.server_id = channel.server_id
+          where channel.server_id = $1 and (channel.category_id is null or category.id is not null)
+          order by channel.position, channel.id`, [params.data.serverId]);
+      const categories = await client.query('select id, server_id as "serverId", name, position, created_at as "createdAt", updated_at as "updatedAt" from server_channel_categories where server_id = $1 order by position, id', [params.data.serverId]);
+      return { canManageChannels: true, channels: text.rows, voiceChannels: voice.rows, categories: categories.rows };
+    });
+    if ('denied' in result) return channelDenial(reply, result.denied);
+    return result;
+  });
+
   app.post('/:serverId/channels', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
     const params = serverParamsSchema.safeParse(request.params);
@@ -168,11 +198,31 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
       body.data.categoryId ?? null
     );
     if ('denied' in result) {
-      return result.denied === 'not_found'
-        ? reply.code(404).send({ error: 'Server not found.' })
-        : reply.code(403).send({ error: 'Only the server owner can create channels.' });
+      return channelDenial(reply, result.denied);
     }
+    layoutChanged(params.data.serverId);
     return reply.code(201).send({ channel: result.channel });
+  });
+
+  app.patch('/:serverId/channels/:channelId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = channelParamsSchema.safeParse(request.params);
+    const body = categoryNameSchema.safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid text channel.' });
+    const result = await renameTextChannel(options.database, params.data.serverId, request.auth.user.id, params.data.channelId, body.data.name);
+    if ('denied' in result) return channelDenial(reply, result.denied);
+    layoutChanged(params.data.serverId);
+    return result;
+  });
+
+  app.delete('/:serverId/channels/:channelId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = channelParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid text channel.' });
+    const result = await deleteTextChannel(options.database, params.data.serverId, request.auth.user.id, params.data.channelId);
+    if ('denied' in result) return channelDenial(reply, result.denied);
+    layoutChanged(params.data.serverId, result.conversationId);
+    return reply.code(204).send();
   });
 
   app.get('/:serverId/voice-channels', { preHandler: requireAuth }, async (request, reply) => {
@@ -192,6 +242,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     const result = await createVoiceChannel(options.database, params.data.serverId, request.auth.user.id,
       body.data.name, body.data.categoryId ?? null);
     if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: 'Voice channel creation denied.' });
+    layoutChanged(params.data.serverId);
     return reply.code(201).send(result);
   });
 
@@ -203,7 +254,22 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     const result = await renameVoiceChannel(options.database, params.data.serverId, request.auth.user.id,
       params.data.channelId, body.data.name);
     if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: 'Voice channel rename denied.' });
+    layoutChanged(params.data.serverId);
     return result;
+  });
+
+  app.delete('/:serverId/voice-channels/:channelId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = channelParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid voice channel.' });
+    const result = await deleteVoiceChannel(options.database, params.data.serverId, request.auth.user.id, params.data.channelId);
+    if ('denied' in result) return channelDenial(reply, result.denied);
+    layoutChanged(params.data.serverId);
+    if (options.serverVoice) {
+      try { await options.serverVoice.revokeDeletedChannel(params.data.channelId); }
+      catch { return { deleted: true, voiceRevocationPending: true }; }
+    }
+    return reply.code(204).send();
   });
 
   app.get('/:serverId/categories', { preHandler: requireAuth }, async (request, reply) => {
@@ -221,7 +287,8 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     const body = categoryNameSchema.safeParse(request.body);
     if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid category.' });
     const result = await createCategory(options.database, params.data.serverId, request.auth.user.id, body.data.name);
-    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Only the server owner can manage categories.' : 'Server not found.' });
+    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Channel management denied.' : 'Server not found.' });
+    layoutChanged(params.data.serverId);
     return reply.code(201).send(result);
   });
 
@@ -231,7 +298,8 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     const body = categoryNameSchema.safeParse(request.body);
     if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid category.' });
     const result = await renameCategory(options.database, params.data.serverId, request.auth.user.id, params.data.categoryId, body.data.name);
-    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Only the server owner can manage categories.' : 'Category not found.' });
+    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Channel management denied.' : 'Category not found.' });
+    layoutChanged(params.data.serverId);
     return result;
   });
 
@@ -240,7 +308,8 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     const params = categoryParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid category.' });
     const result = await deleteCategory(options.database, params.data.serverId, request.auth.user.id, params.data.categoryId);
-    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Only the server owner can manage categories.' : 'Category not found.' });
+    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Channel management denied.' : 'Category not found.' });
+    layoutChanged(params.data.serverId);
     return reply.code(204).send();
   });
 
@@ -251,6 +320,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid category move.' });
     const result = await moveCategory(options.database, params.data.serverId, request.auth.user.id, params.data.categoryId, body.data.targetIndex);
     if ('denied' in result) return reply.code(result.denied === 'invalid_index' ? 400 : result.denied === 'not_owner' ? 403 : 404).send({ error: 'Category move not allowed.' });
+    layoutChanged(params.data.serverId);
     return result;
   });
 
@@ -261,6 +331,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid channel move.' });
     const result = await moveTypedChannel(options.database, params.data.serverId, request.auth.user.id, 'text', params.data.channelId, body.data.targetCategoryId, body.data.targetIndex);
     if ('denied' in result) return reply.code(result.denied === 'invalid_index' ? 400 : result.denied === 'not_owner' ? 403 : 404).send({ error: 'Channel move not allowed.' });
+    layoutChanged(params.data.serverId);
     return result;
   });
 
@@ -272,6 +343,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     const result = await moveTypedChannel(options.database, params.data.serverId, request.auth.user.id,
       params.data.kind, params.data.channelId, body.data.targetCategoryId, body.data.targetIndex);
     if ('denied' in result) return reply.code(result.denied === 'invalid_index' ? 400 : result.denied === 'not_owner' ? 403 : 404).send({ error: 'Channel move not allowed.' });
+    layoutChanged(params.data.serverId);
     return result;
   });
 

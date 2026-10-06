@@ -62,9 +62,10 @@ export async function getEffectiveServerPermissions(executor: ServerPermissionEx
   const row = result.rows[0];
   if (!row) return null;
   const isOwner = row.owner_user_id === userId;
+  const permissions = parseDatabaseMask(row.permissions_mask);
   return {
     serverId, userId, isOwner,
-    effectivePermissions: isOwner ? ALL_SERVER_PERMISSIONS : parseDatabaseMask(row.permissions_mask),
+    effectivePermissions: isOwner ? ALL_SERVER_PERMISSIONS : permissions,
     highestRolePosition: row.highest_position
   };
 }

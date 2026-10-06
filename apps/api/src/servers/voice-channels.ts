@@ -1,5 +1,5 @@
 import type { Database } from '@cubic/database';
-import { compactLayoutScope, withOwnerLock } from './layout.js';
+import { compactLayoutScope, withChannelManagementLock } from './layout.js';
 import { getEffectiveChannelPermissionsBatch, hasChannelPermission } from '../authorization/channel-permissions.js';
 
 export interface ServerVoiceChannelRecord {
@@ -51,7 +51,7 @@ export async function listMemberVoiceChannels(database: Database, serverId: stri
 }
 
 export async function createVoiceChannel(database: Database, serverId: string, actorId: string, name: string, categoryId: string | null) {
-  return withOwnerLock(database, serverId, actorId, async (client) => {
+  return withChannelManagementLock(database, serverId, actorId, async (client) => {
     if (categoryId) {
       const category = await client.query(
         `select 1 from server_channel_categories where id = $1 and server_id = $2`, [categoryId, serverId]
@@ -70,13 +70,36 @@ export async function createVoiceChannel(database: Database, serverId: string, a
 }
 
 export async function renameVoiceChannel(database: Database, serverId: string, actorId: string, channelId: string, name: string) {
-  return withOwnerLock(database, serverId, actorId, async (client) => {
+  return withChannelManagementLock(database, serverId, actorId, async (client) => {
     const updated = await client.query<Row>(
       `update server_voice_channels set name = $3, updated_at = now()
         where id = $2 and server_id = $1
+          and (category_id is null or exists (
+            select 1 from server_channel_categories where id = category_id and server_id = $1
+          ))
        returning id, server_id, category_id, name, position, created_at, updated_at`,
       [serverId, channelId, name]
     );
     return updated.rows[0] ? { channel: record(updated.rows[0]) } : { denied: 'not_found' as const };
+  });
+}
+
+export async function deleteVoiceChannel(database: Database, serverId: string, actorId: string, channelId: string) {
+  return withChannelManagementLock(database, serverId, actorId, async (client) => {
+    const found = await client.query<{ category_id: string | null }>(
+      'select category_id from server_voice_channels where server_id = $1 and id = $2', [serverId, channelId]
+    );
+    if (!found.rows[0]) return { denied: 'not_found' as const };
+    if (found.rows[0].category_id) {
+      const category = await client.query('select 1 from server_channel_categories where id = $1 and server_id = $2', [found.rows[0].category_id, serverId]);
+      if (!category.rowCount) return { denied: 'not_found' as const };
+    }
+    const deleted = await client.query<{ category_id: string | null }>(
+      `delete from server_voice_channels where server_id = $1 and id = $2 returning category_id`,
+      [serverId, channelId]
+    );
+    if (!deleted.rows[0]) return { denied: 'not_found' as const };
+    await compactLayoutScope(client, serverId, deleted.rows[0].category_id);
+    return { deleted: true };
   });
 }

@@ -1,5 +1,6 @@
 import type { Database } from '@cubic/database';
 import type { PoolClient } from 'pg';
+import { requireServerPermission } from '../authorization/server-permissions.js';
 
 type Client = PoolClient;
 type Denied = { denied: 'not_found' | 'not_owner' | 'invalid_index' };
@@ -22,22 +23,20 @@ function categoryRecord(row: {
   };
 }
 
-export async function withOwnerLock<T>(
+export async function withChannelManagementLock<T>(
   database: Database, serverId: string, actorId: string,
   action: (client: Client) => Promise<T | Denied>
 ): Promise<T | Denied> {
   const client = await database.pool.connect();
   try {
     await client.query('begin');
-    const authority = await client.query<{ owner_user_id: string; is_member: boolean }>(
-      `select s.owner_user_id, exists (
-         select 1 from server_members m where m.server_id = s.id and m.user_id = $2
-       ) as is_member from servers s where s.id = $1 for update of s`,
-      [serverId, actorId]
-    );
-    const row = authority.rows[0];
-    if (!row?.is_member) { await client.query('rollback'); return { denied: 'not_found' }; }
-    if (row.owner_user_id !== actorId) { await client.query('rollback'); return { denied: 'not_owner' }; }
+    const locked = await client.query('select id from servers where id = $1 for update', [serverId]);
+    if (!locked.rowCount) { await client.query('rollback'); return { denied: 'not_found' }; }
+    const authority = await requireServerPermission(client, serverId, actorId, 'MANAGE_CHANNELS');
+    if ('denied' in authority) {
+      await client.query('rollback');
+      return { denied: authority.denied === 'forbidden' ? 'not_owner' : 'not_found' };
+    }
     const result = await action(client);
     if (result && typeof result === 'object' && 'denied' in result) {
       await client.query('rollback');
@@ -117,7 +116,7 @@ export async function listMemberCategories(database: Database, serverId: string,
 }
 
 export async function createCategory(database: Database, serverId: string, actorId: string, name: string) {
-  return withOwnerLock(database, serverId, actorId, async (client) => {
+  return withChannelManagementLock(database, serverId, actorId, async (client) => {
     const ordered = await categories(client, serverId);
     const inserted = await client.query<Parameters<typeof categoryRecord>[0]>(
       `insert into server_channel_categories(server_id, name, position)
@@ -129,7 +128,7 @@ export async function createCategory(database: Database, serverId: string, actor
 }
 
 export async function renameCategory(database: Database, serverId: string, actorId: string, categoryId: string, name: string) {
-  return withOwnerLock(database, serverId, actorId, async (client) => {
+  return withChannelManagementLock(database, serverId, actorId, async (client) => {
     const updated = await client.query<Parameters<typeof categoryRecord>[0]>(
       `update server_channel_categories set name = $3, updated_at = now()
         where server_id = $1 and id = $2
@@ -141,7 +140,7 @@ export async function renameCategory(database: Database, serverId: string, actor
 }
 
 export async function deleteCategory(database: Database, serverId: string, actorId: string, categoryId: string) {
-  return withOwnerLock(database, serverId, actorId, async (client) => {
+  return withChannelManagementLock(database, serverId, actorId, async (client) => {
     const ordered = await categories(client, serverId);
     if (!ordered.some((row) => row.id === categoryId)) return { denied: 'not_found' as const };
     const malformed = await client.query(
@@ -162,7 +161,7 @@ export async function deleteCategory(database: Database, serverId: string, actor
 }
 
 export async function moveCategory(database: Database, serverId: string, actorId: string, categoryId: string, targetIndex: number) {
-  return withOwnerLock(database, serverId, actorId, async (client) => {
+  return withChannelManagementLock(database, serverId, actorId, async (client) => {
     const ordered = (await categories(client, serverId)).map((row) => row.id);
     const current = ordered.indexOf(categoryId);
     if (current < 0) return { denied: 'not_found' as const };
@@ -178,7 +177,7 @@ export async function moveTypedChannel(
   database: Database, serverId: string, actorId: string,
   kind: 'text' | 'voice', channelId: string, targetCategoryId: string | null, targetIndex: number
 ) {
-  return withOwnerLock(database, serverId, actorId, async (client) => {
+  return withChannelManagementLock(database, serverId, actorId, async (client) => {
     const channel = await client.query<{ category_id: string | null }>(
       `select category_id from ${kind === 'text' ? 'server_text_channels' : 'server_voice_channels'}
         where id = $1 and server_id = $2`, [channelId, serverId]

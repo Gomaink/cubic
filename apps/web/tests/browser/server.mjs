@@ -659,6 +659,37 @@ const server = createServer(async (request, response) => {
     members.delete(requestUser.id);
     response.writeHead(204); return response.end();
   }
+  const canManageChannels = (selected) => selected.ownerUserId === requestUser.id ||
+    (fixtureServerRoles.get(selected.id) ?? []).some((role) => role.permissions.includes('MANAGE_CHANNELS') &&
+      (role.isDefault || fixtureRoleAssignments.get(selected.id)?.get(requestUser.id)?.has(role.id)));
+  const channelManagement = /^\/api\/v1\/servers\/([0-9a-f-]+)\/channel-management$/.exec(url.pathname);
+  if (channelManagement && request.method === 'GET') {
+    const selected = fixtureServers.find((item) => item.id === channelManagement[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
+    if (!selected) return json({ error: 'Server not found.' }, 404);
+    if (!canManageChannels(selected)) return json({ error: 'Channel management denied.' }, 403);
+    return json({ canManageChannels: true, channels: fixtureChannels.filter((item) => item.serverId === selected.id),
+      voiceChannels: fixtureVoiceChannels.filter((item) => item.serverId === selected.id),
+      categories: fixtureCategories.filter((item) => item.serverId === selected.id) });
+  }
+  const textChannel = /^\/api\/v1\/servers\/([0-9a-f-]+)\/channels\/([0-9a-f-]+)$/.exec(url.pathname);
+  if (textChannel) {
+    const selected = fixtureServers.find((item) => item.id === textChannel[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
+    if (!selected) return json({ error: 'Server not found.' }, 404);
+    if (!canManageChannels(selected)) return json({ error: 'Channel management denied.' }, 403);
+    const channel = fixtureChannels.find((item) => item.id === textChannel[2] && item.serverId === selected.id);
+    if (!channel) return json({ error: 'Channel not found.' }, 404);
+    if (request.method === 'DELETE') {
+      fixtureChannels = fixtureChannels.filter((item) => item !== channel);
+      messages = messages.filter((item) => item.conversationId !== channel.conversationId);
+      response.writeHead(204); return response.end();
+    }
+    if (request.method === 'PATCH') {
+      const payload = JSON.parse((await body()).toString());
+      const name = typeof payload.name === 'string' ? payload.name.trim() : '';
+      if (!name || name.length > 96) return json({ error: 'Invalid channel.' }, 400);
+      channel.name = name; channel.updatedAt = new Date().toISOString(); return json({ channel });
+    }
+  }
   const serverChannels = /^\/api\/v1\/servers\/([0-9a-f-]+)\/channels$/.exec(url.pathname);
   const categoryRoute = /^\/api\/v1\/servers\/([0-9a-f-]+)\/categories(?:\/([0-9a-f-]+)(?:\/(move))?)?$/.exec(url.pathname);
   const channelMoveRoute = /^\/api\/v1\/servers\/([0-9a-f-]+)\/channels\/([0-9a-f-]+)\/move$/.exec(url.pathname);
@@ -668,7 +699,7 @@ const server = createServer(async (request, response) => {
     if (!selected) return json({ error: 'Server not found.' }, 404);
     const current = fixtureCategories.find((item) => item.id === categoryRoute[2] && item.serverId === selected.id);
     if (request.method === 'GET' && !categoryRoute[2]) return json({ categories: fixtureCategories.filter((item) => item.serverId === selected.id).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt)) });
-    if (selected.ownerUserId !== requestUser.id) return json({ error: 'Owner only.' }, 403);
+    if (!canManageChannels(selected)) return json({ error: 'Channel management denied.' }, 403);
     if (categoryRoute[2] && !current) return json({ error: 'Category not found.' }, 404);
     const payload = request.method === 'DELETE' ? {} : JSON.parse((await body()).toString());
     if (request.method === 'POST' && !current) {
@@ -705,7 +736,7 @@ const server = createServer(async (request, response) => {
   if (channelMoveRoute && request.method === 'POST') {
     const selected = fixtureServers.find((item) => item.id === channelMoveRoute[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
     if (!selected) return json({ error: 'Server not found.' }, 404);
-    if (selected.ownerUserId !== requestUser.id) return json({ error: 'Owner only.' }, 403);
+    if (!canManageChannels(selected)) return json({ error: 'Channel management denied.' }, 403);
     const channel = fixtureChannels.find((item) => item.id === channelMoveRoute[2] && item.serverId === selected.id);
     if (!channel) return json({ error: 'Channel not found.' }, 404);
     const payload = JSON.parse((await body()).toString());
@@ -723,7 +754,7 @@ const server = createServer(async (request, response) => {
   if (typedMove && request.method === 'POST') {
     const selected = fixtureServers.find((item) => item.id === typedMove[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
     if (!selected) return json({ error: 'Server not found.' }, 404);
-    if (selected.ownerUserId !== requestUser.id) return json({ error: 'Owner only.' }, 403);
+    if (!canManageChannels(selected)) return json({ error: 'Channel management denied.' }, 403);
     const all = [...fixtureChannels, ...fixtureVoiceChannels];
     const channel = (typedMove[2] === 'text' ? fixtureChannels : fixtureVoiceChannels).find((item) => item.id === typedMove[3] && item.serverId === selected.id);
     if (!channel) return json({ error: 'Channel not found.' }, 404);
@@ -743,7 +774,13 @@ const server = createServer(async (request, response) => {
     const selected = fixtureServers.find((item) => item.id === voiceChannels[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
     if (!selected) return json({ error: 'Server not found.' }, 404);
     if (request.method === 'GET' && !voiceChannels[2]) return json({ channels: fixtureVoiceChannels.filter((item) => item.serverId === selected.id).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)) });
-    if (selected.ownerUserId !== requestUser.id) return json({ error: 'Owner only.' }, 403);
+    if (!canManageChannels(selected)) return json({ error: 'Channel management denied.' }, 403);
+    if (request.method === 'DELETE' && voiceChannels[2]) {
+      const channel = fixtureVoiceChannels.find((item) => item.id === voiceChannels[2] && item.serverId === selected.id);
+      if (!channel) return json({ error: 'Voice channel not found.' }, 404);
+      fixtureVoiceChannels = fixtureVoiceChannels.filter((item) => item !== channel);
+      response.writeHead(204); return response.end();
+    }
     const payload = JSON.parse((await body()).toString());
     const name = typeof payload.name === 'string' ? payload.name.trim() : '';
     if (!name || name.length > 96) return json({ error: 'Invalid voice channel.' }, 400);
@@ -774,7 +811,7 @@ const server = createServer(async (request, response) => {
     if (!selected) return json({ error: 'Server not found.' }, 404);
     if (request.method === 'GET') return json({ channels: fixtureChannels.filter((item) => item.serverId === selected.id).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)) });
     if (request.method === 'POST') {
-      if (selected.ownerUserId !== requestUser.id) return json({ error: 'Only owner can create channels.' }, 403);
+      if (!canManageChannels(selected)) return json({ error: 'Channel management denied.' }, 403);
       const payload = JSON.parse((await body()).toString());
       const name = typeof payload.name === 'string' ? payload.name.trim() : '';
       if (!name || name.length > 96) return json({ error: 'Invalid channel name.' }, 400);
