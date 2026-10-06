@@ -122,6 +122,8 @@ export interface ServerMemberRemovedEvent {
   userId: string;
 }
 
+export interface ServerLayoutChangedEvent { serverId: string; deletedConversationId?: string; }
+
 type MessageCreatedListener = (event: MessageCreatedEvent) => void;
 type MessageUpdatedListener = (event: MessageChangedEvent) => void;
 type MessageDeletedListener = (event: MessageChangedEvent) => void;
@@ -136,6 +138,7 @@ type DirectBlockedListener = (event: DirectBlockedEvent) => void;
 type CallAuthorizationEndedListener = (event: CallAuthorizationEndedEvent) => void;
 type ServerVoicePresenceListener = (event: ServerVoicePresenceEvent) => void;
 type ServerMemberRemovedListener = (event: ServerMemberRemovedEvent) => void;
+type ServerLayoutChangedListener = (event: ServerLayoutChangedEvent) => void;
 
 export interface RealtimeEvents {
   emitMessageCreated(event: MessageCreatedEvent): void;
@@ -152,6 +155,7 @@ export interface RealtimeEvents {
   emitCallAuthorizationEnded(event: CallAuthorizationEndedEvent): void;
   emitServerVoicePresence(event: ServerVoicePresenceEvent): void;
   emitServerMemberRemoved(event: ServerMemberRemovedEvent): void;
+  emitServerLayoutChanged(event: ServerLayoutChangedEvent): void;
   onMessageCreated(listener: MessageCreatedListener): () => void;
   onMessageUpdated(listener: MessageUpdatedListener): () => void;
   onMessageDeleted(listener: MessageDeletedListener): () => void;
@@ -166,6 +170,7 @@ export interface RealtimeEvents {
   onCallAuthorizationEnded(listener: CallAuthorizationEndedListener): () => void;
   onServerVoicePresence(listener: ServerVoicePresenceListener): () => void;
   onServerMemberRemoved(listener: ServerMemberRemovedListener): () => void;
+  onServerLayoutChanged(listener: ServerLayoutChangedListener): () => void;
 }
 
 export function createRealtimeEvents(): RealtimeEvents {
@@ -183,6 +188,7 @@ export function createRealtimeEvents(): RealtimeEvents {
   const callAuthorizationEndedListeners = new Set<CallAuthorizationEndedListener>();
   const serverVoicePresenceListeners = new Set<ServerVoicePresenceListener>();
   const serverMemberRemovedListeners = new Set<ServerMemberRemovedListener>();
+  const serverLayoutChangedListeners = new Set<ServerLayoutChangedListener>();
 
   return {
     emitMessageCreated(event) {
@@ -226,6 +232,9 @@ export function createRealtimeEvents(): RealtimeEvents {
     },
     emitServerMemberRemoved(event) {
       for (const listener of serverMemberRemovedListeners) listener(event);
+    },
+    emitServerLayoutChanged(event) {
+      for (const listener of serverLayoutChangedListeners) listener(event);
     },
     onMessageCreated(listener) {
       messageCreatedListeners.add(listener);
@@ -282,6 +291,10 @@ export function createRealtimeEvents(): RealtimeEvents {
     onServerMemberRemoved(listener) {
       serverMemberRemovedListeners.add(listener);
       return () => serverMemberRemovedListeners.delete(listener);
+    },
+    onServerLayoutChanged(listener) {
+      serverLayoutChangedListeners.add(listener);
+      return () => serverLayoutChangedListeners.delete(listener);
     }
   };
 }

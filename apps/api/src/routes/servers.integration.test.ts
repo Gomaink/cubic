@@ -126,6 +126,7 @@ test('PostgreSQL enforces membership uniqueness, FKs, deletion semantics, and tr
       await expectCode('insert into server_members (server_id, user_id) values ($1, $2)', [rollbackId, randomUUID()], '23503');
       await client.query('rollback to savepoint creation_attempt');
       assert.equal((await client.query('select 1 from servers where id = $1', [rollbackId])).rowCount, 0);
+      assert.equal((await client.query('select 1 from server_roles where server_id = $1', [rollbackId])).rowCount, 0);
 
       await client.query('delete from users where id = $1', [memberId]);
       assert.equal((await client.query('select 1 from server_members where server_id = $1 and user_id = $2', [serverId, memberId])).rowCount, 0);

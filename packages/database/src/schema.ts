@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -169,6 +170,46 @@ export const serverMembers = pgTable(
   ]
 );
 
+// Higher position means higher hierarchy. Position zero is reserved for the
+// implicit @everyone role, whose UUID is the server UUID.
+export const serverRoles = pgTable(
+  'server_roles',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 64 }).notNull(),
+    position: integer('position').notNull(),
+    isDefault: boolean('is_default').notNull().default(false),
+    permissions: bigint('permissions', { mode: 'bigint' }).notNull().default(sql`0`),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex('server_roles_server_id_id_uq').on(table.serverId, table.id),
+    uniqueIndex('server_roles_server_position_uq').on(table.serverId, table.position),
+    uniqueIndex('server_roles_one_default_uq').on(table.serverId).where(sql`${table.isDefault}`),
+    check('server_roles_name_ck', sql`length(btrim(${table.name})) between 1 and 64 and ${table.name} = btrim(${table.name})`),
+    check('server_roles_permissions_ck', sql`${table.permissions} >= 0 and (${table.permissions} & ~8191::bigint) = 0`),
+    check('server_roles_identity_ck', sql`(${table.isDefault} and ${table.id} = ${table.serverId} and ${table.position} = 0) or (not ${table.isDefault} and ${table.id} <> ${table.serverId} and ${table.position} > 0)`)
+  ]
+);
+
+export const serverMemberRoles = pgTable(
+  'server_member_roles',
+  {
+    serverId: uuid('server_id').notNull(),
+    userId: uuid('user_id').notNull(),
+    roleId: uuid('role_id').notNull(),
+    assignedAt: timestamp('assigned_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex('server_member_roles_pair_uq').on(table.serverId, table.userId, table.roleId),
+    index('server_member_roles_role_idx').on(table.serverId, table.roleId),
+    foreignKey({ columns: [table.serverId, table.userId], foreignColumns: [serverMembers.serverId, serverMembers.userId], name: 'server_member_roles_member_fk' }).onDelete('cascade'),
+    foreignKey({ columns: [table.serverId, table.roleId], foreignColumns: [serverRoles.serverId, serverRoles.id], name: 'server_member_roles_role_fk' }).onDelete('cascade')
+  ]
+);
+
 export const serverInvites = pgTable(
   'server_invites',
   {
@@ -332,6 +373,7 @@ export const serverTextChannels = pgTable(
   },
   (table) => [
     uniqueIndex('server_text_channels_conversation_uq').on(table.conversationId),
+    uniqueIndex('server_text_channels_server_id_id_uq').on(table.serverId, table.id),
     index('server_text_channels_server_created_idx').on(table.serverId, table.createdAt, table.id),
     index('server_text_channels_layout_idx').on(table.serverId, table.categoryId, table.position, table.createdAt, table.id),
     check('server_text_channels_position_ck', sql`${table.position} >= 0`)
@@ -350,8 +392,38 @@ export const serverVoiceChannels = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
   },
   (table) => [
+    uniqueIndex('server_voice_channels_server_id_id_uq').on(table.serverId, table.id),
     index('server_voice_channels_layout_idx').on(table.serverId, table.categoryId, table.position, table.createdAt, table.id),
     check('server_voice_channels_position_ck', sql`${table.position} >= 0`)
+  ]
+);
+
+export const serverChannelOverrides = pgTable(
+  'server_channel_overrides',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    serverId: uuid('server_id').notNull(),
+    textChannelId: uuid('text_channel_id'),
+    voiceChannelId: uuid('voice_channel_id'),
+    roleId: uuid('role_id'),
+    memberUserId: uuid('member_user_id'),
+    allow: bigint('allow', { mode: 'bigint' }).notNull().default(sql`0`),
+    deny: bigint('deny', { mode: 'bigint' }).notNull().default(sql`0`),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
+  },
+  (table) => [
+    foreignKey({ columns: [table.serverId, table.textChannelId], foreignColumns: [serverTextChannels.serverId, serverTextChannels.id], name: 'server_channel_overrides_text_fk' }).onDelete('cascade'),
+    foreignKey({ columns: [table.serverId, table.voiceChannelId], foreignColumns: [serverVoiceChannels.serverId, serverVoiceChannels.id], name: 'server_channel_overrides_voice_fk' }).onDelete('cascade'),
+    foreignKey({ columns: [table.serverId, table.roleId], foreignColumns: [serverRoles.serverId, serverRoles.id], name: 'server_channel_overrides_role_fk' }).onDelete('cascade'),
+    foreignKey({ columns: [table.serverId, table.memberUserId], foreignColumns: [serverMembers.serverId, serverMembers.userId], name: 'server_channel_overrides_member_fk' }).onDelete('cascade'),
+    uniqueIndex('server_channel_overrides_text_role_uq').on(table.textChannelId, table.roleId).where(sql`${table.textChannelId} is not null and ${table.roleId} is not null`),
+    uniqueIndex('server_channel_overrides_text_member_uq').on(table.textChannelId, table.memberUserId).where(sql`${table.textChannelId} is not null and ${table.memberUserId} is not null`),
+    uniqueIndex('server_channel_overrides_voice_role_uq').on(table.voiceChannelId, table.roleId).where(sql`${table.voiceChannelId} is not null and ${table.roleId} is not null`),
+    uniqueIndex('server_channel_overrides_voice_member_uq').on(table.voiceChannelId, table.memberUserId).where(sql`${table.voiceChannelId} is not null and ${table.memberUserId} is not null`),
+    check('server_channel_overrides_channel_ck', sql`num_nonnulls(${table.textChannelId}, ${table.voiceChannelId}) = 1`),
+    check('server_channel_overrides_target_ck', sql`num_nonnulls(${table.roleId}, ${table.memberUserId}) = 1`),
+    check('server_channel_overrides_masks_ck', sql`${table.allow} >= 0 and ${table.deny} >= 0 and (${table.allow} & ~8128::bigint) = 0 and (${table.deny} & ~8128::bigint) = 0 and (${table.allow} & ${table.deny}) = 0`)
   ]
 );
 

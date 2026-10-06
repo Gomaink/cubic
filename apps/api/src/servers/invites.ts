@@ -111,16 +111,21 @@ export async function listOwnedServerInvites(database: Database, serverId: strin
   return { value: result.rows.map(record) };
 }
 
-export async function listServerMembers(database: Database, serverId: string, actorId: string): Promise<Result<Array<{ id: string; username: string; displayName: string; avatarUrl: string | null; owner: boolean }>>> {
+export async function listServerMembers(database: Database, serverId: string, actorId: string): Promise<Result<Array<{ id: string; username: string; displayName: string; avatarUrl: string | null; owner: boolean; roleIds: string[]; highestRolePosition: number }>>> {
   const rows = await database.pool.query(
-    `select u.id, u.username, u.display_name, u.avatar_url, s.owner_user_id
+    `select u.id, u.username, u.display_name, u.avatar_url, s.owner_user_id,
+            coalesce(array_agg(r.id order by r.position desc) filter (where r.id is not null), '{}'::uuid[]) as role_ids,
+            coalesce(max(r.position), 0)::integer as highest_role_position
        from server_members m join users u on u.id = m.user_id join servers s on s.id = m.server_id
+       left join server_member_roles a on a.server_id = m.server_id and a.user_id = m.user_id
+       left join server_roles r on r.server_id = a.server_id and r.id = a.role_id and not r.is_default
       where m.server_id = $1
         and exists (select 1 from server_members mine where mine.server_id = m.server_id and mine.user_id = $2)
+      group by u.id, s.owner_user_id
       order by (u.id = s.owner_user_id) desc, lower(u.display_name), u.id`, [serverId, actorId]
   );
   if (!rows.rowCount) return { denied: 'not_found' };
-  return { value: rows.rows.map((row) => ({ id: row.id, username: row.username, displayName: row.display_name, avatarUrl: normalizeLegacyAvatarUrl(row.avatar_url), owner: row.id === row.owner_user_id })) };
+  return { value: rows.rows.map((row) => ({ id: row.id, username: row.username, displayName: row.display_name, avatarUrl: normalizeLegacyAvatarUrl(row.avatar_url), owner: row.id === row.owner_user_id, roleIds: row.role_ids, highestRolePosition: row.highest_role_position })) };
 }
 
 export async function acceptServerInvite(database: Database, inviteId: string, actorId: string): Promise<Result<string>> {

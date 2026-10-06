@@ -41,7 +41,7 @@ export async function openServerSettings(page: Page) {
   await page.locator('.cubic-server-sidebar-head').getByRole('button', { name: 'Settings', exact: true }).click();
 }
 
-export async function openServerSettingsSection(page: Page, name: 'Overview' | 'Members' | 'Invites') {
+export async function openServerSettingsSection(page: Page, name: 'Overview' | 'Roles' | 'Members' | 'Invites') {
   await openServerSettings(page);
   await page.getByRole('navigation', { name: 'Server settings sections' }).getByRole('button', { name: new RegExp(`^${name}(?:\\s|$)`) }).click();
 }

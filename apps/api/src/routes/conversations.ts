@@ -327,7 +327,7 @@ export const conversationRoutes: FastifyPluginAsync<ConversationRoutesOptions> =
          from messages m where m.conversation_id = c.id and m.deleted_at is null
          order by m.created_at desc, m.id desc limit 1
        ) lm on true
-       where mine.user_id = $1
+       where mine.user_id = $1 and c.kind in ('direct', 'group')
        order by coalesce(lm.created_at, c.updated_at) desc`,
       [request.auth.user.id]
     );

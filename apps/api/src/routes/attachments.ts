@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Database } from '@cubic/database';
 import { createRequireAuth } from '../auth/guard.js';
 import type { SessionService } from '../security/session.js';
-import { authorizeConversationContentCreation } from '../authorization/conversations.js';
+import { authorizeConversationContentCreation, resolveConversationAccess } from '../authorization/conversations.js';
 import {
   AttachmentStorageReserveError,
   attachmentDeliveryPolicy,
@@ -267,6 +267,9 @@ export const attachmentRoutes: FastifyPluginAsync<AttachmentRoutesOptions> =
 
         const row = result.rows[0];
         if (!row) {
+          return reply.code(404).send({ error: 'Attachment not found.' });
+        }
+        if (row.message_id && !await resolveConversationAccess(options.database, row.conversation_id, request.auth.user.id)) {
           return reply.code(404).send({ error: 'Attachment not found.' });
         }
 

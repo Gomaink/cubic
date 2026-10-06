@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import Fastify from 'fastify';
-import { AccessToken } from 'livekit-server-sdk';
+import { AccessToken, TrackSource } from 'livekit-server-sdk';
 import type { Database } from '@cubic/database';
 import type { SessionService } from '../security/session.js';
 import { createBrowserMutationProtection } from '../security/browser-request.js';
@@ -36,7 +36,10 @@ test('HTTP LiveKit webhook requires a valid raw-body signature and reconciles ca
   let participants = [{
     identity: voiceParticipantIdentity(roomScopedSessionTag(apiSecret, room, sessionId),
       '55555555-5555-4555-8555-555555555551'),
-    attributes: { cubicUserId: memberId, cubicServerVoiceChannelId: channelId }
+    attributes: { cubicUserId: memberId, cubicServerVoiceChannelId: channelId },
+    permission: { canPublish: true, canPublishData: false, canPublishSources: [
+      TrackSource.MICROPHONE, TrackSource.CAMERA, TrackSource.SCREEN_SHARE, TrackSource.SCREEN_SHARE_AUDIO
+    ] }
   }];
   const removed: string[] = [];
   let participantReads = 0;
@@ -49,6 +52,12 @@ test('HTTP LiveKit webhook requires a valid raw-body signature and reconciles ca
     }
   };
   const database = { pool: { query: async (sql: string, params: unknown[]) => {
+    if (sql.includes('from servers s') && sql.includes('join server_members m'))
+      return { rows: params[1] === memberId ? [{ owner_user_id: outsiderId, permissions_mask: '8001', highest_position: 0 }] : [],
+        rowCount: params[1] === memberId ? 1 : 0 };
+    if (sql.includes('from server_voice_channels channel') && sql.includes('left join server_channel_overrides'))
+      return { rows: [{ channel_id: channelId, role_id: null, member_user_id: null,
+        allow_mask: null, deny_mask: null }], rowCount: 1 };
     if (sql.includes('from server_voice_channels voice'))
       return { rows: params[0] === channelId ? [{ server_id: serverId }] : [], rowCount: params[0] === channelId ? 1 : 0 };
     if (sql.includes('from server_members'))

@@ -1,5 +1,8 @@
 export const CUBIC_VERSION = '2.0.0-alpha.7' as const;
 export const CUBIC_NAME = 'Cubic' as const;
+export { SERVER_PERMISSION_BITS, parseServerPermissionName } from './server-permissions.js';
+export type { ServerPermissionName } from './server-permissions.js';
+import type { ServerPermissionName } from './server-permissions.js';
 
 export type HealthStatus = 'ok' | 'degraded';
 export type UserTheme = 'dark' | 'light' | 'system';
@@ -22,6 +25,21 @@ export interface UserSettingsPayload {
 
 export interface AuthResponse {
   user: PublicUser;
+}
+
+// Ownership remains on the server, independent of roles.
+export interface ServerRole {
+  id: string;
+  serverId: string;
+  name: string;
+  position: number;
+  isDefault: boolean;
+  permissions: ServerPermissionName[];
+}
+
+export interface ServerRolesResponse {
+  roles: ServerRole[];
+  permissionNames: ServerPermissionName[];
 }
 
 export interface HealthResponse {
