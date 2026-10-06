@@ -4519,9 +4519,9 @@ body { background: var(--cubic-onyx-0); }
 .cubic-app-compact .message-date-divider { min-height: 24px; margin-top: 4px; margin-bottom: 2px; }
 .cubic-app-compact .conversation-row { gap: 9px; padding-block: 5px; }
 .cubic-app-compact .conversation-copy small { margin-top: 2px; }
-.cubic-app-compact .cubic-channel-sidebar-head { padding-top: 7px; padding-bottom: 2px; }
+.cubic-app-compact .cubic-channel-sidebar-head { padding-top: 2px; padding-bottom: 2px; }
 .cubic-app-compact .cubic-server-sidebar .cubic-channel-list { padding-top: 0; padding-bottom: 4px; }
-.cubic-app-compact .cubic-layout-category { margin-top: 2px; }
+.cubic-app-compact .cubic-layout-category { margin-top: 0; }
 .cubic-app-compact .cubic-layout-category-head { min-height: 32px; }
 .cubic-app-compact .cubic-server-sidebar .cubic-channel-row { min-height: 32px; gap: 6px; padding-block: 3px; }
 @media (pointer: coarse) {
@@ -4565,7 +4565,7 @@ main.cubic-app-shell.cubic-app-reduce-motion *::after {
 .cubic-navigation-actions button:disabled { opacity: .4; cursor: default; }
 .cubic-navigation-actions .cubic-navigation-danger { color: #ffb4b8; }
 .cubic-channel-sidebar-head { border-bottom: 1px solid #ffffff12; }
-.cubic-layout-category { margin-top: 12px; }
+.cubic-layout-category { margin-top: 16px; }
 .cubic-layout-category-head, .cubic-layout-channel-line { display: flex; align-items: center; min-width: 0; }
 .cubic-layout-category-head { min-height: 36px; gap: 2px; padding: 0 3px 0 9px; color: var(--cubic-muted); }
 .cubic-layout-category-head strong { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .72rem; letter-spacing: .045em; text-transform: uppercase; }
@@ -4685,6 +4685,7 @@ main.cubic-app-shell.cubic-app-reduce-motion *::after {
 .cubic-settings-member-row:last-child { border-bottom: 0; }
 .cubic-settings-member-row .cubic-server-member-entry { flex: 1 1 auto; min-width: 0; }
 .cubic-role-layout { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); gap: 14px; margin-bottom: 12px; }
+@media (max-width: 1100px) { .cubic-role-layout { grid-template-columns: minmax(0, 1fr); } }
 .cubic-role-list-item { display: grid; gap: 3px; width: 100%; min-height: 52px; padding: 9px 12px; border: 0; border-bottom: 1px solid #ffffff12; background: transparent; color: var(--cubic-text); font: inherit; text-align: left; cursor: pointer; }
 .cubic-role-list-item:last-child { border-bottom: 0; }
 .cubic-role-list-item:hover, .cubic-role-list-item:focus-visible, .cubic-role-list-item[aria-current="true"] { background: var(--cubic-brand-soft); }
@@ -4717,7 +4718,6 @@ main.cubic-app-shell.cubic-app-reduce-motion *::after {
 .cubic-channel-settings-content { padding-top: 24px; }
 .cubic-channel-settings-surface .chat-heading small { text-transform: none; }
 @media (max-width: 760px) {
-  .cubic-role-layout { grid-template-columns: minmax(0, 1fr); }
   .cubic-role-form fieldset { grid-template-columns: minmax(0, 1fr); }
   .cubic-settings-member-row { flex-wrap: wrap; }
   .cubic-member-roles { justify-items: start; min-width: 0; }

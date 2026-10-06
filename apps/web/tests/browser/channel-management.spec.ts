@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { chooseServerCreate, openServers } from './navigation';
+import { chooseServerCreate, isCompactNavigation, openServers } from './navigation';
 
 test.beforeEach(async ({ page, context, request }) => {
   await request.post('http://127.0.0.1:3198/__test/reset');
@@ -7,7 +7,7 @@ test.beforeEach(async ({ page, context, request }) => {
   await page.goto('/app');
 });
 
-test('category controls create there and channel settings rename and delete with confirmation', async ({ page }, testInfo) => {
+test('category controls create there and channel settings rename and delete with confirmation', async ({ page }) => {
   await openServers(page);
   await page.getByRole('button', { name: 'Create server' }).first().click();
   const createServer = page.getByRole('dialog', { name: 'Create server' });
@@ -24,7 +24,7 @@ test('category controls create there and channel settings rename and delete with
   await uncategorized.getByRole('textbox', { name: 'Channel name' }).fill('lobby');
   await uncategorized.getByRole('button', { name: 'Create text channel' }).click();
   const back = page.getByRole('button', { name: 'Back to server', exact: true });
-  if (testInfo.project.name === 'phone-portrait') { await expect(back).toBeVisible(); await back.click(); }
+  if (isCompactNavigation(page)) { await expect(back).toBeVisible(); await back.click(); }
   const category = page.getByRole('region', { name: 'Category Projects' });
   await expect(page.locator('.cubic-channel-list > .cubic-layout-channel-line').first().getByRole('button', { name: 'Text channel lobby', exact: true })).toBeVisible();
   expect(await page.evaluate(() => {
@@ -40,7 +40,7 @@ test('category controls create there and channel settings rename and delete with
   await expect(textDialog.getByRole('combobox', { name: 'Category' })).toHaveValue(/^[0-9a-f-]{36}$/);
   await textDialog.getByRole('textbox', { name: 'Channel name' }).fill('plans');
   await textDialog.getByRole('button', { name: 'Create text channel' }).click();
-  if (testInfo.project.name === 'phone-portrait') { await expect(back).toBeVisible(); await back.click(); }
+  if (isCompactNavigation(page)) { await expect(back).toBeVisible(); await back.click(); }
   await expect(category.getByRole('button', { name: 'Text channel plans', exact: true })).toBeVisible();
   await expect(page.locator('.cubic-channel-list').getByRole('button', { name: 'Text channel plans', exact: true })).toHaveCount(1);
   await category.getByRole('button', { name: 'Actions for text channel plans' }).click();

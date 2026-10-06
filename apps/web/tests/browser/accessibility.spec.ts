@@ -66,9 +66,15 @@ test('messages, search, attachments, and custom dialog expose usable keyboard pa
 
   const picker = page.getByRole('button', { name: 'Add attachment' });
   if (testInfo.project.use.hasTouch) {
+    const dimensions = await picker.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { width: style.width, height: style.height, minWidth: style.minWidth, minHeight: style.minHeight };
+    });
+    expect(dimensions).toEqual({ width: '44px', height: '44px', minWidth: '44px', minHeight: '44px' });
     const box = await picker.boundingBox();
-    expect(box!.width).toBeGreaterThanOrEqual(44);
-    expect(box!.height).toBeGreaterThanOrEqual(44);
+    // Browser coordinate conversion can round a 44 CSS px box a few millionths below 44.
+    expect(box!.width).toBeGreaterThanOrEqual(43.99);
+    expect(box!.height).toBeGreaterThanOrEqual(43.99);
   }
   await picker.focus();
   const chooser = page.waitForEvent('filechooser');
