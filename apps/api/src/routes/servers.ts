@@ -18,6 +18,7 @@ import { ServerIconStore, SERVER_ICON_MAX_BYTES, InvalidServerIconError } from '
 import { checkIconOwner, replaceServerIcon, removeServerIcon } from '../server-icons/service.js';
 import type { ServerVoiceService } from '../server-voice/service.js';
 import { assignCustomRole, createCustomRole, deleteCustomRole, listMemberRoles, listServerRoles, removeCustomRoleAssignment, updateServerRole } from '../servers/roles.js';
+import { CHANNEL_OVERRIDE_PERMISSIONS, listChannelOverrides, writeChannelOverride } from '../servers/channel-overrides.js';
 
 export interface ServerRoutesOptions {
   database: Database;
@@ -35,6 +36,11 @@ const categoryNameSchema = z.object({ name: z.string().trim().min(1).max(96) });
 const categoryParamsSchema = serverParamsSchema.extend({ categoryId: z.string().uuid() });
 const channelParamsSchema = serverParamsSchema.extend({ channelId: z.string().uuid() });
 const typedChannelParamsSchema = channelParamsSchema.extend({ kind: z.enum(['text', 'voice']) });
+const overrideParamsSchema = typedChannelParamsSchema.extend({ targetType: z.enum(['role', 'member']), targetId: z.string().uuid() });
+const overridePermissionSchema = z.enum(CHANNEL_OVERRIDE_PERMISSIONS);
+const overrideListSchema = z.array(overridePermissionSchema).max(CHANNEL_OVERRIDE_PERMISSIONS.length).refine((items) => new Set(items).size === items.length);
+const overrideBodySchema = z.strictObject({ allow: overrideListSchema, deny: overrideListSchema })
+  .refine((value) => value.allow.every((name) => !value.deny.includes(name)));
 const moveCategorySchema = z.object({ targetIndex: z.number().int().nonnegative() });
 const moveChannelSchema = z.object({ targetCategoryId: z.string().uuid().nullable(), targetIndex: z.number().int().nonnegative() });
 const inviteParamsSchema = z.object({ inviteId: z.string().uuid() });
@@ -69,6 +75,13 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
   const channelDenial = (reply: FastifyReply, denied: string) =>
     reply.code(denied === 'not_owner' ? 403 : denied === 'invalid_index' ? 400 : 404)
       .send({ error: 'Channel management denied or resource not found.' });
+  const overrideCommitted = async (serverId: string, kind: 'text' | 'voice', needsVoiceReconcile: boolean) => {
+    try { options.realtimeEvents?.emitServerLayoutChanged({ serverId }); }
+    catch (error) { app.log.error({ error }, 'Could not emit server layout change after channel override commit.'); }
+    if (kind !== 'voice' || !needsVoiceReconcile || !options.serverVoice) return false;
+    try { await options.serverVoice.reconcile(); return false; }
+    catch (error) { app.log.error({ error }, 'Voice reconciliation pending after channel override commit.'); return true; }
+  };
 
   app.post('/', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
@@ -182,6 +195,38 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     });
     if ('denied' in result) return channelDenial(reply, result.denied);
     return result;
+  });
+
+  app.get('/:serverId/layout/:kind/:channelId/permissions', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = typedChannelParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid channel.' });
+    const result = await listChannelOverrides(options.database, params.data.serverId, request.auth.user.id, params.data.kind, params.data.channelId);
+    return 'denied' in result ? channelDenial(reply, result.denied) : result;
+  });
+
+  app.put('/:serverId/layout/:kind/:channelId/permissions/:targetType/:targetId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = overrideParamsSchema.safeParse(request.params);
+    const body = overrideBodySchema.safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid channel override.' });
+    const result = await writeChannelOverride(options.database, params.data.serverId, request.auth.user.id,
+      params.data.kind, params.data.channelId, params.data.targetType, params.data.targetId, body.data);
+    if ('denied' in result) return channelDenial(reply, result.denied);
+    const voiceRevocationPending = await overrideCommitted(params.data.serverId, params.data.kind, true);
+    return { ...result, voiceRevocationPending };
+  });
+
+  app.delete('/:serverId/layout/:kind/:channelId/permissions/:targetType/:targetId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = overrideParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid channel override.' });
+    const result = await writeChannelOverride(options.database, params.data.serverId, request.auth.user.id,
+      params.data.kind, params.data.channelId, params.data.targetType, params.data.targetId, null);
+    if ('denied' in result) return channelDenial(reply, result.denied);
+    const voiceRevocationPending = await overrideCommitted(params.data.serverId, params.data.kind, true);
+    if (voiceRevocationPending) return { removed: true, voiceRevocationPending };
+    return reply.code(204).send();
   });
 
   app.post('/:serverId/channels', { preHandler: requireAuth }, async (request, reply) => {

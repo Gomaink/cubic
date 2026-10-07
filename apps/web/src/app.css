@@ -4717,6 +4717,25 @@ main.cubic-app-shell.cubic-app-reduce-motion *::after {
 .cubic-settings-order-actions button:disabled, .cubic-settings-secondary:disabled, .cubic-settings-form-card button:disabled, .cubic-settings-inline-form button:disabled { opacity: .48; cursor: default; }
 .cubic-channel-settings-content { padding-top: 24px; }
 .cubic-channel-settings-surface .chat-heading small { text-transform: none; }
+.cubic-channel-override-add { display: grid; gap: 8px; padding: 14px; border-bottom: 1px solid #ffffff12; }
+.cubic-channel-permissions .cubic-settings-row h3 { margin: 0; font-size: .9rem; }
+.cubic-channel-override-add label { font-size: .8rem; font-weight: 700; }
+.cubic-channel-override-add select { flex: 1 1 auto; min-width: 0; min-height: var(--cubic-control-height); padding: 8px 10px; border: 1px solid var(--cubic-control-border); border-radius: var(--cubic-control-radius); background: var(--cubic-bg-1); color: var(--cubic-text); font: inherit; }
+.cubic-channel-override-layout { display: grid; grid-template-columns: minmax(150px, 210px) minmax(0, 1fr); min-width: 0; }
+.cubic-channel-override-list { min-width: 0; border-right: 1px solid #ffffff12; }
+.cubic-channel-override-editor { display: grid; gap: 10px; min-width: 0; padding: 14px; }
+.cubic-channel-override-editor h3 { margin: 0 0 4px; font-size: .95rem; overflow-wrap: anywhere; }
+.cubic-channel-permission-row { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.cubic-channel-permission-row legend { width: 100%; margin-bottom: 5px; color: var(--cubic-text); font-size: .82rem; font-weight: 700; }
+.cubic-channel-permission-row label { position: relative; display: inline-flex; align-items: center; justify-content: center; min-height: 40px; min-width: 76px; padding: 6px 9px; border: 1px solid var(--cubic-control-border); border-radius: var(--cubic-control-radius); background: var(--cubic-control-bg); color: var(--cubic-muted); font-size: .78rem; cursor: pointer; }
+.cubic-channel-permission-row label:has(input:checked) { background: var(--cubic-brand-soft); color: var(--cubic-text); border-color: var(--cubic-brand-active); }
+.cubic-channel-permission-row label:has(input:focus-visible), .cubic-channel-override-add select:focus-visible { outline: 2px solid var(--cubic-brand-active); outline-offset: 2px; }
+.cubic-channel-permission-row input { position: absolute; opacity: 0; inset: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.cubic-channel-permissions-notice { margin: 0; padding: 10px 14px; color: var(--cubic-muted); font-size: .82rem; }
+.cubic-channel-override-editor .cubic-control-danger { border-color: #713b43; background: #25181b; color: #e7a6ad; }
+@media (max-width: 1000px) { .cubic-channel-override-layout { grid-template-columns: minmax(0, 1fr); } .cubic-channel-override-list { border-right: 0; border-bottom: 1px solid #ffffff12; } }
+@media (max-width: 520px) { .cubic-channel-override-add .cubic-settings-inline-form { flex-wrap: wrap; } .cubic-channel-override-add select { flex-basis: 100%; } }
+@media (pointer: coarse) { .cubic-channel-permission-row label, .cubic-channel-override-add button, .cubic-channel-override-editor button { min-height: 44px; } }
 @media (max-width: 760px) {
   .cubic-role-form fieldset { grid-template-columns: minmax(0, 1fr); }
   .cubic-settings-member-row { flex-wrap: wrap; }

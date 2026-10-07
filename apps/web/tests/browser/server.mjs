@@ -43,6 +43,7 @@ let fixtureCategories;
 let fixtureServerMembers;
 let fixtureServerRoles;
 let fixtureRoleAssignments;
+let fixtureChannelOverrides;
 let fixtureServerInvites;
 let fixtureShareInviteLinks;
 let fixtureServerFriends;
@@ -82,6 +83,7 @@ function reset() {
   fixtureServerMembers = new Map();
   fixtureServerRoles = new Map();
   fixtureRoleAssignments = new Map();
+  fixtureChannelOverrides = new Map();
   fixtureServerInvites = [];
   fixtureShareInviteLinks = [];
   fixtureServerFriends = false;
@@ -662,6 +664,59 @@ const server = createServer(async (request, response) => {
   const canManageChannels = (selected) => selected.ownerUserId === requestUser.id ||
     (fixtureServerRoles.get(selected.id) ?? []).some((role) => role.permissions.includes('MANAGE_CHANNELS') &&
       (role.isDefault || fixtureRoleAssignments.get(selected.id)?.get(requestUser.id)?.has(role.id)));
+  const canViewChannel = (channel, kind) => {
+    const server = fixtureServers.find((item) => item.id === channel.serverId);
+    if (server?.ownerUserId === requestUser.id) return true;
+    const roles = fixtureServerRoles.get(channel.serverId) ?? [];
+    const assigned = fixtureRoleAssignments.get(channel.serverId)?.get(requestUser.id) ?? new Set();
+    let visible = roles.some((role) => (role.isDefault || assigned.has(role.id)) && role.permissions.includes('VIEW_CHANNEL'));
+    const overrides = fixtureChannelOverrides.get(`${channel.serverId}:${kind}:${channel.id}`) ?? [];
+    const apply = (item) => { if (item?.deny.includes('VIEW_CHANNEL')) visible = false; if (item?.allow.includes('VIEW_CHANNEL')) visible = true; };
+    apply(overrides.find((item) => item.targetType === 'role' && item.targetId === channel.serverId));
+    const roleOverrides = overrides.filter((item) => item.targetType === 'role' && assigned.has(item.targetId));
+    if (roleOverrides.some((item) => item.deny.includes('VIEW_CHANNEL'))) visible = false;
+    if (roleOverrides.some((item) => item.allow.includes('VIEW_CHANNEL'))) visible = true;
+    apply(overrides.find((item) => item.targetType === 'member' && item.targetId === requestUser.id));
+    return visible;
+  };
+  const permissionNames = ['VIEW_CHANNEL', 'SEND_MESSAGES', 'MANAGE_MESSAGES', 'CONNECT', 'SPEAK', 'VIDEO', 'SCREEN_SHARE'];
+  const overrideRoute = /^\/api\/v1\/servers\/([0-9a-f-]+)\/layout\/(text|voice)\/([0-9a-f-]+)\/permissions(?:\/(role|member)\/([0-9a-f-]+|fixture-peer|fixture-user))?$/.exec(url.pathname);
+  if (overrideRoute) {
+    const selected = fixtureServers.find((item) => item.id === overrideRoute[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
+    if (!selected) return json({ error: 'Server not found.' }, 404);
+    if (!canManageChannels(selected)) return json({ error: 'Channel management denied.' }, 403);
+    const channel = (overrideRoute[2] === 'text' ? fixtureChannels : fixtureVoiceChannels).find((item) => item.id === overrideRoute[3] && item.serverId === selected.id);
+    if (!channel) return json({ error: 'Channel not found.' }, 404);
+    const roles = fixtureServerRoles.get(selected.id) ?? [];
+    const members = [...(fixtureServerMembers.get(selected.id) ?? [])].filter((id) => id !== selected.ownerUserId)
+      .map((id) => ({ id, name: id === user.id ? user.displayName : peer.displayName }));
+    const key = `${selected.id}:${overrideRoute[2]}:${channel.id}`;
+    const overrides = fixtureChannelOverrides.get(key) ?? [];
+    if (request.method === 'GET' && !overrideRoute[4]) return json({ permissions: permissionNames,
+      overrides: overrides.map((item) => ({ ...item, targetName: item.targetType === 'role' ? roles.find((role) => role.id === item.targetId)?.name : members.find((member) => member.id === item.targetId)?.name })),
+      availableRoles: roles.map((role) => ({ id: role.id, name: role.name, isDefault: role.isDefault })), availableMembers: members });
+    if (!overrideRoute[4] || !overrideRoute[5]) return json({ error: 'Invalid target.' }, 400);
+    if (!(overrideRoute[4] === 'role' ? roles.some((role) => role.id === overrideRoute[5]) : members.some((member) => member.id === overrideRoute[5]))) return json({ error: 'Target not found.' }, 404);
+    const existing = overrides.findIndex((item) => item.targetType === overrideRoute[4] && item.targetId === overrideRoute[5]);
+    let result = { removed: true };
+    if (request.method === 'PUT') {
+      const payload = JSON.parse((await body()).toString());
+      if (!Array.isArray(payload.allow) || !Array.isArray(payload.deny) ||
+        [...payload.allow, ...payload.deny].some((name) => !permissionNames.includes(name)) ||
+        new Set([...payload.allow, ...payload.deny]).size !== payload.allow.length + payload.deny.length) return json({ error: 'Invalid override.' }, 400);
+      if (payload.allow.length || payload.deny.length) {
+        result = { targetType: overrideRoute[4], targetId: overrideRoute[5], allow: payload.allow, deny: payload.deny };
+        if (existing >= 0) overrides[existing] = result;
+        else overrides.push(result);
+      } else if (existing >= 0) overrides.splice(existing, 1);
+    } else if (request.method === 'DELETE') {
+      if (existing >= 0) overrides.splice(existing, 1);
+    } else return json({ error: 'Invalid method.' }, 405);
+    fixtureChannelOverrides.set(key, overrides);
+    io.emit('server:layout:changed', { serverId: selected.id });
+    if (request.method === 'DELETE') { response.writeHead(204); return response.end(); }
+    return json({ ...result, voiceRevocationPending: false });
+  }
   const channelManagement = /^\/api\/v1\/servers\/([0-9a-f-]+)\/channel-management$/.exec(url.pathname);
   if (channelManagement && request.method === 'GET') {
     const selected = fixtureServers.find((item) => item.id === channelManagement[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
@@ -773,7 +828,7 @@ const server = createServer(async (request, response) => {
   if (voiceChannels) {
     const selected = fixtureServers.find((item) => item.id === voiceChannels[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
     if (!selected) return json({ error: 'Server not found.' }, 404);
-    if (request.method === 'GET' && !voiceChannels[2]) return json({ channels: fixtureVoiceChannels.filter((item) => item.serverId === selected.id).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)) });
+    if (request.method === 'GET' && !voiceChannels[2]) return json({ channels: fixtureVoiceChannels.filter((item) => item.serverId === selected.id && canViewChannel(item, 'voice')).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)) });
     if (!canManageChannels(selected)) return json({ error: 'Channel management denied.' }, 403);
     if (request.method === 'DELETE' && voiceChannels[2]) {
       const channel = fixtureVoiceChannels.find((item) => item.id === voiceChannels[2] && item.serverId === selected.id);
@@ -809,7 +864,7 @@ const server = createServer(async (request, response) => {
   if (serverChannels) {
     const selected = fixtureServers.find((item) => item.id === serverChannels[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
     if (!selected) return json({ error: 'Server not found.' }, 404);
-    if (request.method === 'GET') return json({ channels: fixtureChannels.filter((item) => item.serverId === selected.id).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)) });
+    if (request.method === 'GET') return json({ channels: fixtureChannels.filter((item) => item.serverId === selected.id && canViewChannel(item, 'text')).sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)) });
     if (request.method === 'POST') {
       if (!canManageChannels(selected)) return json({ error: 'Channel management denied.' }, 403);
       const payload = JSON.parse((await body()).toString());

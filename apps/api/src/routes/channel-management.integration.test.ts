@@ -23,6 +23,8 @@ test('channel management uses current server permission and deletes only scoped 
     const events = createRealtimeEvents();
     const layoutEvents: Array<{ serverId: string; deletedConversationId?: string }> = [];
     let failVoiceRevocation = false;
+    let failVoiceReconcile = false;
+    let voiceReconciliations = 0;
     events.onServerLayoutChanged((event) => layoutEvents.push(event));
     const app = Fastify({ logger: false });
     try {
@@ -39,7 +41,8 @@ test('channel management uses current server permission and deletes only scoped 
       app.decorateRequest('auth', null);
       await app.register(serverRoutes, {
         prefix: '/api/v1/servers', database, cookieName: 'session', realtimeEvents: events,
-        serverVoice: { revokeDeletedChannel: async () => {
+        serverVoice: { reconcile: async () => { voiceReconciliations += 1; if (failVoiceReconcile) throw new Error('temporary control plane failure'); },
+          revokeDeletedChannel: async () => {
           if (failVoiceRevocation) throw new Error('temporary control plane failure');
         } } as unknown as ServerVoiceService,
         sessionService: { resolveToken: async (token: string) => {
@@ -49,7 +52,7 @@ test('channel management uses current server permission and deletes only scoped 
       });
       const base = `/api/v1/servers/${primary.id}`;
       const other = `/api/v1/servers/${secondary.id}`;
-      const send = (method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, actor?: string, payload?: unknown) => app.inject({
+      const send = (method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, actor?: string, payload?: unknown) => app.inject({
         method, url: path, headers: actor ? { cookie: `session=${actor}` } : {},
         ...(payload === undefined ? {} : { payload: JSON.stringify(payload), headers: { ...(actor ? { cookie: `session=${actor}` } : {}), 'content-type': 'application/json' } })
       });
@@ -93,6 +96,60 @@ test('channel management uses current server permission and deletes only scoped 
       const managed = (await send('GET', `${base}/channel-management`, 'manager')).json();
       assert.equal(managed.channels.some((item: { id: string }) => item.id === channel.id), true);
       assert.equal(JSON.stringify(managed).includes('Keep until deletion'), false);
+      const permissionsUrl = `${base}/layout/text/${channel.id}/permissions`;
+      const roleUrl = `${permissionsUrl}/role/${role.id}`;
+      const memberUrl = `${permissionsUrl}/member/${manager}`;
+      const put = (path: string, actor: string, allow: string[], deny: string[]) => send('PUT', path, actor, { allow, deny });
+      assert.equal((await send('GET', permissionsUrl)).statusCode, 401);
+      assert.equal((await send('GET', permissionsUrl, 'outsider')).statusCode, 404);
+      assert.equal((await send('GET', `${base}/layout/text/${foreign.id}/permissions`, 'manager')).statusCode, 404);
+      assert.equal((await send('GET', permissionsUrl, 'manager')).json().availableRoles.some((item: { name: string }) => item.name === '@everyone'), true);
+      assert.equal((await put(`${permissionsUrl}/member/${owner}`, 'manager', ['VIEW_CHANNEL'], [])).statusCode, 404);
+      assert.equal((await put(`${permissionsUrl}/role/${randomUUID()}`, 'manager', ['VIEW_CHANNEL'], [])).statusCode, 404);
+      assert.equal((await put(`${permissionsUrl}/member/${outsider}`, 'manager', ['VIEW_CHANNEL'], [])).statusCode, 404);
+      const foreignRole = (await pool.query<{ id: string }>(`insert into server_roles(server_id,name,position,permissions)
+        values($1,'Foreign override role',1,0) returning id`, [secondary.id])).rows[0]!;
+      await pool.query('insert into server_members(server_id,user_id) values($1,$2)', [secondary.id, outsider]);
+      assert.equal((await put(`${permissionsUrl}/role/${foreignRole.id}`, 'manager', ['VIEW_CHANNEL'], [])).statusCode, 404);
+      assert.equal((await put(`${permissionsUrl}/member/${outsider}`, 'manager', ['VIEW_CHANNEL'], [])).statusCode, 404);
+      const deletedRole = (await pool.query<{ id: string }>(`insert into server_roles(server_id,name,position,permissions)
+        values($1,'Temporary override role',2,0) returning id`, [primary.id])).rows[0]!;
+      await pool.query('delete from server_roles where id=$1', [deletedRole.id]);
+      assert.equal((await put(`${permissionsUrl}/role/${deletedRole.id}`, 'manager', ['VIEW_CHANNEL'], [])).statusCode, 404);
+      await pool.query('insert into server_members(server_id,user_id) values($1,$2)', [primary.id, outsider]);
+      assert.equal((await send('GET', permissionsUrl, 'outsider')).statusCode, 403);
+      await pool.query('delete from server_members where server_id=$1 and user_id=$2', [primary.id, outsider]);
+      assert.equal((await put(`${permissionsUrl}/member/${outsider}`, 'manager', ['VIEW_CHANNEL'], [])).statusCode, 404);
+      assert.equal((await put(`${base}/layout/text/${foreign.id}/permissions/role/${role.id}`, 'manager', ['VIEW_CHANNEL'], [])).statusCode, 404);
+      assert.equal((await send('PUT', `${permissionsUrl}/other/${role.id}`, 'manager', { allow: [], deny: [] })).statusCode, 400);
+      for (const payload of [
+        { allow: ['VIEW_CHANNEL'], deny: ['VIEW_CHANNEL'] }, { allow: ['VIEW_CHANNEL', 'VIEW_CHANNEL'], deny: [] },
+        { allow: ['MANAGE_CHANNELS'], deny: [] }, { allow: [4096], deny: [] }, { allow: 4096, deny: [] }
+      ]) assert.equal((await send('PUT', roleUrl, 'manager', payload)).statusCode, 400);
+      const beforeOverrideEvents = layoutEvents.length;
+      assert.equal((await put(roleUrl, 'manager', [], ['VIEW_CHANNEL'])).statusCode, 200);
+      assert.deepEqual(layoutEvents.at(-1), { serverId: primary.id });
+      assert.equal(layoutEvents.length, beforeOverrideEvents + 1);
+      assert.equal((await send('GET', `${base}/channels`, 'manager')).json().channels.some((item: { id: string }) => item.id === channel.id), false);
+      assert.equal((await send('GET', permissionsUrl, 'manager')).json().overrides[0].deny.includes('VIEW_CHANNEL'), true);
+      assert.equal((await put(memberUrl, 'manager', ['VIEW_CHANNEL', 'MANAGE_MESSAGES'], [])).statusCode, 200);
+      assert.equal((await send('GET', `${base}/channels`, 'manager')).json().channels.some((item: { id: string }) => item.id === channel.id), true);
+      assert.equal((await put(memberUrl, 'manager', [], [])).statusCode, 200);
+      assert.equal((await pool.query('select 1 from server_channel_overrides where server_id = $1 and text_channel_id = $2 and member_user_id = $3', [primary.id, channel.id, manager])).rowCount, 0);
+      assert.equal((await put(roleUrl, 'manager', ['VIEW_CHANNEL'], [])).statusCode, 200);
+      assert.equal((await send('GET', `${base}/channels`, 'manager')).json().channels.some((item: { id: string }) => item.id === channel.id), true);
+      assert.equal((await put(memberUrl, 'manager', [], ['VIEW_CHANNEL'])).statusCode, 200);
+      assert.equal((await send('GET', `${base}/channels`, 'manager')).json().channels.some((item: { id: string }) => item.id === channel.id), false);
+      assert.equal((await send('DELETE', memberUrl, 'manager')).statusCode, 204);
+      const concurrent = await Promise.all([put(roleUrl, 'manager', [], ['VIEW_CHANNEL']), put(roleUrl, 'manager', ['VIEW_CHANNEL'], [])]);
+      assert.deepEqual(concurrent.map((response) => response.statusCode), [200, 200]);
+      assert.equal((await pool.query('select count(*)::int n from server_channel_overrides where server_id=$1 and text_channel_id=$2 and role_id=$3', [primary.id, channel.id, role.id])).rows[0].n, 1);
+      assert.equal((await send('DELETE', roleUrl, 'manager')).statusCode, 204);
+      assert.equal((await send('DELETE', roleUrl, 'manager')).statusCode, 204);
+      assert.equal((await put(`${permissionsUrl}/role/${primary.id}`, 'manager', [], ['SEND_MESSAGES'])).statusCode, 200);
+      assert.equal((await send('GET', permissionsUrl, 'manager')).json().overrides.some((item: { targetName: string }) => item.targetName === '@everyone'), true);
+      assert.equal((await send('GET', `${base}/channels`, 'owner')).json().channels.some((item: { id: string }) => item.id === channel.id), true);
+      assert.equal((await send('DELETE', `${permissionsUrl}/role/${primary.id}`, 'manager')).statusCode, 204);
       await pool.query(`insert into server_channel_overrides(server_id,text_channel_id,member_user_id,deny)
         values($1,$2,$3,4096)`, [primary.id, channel.id, manager]);
       assert.equal((await send('GET', `${base}/channels`, 'manager')).json().channels.some((item: { id: string }) => item.id === channel.id), false);
@@ -107,6 +164,19 @@ test('channel management uses current server permission and deletes only scoped 
       assert.equal((await pool.query('select 1 from conversations where id = $1', [foreign.conversationId])).rowCount, 1);
       const voice = (await send('POST', `${base}/voice-channels`, 'manager', { name: 'Call', categoryId: category.id })).json().channel;
       assert.equal((await send('PATCH', `${base}/voice-channels/${voice.id}`, 'manager', { name: 'Renamed call' })).statusCode, 200);
+      const voiceUrl = `${base}/layout/voice/${voice.id}/permissions/role/${role.id}`;
+      assert.equal((await put(voiceUrl, 'manager', [], ['CONNECT', 'SPEAK'])).statusCode, 200);
+      assert.equal(voiceReconciliations, 1);
+      assert.equal((await pool.query('select deny::text from server_channel_overrides where server_id=$1 and voice_channel_id=$2 and role_id=$3', [primary.id, voice.id, role.id])).rows[0].deny, '768');
+      failVoiceReconcile = true;
+      const pendingOverride = await put(voiceUrl, 'manager', ['CONNECT'], []);
+      assert.equal(pendingOverride.statusCode, 200);
+      assert.equal(pendingOverride.json().voiceRevocationPending, true);
+      assert.equal((await pool.query('select allow::text from server_channel_overrides where server_id=$1 and voice_channel_id=$2 and role_id=$3', [primary.id, voice.id, role.id])).rows[0].allow, '256');
+      const pendingRemoval = await send('DELETE', voiceUrl, 'manager');
+      assert.equal(pendingRemoval.statusCode, 200);
+      assert.deepEqual(pendingRemoval.json(), { removed: true, voiceRevocationPending: true });
+      failVoiceReconcile = false;
       assert.equal((await send('DELETE', `${base}/voice-channels/${voice.id}`, 'manager')).statusCode, 204);
       assert.equal((await pool.query('select 1 from server_voice_channels where id = $1', [voice.id])).rowCount, 0);
       const pendingVoice = (await send('POST', `${base}/voice-channels`, 'manager', { name: 'Pending' })).json().channel;
@@ -124,11 +194,13 @@ test('channel management uses current server permission and deletes only scoped 
         await blocker.query('begin');
         await blocker.query('select id from servers where id = $1 for update', [primary.id]);
         const pending = send('POST', `${base}/channels`, 'manager', { name: 'Stale grant' });
+        const pendingOverrideWrite = put(`${base}/layout/text/${survivor.id}/permissions/role/${role.id}`, 'manager', ['VIEW_CHANNEL'], []);
         await new Promise((resolve) => setTimeout(resolve, 50));
         await blocker.query('delete from server_member_roles where server_id = $1 and user_id = $2', [primary.id, manager]);
         await blocker.query('commit');
         const eventCount = layoutEvents.length;
         assert.equal((await pending).statusCode, 403);
+        assert.equal((await pendingOverrideWrite).statusCode, 403);
         assert.equal(layoutEvents.length, eventCount);
         assert.equal((await pool.query("select 1 from server_text_channels where server_id = $1 and name = 'Stale grant'", [primary.id])).rowCount, 0);
       } finally {
