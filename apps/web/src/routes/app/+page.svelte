@@ -162,6 +162,22 @@
   let memberRemovalTarget = $state<ProfileIdentity | null>(null);
   type ServerSurface = 'overview' | 'roles' | 'members' | 'invites';
   type ChannelSettingsTarget = { kind: 'text' | 'voice'; id: string };
+  type ChannelOverrideTarget = { id: string; name: string; isDefault?: boolean };
+  type ChannelOverride = { targetType: 'role' | 'member'; targetId: string; targetName: string; allow: string[]; deny: string[] };
+  const channelPermissionLabels: Record<string, string> = { VIEW_CHANNEL: 'View channel', SEND_MESSAGES: 'Send messages',
+    MANAGE_MESSAGES: 'Manage messages', CONNECT: 'Connect', SPEAK: 'Speak', VIDEO: 'Video', SCREEN_SHARE: 'Screen share' };
+  let channelPermissions = $state<string[]>([]);
+  let channelOverrides = $state<ChannelOverride[]>([]);
+  let channelOverrideRoles = $state<ChannelOverrideTarget[]>([]);
+  let channelOverrideMembers = $state<ChannelOverrideTarget[]>([]);
+  let channelOverrideSelection = $state('');
+  let channelOverrideNewTarget = $state('');
+  let channelOverrideStates = $state<Record<string, 'inherit' | 'allow' | 'deny'>>({});
+  let channelOverridesLoading = $state(false);
+  let channelOverridesBusy = $state(false);
+  let channelOverridesError = $state('');
+  let channelOverridesNotice = $state('');
+  let channelOverridesSequence = 0;
   let serverMenuOpen = $state(false);
   let serverSurface = $state<ServerSurface | null>(null);
   let channelSettingsTarget = $state<ChannelSettingsTarget | null>(null);
@@ -704,11 +720,96 @@
     channelSettingsName = channel.name;
     channelSettingsCategoryId = channel.categoryId ?? '';
     channelSettingsError = '';
+    channelOverrideSelection = '';
+    channelOverrideNewTarget = '';
+    channelOverridesNotice = '';
+    void loadChannelOverrides();
   }
 
   function closeChannelSettings() {
+    channelOverridesSequence += 1;
     channelSettingsTarget = null;
     channelSettingsError = '';
+  }
+
+  function overrideUrl(target?: string) {
+    const server = activeServer;
+    const channel = channelSettingsTarget;
+    if (!server || !channel) return '';
+    return `/api/v1/servers/${server.id}/layout/${channel.kind}/${channel.id}/permissions${target ? `/${target.replace(':', '/')}` : ''}`;
+  }
+
+  async function loadChannelOverrides(selected = channelOverrideSelection) {
+    const url = overrideUrl();
+    if (!url || !canManageChannels) return;
+    const sequence = ++channelOverridesSequence;
+    channelOverridesLoading = true;
+    channelOverridesError = '';
+    try {
+      const result = await api(url);
+      if (sequence !== channelOverridesSequence || url !== overrideUrl()) return;
+      channelPermissions = result.permissions;
+      channelOverrides = result.overrides;
+      channelOverrideRoles = result.availableRoles;
+      channelOverrideMembers = result.availableMembers;
+      const existing = channelOverrides.find((item) => `${item.targetType}:${item.targetId}` === selected);
+      if (existing) selectChannelOverride(selected);
+      else if (selected) { channelOverrideSelection = ''; channelOverrideStates = {}; }
+    } catch (cause) {
+      if (sequence === channelOverridesSequence) channelOverridesError = cause instanceof Error ? cause.message : 'Could not load permissions.';
+    } finally {
+      if (sequence === channelOverridesSequence) channelOverridesLoading = false;
+    }
+  }
+
+  function selectChannelOverride(selection: string) {
+    channelOverrideSelection = selection;
+    const item = channelOverrides.find((override) => `${override.targetType}:${override.targetId}` === selection);
+    channelOverrideStates = Object.fromEntries(channelPermissions.map((permission) =>
+      [permission, item?.allow.includes(permission) ? 'allow' : item?.deny.includes(permission) ? 'deny' : 'inherit']));
+    channelOverridesNotice = '';
+  }
+
+  function addChannelOverride() {
+    if (!channelOverrideNewTarget) return;
+    selectChannelOverride(channelOverrideNewTarget);
+    channelOverrideNewTarget = '';
+  }
+
+  async function saveChannelOverride() {
+    const target = channelOverrideSelection;
+    const url = overrideUrl(target);
+    if (!target || !url || !canManageChannels || channelOverridesBusy) return;
+    channelOverridesBusy = true;
+    channelOverridesError = '';
+    channelOverridesNotice = '';
+    try {
+      const result = await api(url, { method: 'PUT', body: JSON.stringify({
+        allow: channelPermissions.filter((permission) => channelOverrideStates[permission] === 'allow'),
+        deny: channelPermissions.filter((permission) => channelOverrideStates[permission] === 'deny')
+      }) });
+      await loadChannelOverrides(target);
+      channelOverridesNotice = result?.voiceRevocationPending ? 'Saved. Active voice access is pending reconciliation.' : 'Permissions saved.';
+    } catch (cause) {
+      channelOverridesError = cause instanceof Error ? cause.message : 'Could not save permissions.';
+    } finally { channelOverridesBusy = false; }
+  }
+
+  async function removeChannelOverride() {
+    const target = channelOverrideSelection;
+    const url = overrideUrl(target);
+    if (!target || !url || !canManageChannels || channelOverridesBusy) return;
+    channelOverridesBusy = true;
+    channelOverridesError = '';
+    try {
+      const result = await api(url, { method: 'DELETE' });
+      channelOverrideSelection = '';
+      channelOverrideStates = {};
+      await loadChannelOverrides('');
+      channelOverridesNotice = result?.voiceRevocationPending ? 'Removed. Active voice access is pending reconciliation.' : 'Override removed.';
+    } catch (cause) {
+      channelOverridesError = cause instanceof Error ? cause.message : 'Could not remove override.';
+    } finally { channelOverridesBusy = false; }
   }
 
   async function saveVoiceChannelSettings(event: SubmitEvent) {
@@ -4965,6 +5066,43 @@
             <form class="cubic-settings-card cubic-settings-form-card" onsubmit={saveVoiceChannelSettings}><label for="cubic-channel-settings-name">Channel name</label><div class="cubic-settings-inline-form"><input id="cubic-channel-settings-name" bind:value={channelSettingsName} maxlength="96" /><button type="submit" disabled={channelSettingsBusy || !channelSettingsName.trim() || channelSettingsName.trim() === settingsChannel.name}>Save name</button></div></form>
             <div class="cubic-settings-card"><div class="cubic-settings-row"><div><strong>Delete channel</strong><small>This permanently removes {settingsChannel.kind === 'text' ? 'its messages and attachments' : 'the voice room'}.</small></div><button type="button" class="cubic-navigation-danger" disabled={channelSettingsBusy} onclick={() => void deleteSelectedChannel(settingsChannel)}>Delete {settingsChannel.name}</button></div></div>
             <form class="cubic-settings-card cubic-settings-form-card" onsubmit={saveChannelSettingsCategory}><label for="cubic-channel-settings-category">Category</label><select id="cubic-channel-settings-category" bind:value={channelSettingsCategoryId}><option value="">Uncategorized</option>{#each serverCategories as category (category.id)}<option value={category.id}>{category.name}</option>{/each}</select><button type="submit" disabled={channelSettingsBusy || channelSettingsCategoryId === (settingsChannel.categoryId ?? '')}>{channelSettingsBusy ? 'Moving…' : 'Move to category'}</button></form>
+            {#if canManageChannels}
+              <section class="cubic-settings-card cubic-channel-permissions" aria-labelledby="channel-permissions-title">
+                <div class="cubic-settings-row"><div><h3 id="channel-permissions-title">Permissions</h3><small>Inherit uses the permissions resolved from the server and previous overrides.</small></div></div>
+                {#if channelOverridesLoading}<p class="cubic-settings-empty" role="status">Loading permissions…</p>{/if}
+                {#if channelOverridesError}<p class="inline-error" role="alert">{channelOverridesError} <button type="button" onclick={() => void loadChannelOverrides()}>Retry</button></p>{/if}
+                {#if channelOverridesNotice}<p class="cubic-channel-permissions-notice" role="status">{channelOverridesNotice}</p>{/if}
+                {#if !channelOverridesLoading}
+                  <div class="cubic-channel-override-add">
+                    <label for="cubic-channel-override-target">Add role/member override</label>
+                    <div class="cubic-settings-inline-form"><select id="cubic-channel-override-target" bind:value={channelOverrideNewTarget}>
+                      <option value="">Choose a role or member</option>
+                      {#each channelOverrideRoles.filter((role) => !channelOverrides.some((item) => item.targetType === 'role' && item.targetId === role.id)) as role (role.id)}<option value={`role:${role.id}`}>Role · {role.name}</option>{/each}
+                      {#each channelOverrideMembers.filter((member) => !channelOverrides.some((item) => item.targetType === 'member' && item.targetId === member.id)) as member (member.id)}<option value={`member:${member.id}`}>Member · {member.name}</option>{/each}
+                    </select><button type="button" disabled={!channelOverrideNewTarget || channelOverridesBusy} onclick={addChannelOverride}>Add</button></div>
+                  </div>
+                  <div class="cubic-channel-override-layout">
+                    <div class="cubic-channel-override-list" aria-label="Configured overrides">
+                      {#each channelOverrides as item (`${item.targetType}:${item.targetId}`)}
+                        <button type="button" class="cubic-role-list-item" aria-current={channelOverrideSelection === `${item.targetType}:${item.targetId}` ? 'true' : undefined} onclick={() => selectChannelOverride(`${item.targetType}:${item.targetId}`)}><span>{item.targetName}</span><small>{item.targetType === 'role' ? 'Role' : 'Member'}</small></button>
+                      {/each}
+                      {#if channelOverrides.length === 0}<p class="cubic-settings-empty">No overrides configured.</p>{/if}
+                    </div>
+                    {#if channelOverrideSelection}
+                      <div class="cubic-channel-override-editor">
+                        <h3>{channelOverrides.find((item) => `${item.targetType}:${item.targetId}` === channelOverrideSelection)?.targetName ?? (channelOverrideSelection.startsWith('role:') ? channelOverrideRoles.find((item) => `role:${item.id}` === channelOverrideSelection)?.name : channelOverrideMembers.find((item) => `member:${item.id}` === channelOverrideSelection)?.name)}</h3>
+                        {#each channelPermissions as permission (permission)}
+                          <fieldset class="cubic-channel-permission-row"><legend>{channelPermissionLabels[permission] ?? permission}</legend>
+                            {#each ['inherit', 'allow', 'deny'] as state (state)}<label><input type="radio" name={`channel-${permission}`} checked={channelOverrideStates[permission] === state} onchange={() => channelOverrideStates = { ...channelOverrideStates, [permission]: state as 'inherit' | 'allow' | 'deny' }} disabled={channelOverridesBusy} /><span>{state === 'inherit' ? 'Inherit' : state === 'allow' ? 'Allow' : 'Deny'}</span></label>{/each}
+                          </fieldset>
+                        {/each}
+                        <div class="cubic-settings-actions"><button type="button" disabled={channelOverridesBusy} onclick={() => void saveChannelOverride()}>{channelOverridesBusy ? 'Saving…' : 'Save permissions'}</button><button type="button" class="cubic-control-danger" disabled={channelOverridesBusy || !channelOverrides.some((item) => `${item.targetType}:${item.targetId}` === channelOverrideSelection)} onclick={() => void removeChannelOverride()}>Remove override</button></div>
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </section>
+            {/if}
             <div class="cubic-settings-card"><div class="cubic-settings-row cubic-settings-order-row"><div><strong>Channel order</strong><small>Move within the current category.</small></div><div class="cubic-settings-order-actions"><button type="button" disabled={layoutBusy || channelSettingsBusy || settingsIndex <= 0} onclick={() => void shiftChannel(settingsChannel, -1)}>Move up</button><button type="button" disabled={layoutBusy || channelSettingsBusy || settingsIndex < 0 || settingsIndex >= settingsScope.length - 1} onclick={() => void shiftChannel(settingsChannel, 1)}>Move down</button></div></div></div>
             {#if channelSettingsError}<p class="inline-error" role="alert">{channelSettingsError}</p>{/if}
             {#if layoutError}<p class="inline-error" role="alert">{layoutError}</p>{/if}
