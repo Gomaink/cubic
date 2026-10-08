@@ -246,6 +246,7 @@
   let voiceError = $state('');
   let voiceRetryConversation = $state<any | null>(null);
   let voiceAudioHost = $state<HTMLDivElement | null>(null);
+  const VOICE_CONNECT_TIMEOUT_MS = 15_000;
 
   const MESSAGE_PAGE_SIZE = 50;
   const HISTORY_TOP_THRESHOLD = 120;
@@ -3703,6 +3704,46 @@
       .forEach((element) => element.remove());
   }
 
+  async function connectVoiceRoom(room: Room, url: string, token: string) {
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const connection = room.connect(url, token);
+    // A timed-out connect may still settle after cleanup. Never retain that Room.
+    void connection.then(() => {
+      if (timedOut) void room.disconnect().catch(() => {});
+    }, () => {});
+    try {
+      await Promise.race([
+        connection,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            timedOut = true;
+            reject(new Error('Voice connection timed out.'));
+          }, VOICE_CONNECT_TIMEOUT_MS);
+        })
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  function prepareVoiceMedia(room: Room, attempt: number, label: 'call' | 'channel') {
+    const current = () => voiceRoom === room && voiceAttemptSerial === attempt;
+    void room.startAudio().catch(() => {
+      if (current()) voiceMediaNotice = `Browser audio playback is paused. Enable audio to hear this ${label}.`;
+    });
+    void room.localParticipant.setMicrophoneEnabled(
+      true, microphoneCaptureOptions(browserVoiceProcessing, selectedAudioInput)
+    ).then(() => {
+      if (current()) syncVoiceParticipants();
+      else void room.localParticipant.setMicrophoneEnabled(false).catch(() => {});
+    }, (cause) => {
+      if (!current()) return;
+      voiceError = `Connected, microphone unavailable — ${mediaDeviceErrorMessage(cause, 'microphone')}`;
+      syncVoiceParticipants();
+    });
+  }
+
   async function leaveVoice(endDirect = true) {
     voiceAttemptSerial += 1;
     const room = voiceRoom;
@@ -3787,10 +3828,10 @@
       if (attempt !== voiceAttemptSerial) return;
       await loadLiveKit();
       if (attempt !== voiceAttemptSerial) return;
-      const room = new Room({
-        adaptiveStream: true,
-        dynacast: true
-      });
+      const testFactory = import.meta.env.MODE === 'browser-test'
+        ? (window as Window & { __cubicVoiceTestRoom?: () => Room }).__cubicVoiceTestRoom
+        : undefined;
+      const room = testFactory?.() ?? new Room({ adaptiveStream: true, dynacast: true });
       voiceRoom = room;
 
       const resync = () => {
@@ -3874,32 +3915,16 @@
         }
       });
 
-      await room.connect(ticket.url, ticket.token);
+      await connectVoiceRoom(room, ticket.url, ticket.token);
       if (voiceRoom !== room || attempt !== voiceAttemptSerial) {
         await room.disconnect();
         return;
       }
 
-      await room.startAudio().catch(() => {
-        if (voiceRoom === room) voiceMediaNotice = 'Browser audio playback is paused. Enable audio to hear this call.';
-      });
-
-      let microphoneWarning = '';
-      try {
-        await room.localParticipant.setMicrophoneEnabled(
-          true,
-          microphoneCaptureOptions(browserVoiceProcessing, selectedAudioInput)
-        );
-      } catch (microphoneError) {
-        microphoneWarning =
-          `Joined muted — ${mediaDeviceErrorMessage(microphoneError, 'microphone')}`;
-      }
-
-      if (voiceRoom !== room) return;
-
       voiceStatus = 'connected';
       voiceRetryConversation = null;
       syncVoiceParticipants();
+      prepareVoiceMedia(room, attempt, 'call');
 
       if (selectedAudioOutput && audioOutputSupported) {
         room.switchActiveDevice('audiooutput', selectedAudioOutput).catch(() => {
@@ -3907,9 +3932,6 @@
         });
       }
 
-      if (microphoneWarning) {
-        voiceError = microphoneWarning;
-      }
       if (directCall?.state === 'accepted' && directCall.conversationId === conversation.id) {
         callUiState = 'in-call';
       }
@@ -3923,7 +3945,7 @@
       voiceRetryConversation = conversation;
       voiceParticipants = [];
       clearVoiceAudio();
-      if (failedRoom) await failedRoom.disconnect().catch(() => {});
+      if (failedRoom) void failedRoom.disconnect().catch(() => {});
       if (directCall?.state === 'accepted' && directCall.conversationId === conversation.id) {
         callUiState = 'rejoin';
       }
@@ -4010,28 +4032,17 @@
           voiceError = 'Voice connection ended. Check your network and try again.';
         });
       });
-      await room.connect(ticket.url, ticket.token);
+      await connectVoiceRoom(room, ticket.url, ticket.token);
       if (voiceRoom !== room || attempt !== voiceAttemptSerial) { await room.disconnect(); return; }
-      await room.startAudio().catch(() => {
-        if (voiceRoom === room) voiceMediaNotice = 'Browser audio playback is paused. Enable audio to hear this channel.';
-      });
-      try {
-        await room.localParticipant.setMicrophoneEnabled(true,
-          microphoneCaptureOptions(browserVoiceProcessing, selectedAudioInput));
-      } catch (cause) {
-        voiceError = `Joined muted — ${mediaDeviceErrorMessage(cause, 'microphone')}`;
-      }
-      if (voiceRoom !== room) return;
       voiceStatus = 'connected';
       syncVoiceParticipants();
+      prepareVoiceMedia(room, attempt, 'channel');
       if (selectedAudioOutput && audioOutputSupported) {
         room.switchActiveDevice('audiooutput', selectedAudioOutput).catch(() => {});
       }
     } catch {
       if (attempt !== voiceAttemptSerial || activeServerVoiceId !== channel.id) return;
-      const failedRoom = voiceRoom;
-      await leaveVoice(false);
-      if (failedRoom) await failedRoom.disconnect().catch(() => {});
+      void leaveVoice(false).catch(() => {});
       voiceRetryServerChannel = channel;
       voiceError = 'Could not join voice channel. Check your access and connection.';
     }
