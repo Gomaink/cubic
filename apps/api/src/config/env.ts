@@ -194,9 +194,14 @@ const envSchema = z
       5 * 60 * 1_000
     ),
     LIVEKIT_API_KEY: z.string().min(3),
-    LIVEKIT_API_SECRET: z.string().min(32)
+    LIVEKIT_API_SECRET: z.string().min(32),
+    INVITE_LINK_ACTIVE_KEY_ID: z.string().optional(),
+    INVITE_LINK_HMAC_KEYS: z.string().optional()
   })
   .superRefine((env, context) => {
+    if (env.NODE_ENV === 'production' && (!env.INVITE_LINK_ACTIVE_KEY_ID || !env.INVITE_LINK_HMAC_KEYS)) {
+      context.addIssue({ code: 'custom', path: ['INVITE_LINK_HMAC_KEYS'], message: 'persistent invite link HMAC keys and active key ID are required' });
+    }
     if (env.WEBAUTHN_RP_ID && env.WEBAUTHN_RP_ID !== new URL(env.CORS_ORIGIN).hostname) {
       context.addIssue({ code: 'custom', path: ['WEBAUTHN_RP_ID'], message: 'must exactly match the configured CORS_ORIGIN hostname' });
     }

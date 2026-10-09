@@ -176,6 +176,13 @@
       "when": 1791502598893,
       "tag": "0024_safe_ricochet",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791510727435,
+      "tag": "0025_quiet_the_hood",
+      "breakpoints": true
     }
   ]
 }

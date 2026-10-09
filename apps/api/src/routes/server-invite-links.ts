@@ -5,9 +5,11 @@ import { createRequireAuth } from '../auth/guard.js';
 import type { SessionService } from '../security/session.js';
 import { SessionPersistenceError } from '../security/session.js';
 import { joinServerViaInviteLink, previewServerInviteLink, validInviteLinkToken } from '../servers/invite-links.js';
+import type { InviteCredentials } from '../servers/invite-credentials.js';
 
 interface InviteLinkRoutesOptions {
   database: Database;
+  inviteCredentials?: InviteCredentials | null;
   cookieName: string;
   sessionService: SessionService;
 }
@@ -32,7 +34,7 @@ export const serverInviteLinkRoutes: FastifyPluginAsync<InviteLinkRoutesOptions>
         throw error;
       }
     }
-    const result = await previewServerInviteLink(options.database, parsed.data.token, actorId);
+    const result = await previewServerInviteLink(options.database, parsed.data.token, actorId, options.inviteCredentials);
     if ('denied' in result) return reply.code(404).send(unavailable);
     return { valid: true, ...result.value };
   });
@@ -42,7 +44,7 @@ export const serverInviteLinkRoutes: FastifyPluginAsync<InviteLinkRoutesOptions>
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
     const parsed = tokenBody.safeParse(request.body);
     if (!parsed.success || !validInviteLinkToken(parsed.data.token)) return reply.code(404).send(unavailable);
-    const result = await joinServerViaInviteLink(options.database, parsed.data.token, request.auth.user.id);
+    const result = await joinServerViaInviteLink(options.database, parsed.data.token, request.auth.user.id, options.inviteCredentials);
     if ('denied' in result) return reply.code(404).send(unavailable);
     return result.value;
   });

@@ -7,7 +7,7 @@ Cubic is an open-source, self-hosted realtime messenger for direct messages, gro
 ## Available now
 
 - Direct messages and groups, friend requests and blocks, replies, reactions, editing, deletion, attachments, cursor-paginated history and realtime delivery.
-- Servers with membership, text channels, categories, audio-only voice channels, server icons and shareable invite links. The existing targeted server invitations are also still implemented.
+- Servers with membership, text channels, categories, audio-only voice channels, server icons and managed invite links with expiration, usage limits, history, revocation and pause. Existing targeted server invitations can still be accepted or cancelled; new targeted invitations are disabled.
 - Direct calls and group voice, camera video, screen sharing, media preflight, device preferences and per-stream audio controls where the browser supports them.
 - Registration and password login; verified email and email change; password recovery for eligible accounts; passkey enrollment, login, management and reauthentication; revocable sessions.
 - Onyx web UI for desktop and mobile browsers, with keyboard and accessibility work completed in Alpha 11.8.2.

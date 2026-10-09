@@ -114,12 +114,10 @@ test('targeted friend joins existing text channel, sends a message, then leaves 
   await openServerSettingsSection(page, 'Invites');
   const settings = page.getByRole('region', { name: 'Shared space server settings' });
   await expect(settings.getByRole('button', { name: 'Leave server' })).toHaveCount(0);
-  await settings.getByRole('combobox', { name: 'Friend' }).selectOption('fixture-peer');
-  await settings.getByRole('button', { name: 'Invite friend' }).click();
-  await expect(settings.getByText('Fixture DM', { exact: true })).toBeVisible();
-  await expect(settings.getByText('Pending invitation', { exact: true })).toBeVisible();
+  await expect(settings.getByRole('button', { name: 'Invite friend' })).toHaveCount(0);
   await closeServerSettings(page);
   const serverId = (await page.evaluate(async () => (await (await fetch('/api/v1/servers')).json()).servers[0].id)) as string;
+  await request.post(`http://127.0.0.1:3198/__test/pending-server-invite?serverId=${serverId}`);
   const conversationId = (await page.evaluate(async (id) => (await (await fetch(`/api/v1/servers/${id}/channels`)).json()).channels[0].conversationId, serverId)) as string;
 
   const friendContext = await browser.newContext();
@@ -175,8 +173,8 @@ test('owner confirms ordinary member removal without changing chats or server co
   if (isCompactNavigation(page)) await page.getByRole('button', { name: 'Back to server' }).click();
   await openServerSettingsSection(page, 'Invites');
   const inviteSettings = page.getByRole('region', { name: 'Removal space server settings' });
-  await inviteSettings.getByRole('combobox', { name: 'Friend' }).selectOption('fixture-peer');
-  await inviteSettings.getByRole('button', { name: 'Invite friend' }).click();
+  await expect(inviteSettings.getByRole('button', { name: 'Invite friend' })).toHaveCount(0);
+  await request.post(`http://127.0.0.1:3198/__test/pending-server-invite?serverId=${serverId}`);
   await closeServerSettings(page);
 
   const friendContext = await browser.newContext();

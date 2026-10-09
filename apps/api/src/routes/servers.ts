@@ -9,11 +9,12 @@ import { createOwnedTextChannel, deleteTextChannel, listMemberTextChannels, rena
 import { createCategory, deleteCategory, listMemberCategories, moveCategory, moveTypedChannel, renameCategory, withChannelManagementLock } from '../servers/layout.js';
 import { createVoiceChannel, deleteVoiceChannel, listMemberVoiceChannels, renameVoiceChannel } from '../servers/voice-channels.js';
 import {
-  acceptServerInvite, cancelServerInvite, createServerInvite, leaveServer, removeServerMember,
+  acceptServerInvite, cancelServerInvite, leaveServer, removeServerMember,
   listOwnedServerInvites, listReceivedServerInvites, listServerMembers
 } from '../servers/invites.js';
 import type { RealtimeEvents } from '../realtime/events.js';
-import { createServerInviteLink, listManagedServerInviteLinks, revokeServerInviteLink } from '../servers/invite-links.js';
+import { createServerInviteLink, listManagedServerInviteLinks, revokeServerInviteLink, copyServerInviteLink, updateServerInviteLink, setServerInvitesPaused } from '../servers/invite-links.js';
+import type { InviteCredentials } from '../servers/invite-credentials.js';
 import { ServerIconStore, SERVER_ICON_MAX_BYTES, InvalidServerIconError } from '../server-icons/storage.js';
 import { checkIconOwner, replaceServerIcon, removeServerIcon } from '../server-icons/service.js';
 import type { ServerVoiceService } from '../server-voice/service.js';
@@ -22,6 +23,7 @@ import { CHANNEL_OVERRIDE_PERMISSIONS, VOICE_CHANNEL_OVERRIDE_PERMISSIONS, listC
 
 export interface ServerRoutesOptions {
   database: Database;
+  inviteCredentials?: InviteCredentials | null;
   cookieName: string;
   sessionService: SessionService;
   realtimeEvents?: RealtimeEvents;
@@ -44,7 +46,6 @@ const overrideBodySchema = z.strictObject({ allow: overrideListSchema, deny: ove
 const moveCategorySchema = z.object({ targetIndex: z.number().int().nonnegative() });
 const moveChannelSchema = z.object({ targetCategoryId: z.string().uuid().nullable(), targetIndex: z.number().int().nonnegative() });
 const inviteParamsSchema = z.object({ inviteId: z.string().uuid() });
-const inviteTargetSchema = z.object({ userId: z.string().uuid() });
 const memberParamsSchema = serverParamsSchema.extend({ userId: z.string().uuid() });
 const roleParamsSchema = serverParamsSchema.extend({ roleId: z.string().uuid() });
 const memberRoleParamsSchema = memberParamsSchema.extend({ roleId: z.string().uuid() });
@@ -53,6 +54,13 @@ const rolePermissionsSchema = z.array(z.string().refine((value) => parseServerPe
 const createRoleSchema = z.strictObject({ name: z.string().trim().min(1).max(64), permissions: rolePermissionsSchema.optional() });
 const updateRoleSchema = z.strictObject({ name: z.string().trim().min(1).max(64).optional(), permissions: rolePermissionsSchema.optional() }).refine((value) => value.name !== undefined || value.permissions !== undefined);
 const inviteLinkParamsSchema = serverParamsSchema.extend({ linkId: z.string().uuid() });
+const inviteSettingsSchema = z.strictObject({
+  expiration: z.enum(['1h', '1d', '7d', '30d', 'never']).optional(),
+  maxUses: z.union([z.literal(1), z.literal(5), z.literal(10), z.literal(25), z.literal(100), z.null()]).optional()
+});
+const inviteEditSchema = inviteSettingsSchema.refine((value) => value.expiration !== undefined || value.maxUses !== undefined);
+const invitePageSchema = z.strictObject({ page: z.coerce.number().int().min(0).max(10000).optional() });
+const pauseSchema = z.strictObject({ paused: z.boolean() });
 
 export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app, options) => {
   const requireAuth = createRequireAuth(options.sessionService, options.cookieName);
@@ -413,7 +421,10 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
     const params = serverParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid server.' });
-    const result = await createServerInviteLink(options.database, params.data.serverId, request.auth.user.id);
+    const body = inviteSettingsSchema.safeParse(request.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: 'Invalid invite link settings.' });
+    if (!options.inviteCredentials) return reply.code(503).send({ error: 'Invite links are not configured.' });
+    const result = await createServerInviteLink(options.database, params.data.serverId, request.auth.user.id, options.inviteCredentials, body.data);
     if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: result.denied === 'not_owner' ? 'Invite link management denied.' : 'Server not found.' });
     reply.header('cache-control', 'no-store');
     return reply.code(201).send(result.value);
@@ -423,10 +434,45 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
     const params = serverParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid server.' });
-    const result = await listManagedServerInviteLinks(options.database, params.data.serverId, request.auth.user.id);
+    const query = invitePageSchema.safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'Invalid invite page.' });
+    const result = await listManagedServerInviteLinks(options.database, params.data.serverId, request.auth.user.id, query.data.page ?? 0);
     if ('denied' in result) return reply.code(404).send({ error: 'Server not found.' });
     reply.header('cache-control', 'no-store');
-    return { inviteLinks: result.value };
+    return result.value;
+  });
+
+  app.post('/:serverId/invite-links/:linkId/copy', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = inviteLinkParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid invite link.' });
+    if (!options.inviteCredentials) return reply.code(503).send({ error: 'Invite links are not configured.' });
+    const result = await copyServerInviteLink(options.database, params.data.serverId, params.data.linkId, request.auth.user.id, options.inviteCredentials);
+    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: 'Invite link unavailable.' });
+    reply.header('cache-control', 'no-store');
+    return result.value;
+  });
+
+  app.patch('/:serverId/invite-links/:linkId', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = inviteLinkParamsSchema.safeParse(request.params);
+    const body = inviteEditSchema.safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid invite link settings.' });
+    const result = await updateServerInviteLink(options.database, params.data.serverId, params.data.linkId, request.auth.user.id, body.data);
+    if ('denied' in result) return reply.code(result.denied === 'invalid' ? 400 : result.denied === 'not_owner' ? 403 : 404).send({ error: 'Invite link cannot be edited.' });
+    reply.header('cache-control', 'no-store');
+    return { inviteLink: result.value };
+  });
+
+  app.patch('/:serverId/invites/pause', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
+    const params = serverParamsSchema.safeParse(request.params);
+    const body = pauseSchema.safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid invite pause setting.' });
+    const result = await setServerInvitesPaused(options.database, params.data.serverId, request.auth.user.id, body.data.paused);
+    if ('denied' in result) return reply.code(result.denied === 'not_owner' ? 403 : 404).send({ error: 'Invite management denied.' });
+    reply.header('cache-control', 'no-store');
+    return result.value;
   });
 
   app.post('/:serverId/invite-links/:linkId/revoke', { preHandler: requireAuth }, async (request, reply) => {
@@ -540,17 +586,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
 
   app.post('/:serverId/invites', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) return reply.code(401).send({ error: 'Authentication required.' });
-    const params = serverParamsSchema.safeParse(request.params);
-    const body = inviteTargetSchema.safeParse(request.body);
-    if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid invitation.' });
-    const result = await createServerInvite(options.database, params.data.serverId, request.auth.user.id, body.data.userId);
-    if ('denied' in result) {
-      if (result.denied === 'not_found') return reply.code(404).send({ error: 'Server not found.' });
-      if (result.denied === 'not_owner') return reply.code(403).send({ error: 'Only the server owner can invite friends.' });
-      if (result.denied === 'not_friend') return reply.code(403).send({ error: 'You can only invite available friends.' });
-      return reply.code(409).send({ error: result.denied === 'member' ? 'User is already a server member.' : 'An invitation is already pending.' });
-    }
-    return reply.code(201).send({ invite: result.value });
+    return reply.code(410).send({ error: 'Create a server invite link instead.' });
   });
 
   app.post('/invites/:inviteId/accept', { preHandler: requireAuth }, async (request, reply) => {

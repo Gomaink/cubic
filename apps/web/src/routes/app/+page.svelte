@@ -103,7 +103,7 @@
   type ServerVoiceChannel = { kind: 'voice'; id: string; serverId: string; categoryId: string | null; position: number; name: string; createdAt: string; updatedAt: string };
   type ServerLayoutChannel = ServerTextChannel | ServerVoiceChannel;
   type ServerCategory = { id: string; serverId: string; name: string; position: number; createdAt: string; updatedAt: string };
-  type ShareInviteLink = { id: string; createdAt: string; expiresAt: string; revokedAt: string | null };
+  type ShareInviteLink = { id: string; createdAt: string; updatedAt: string; expiresAt: string | null; revokedAt: string | null; maxUses: number | null; useCount: number; lastUsedAt: string | null; creatorUserId: string | null; status: 'Active' | 'Expired' | 'Exhausted' | 'Revoked' | 'Paused' };
   let servers = $state<ServerSummary[]>([]);
   let activeServer = $state<ServerSummary | null>(null);
   let serverChannels = $state<ServerTextChannel[]>([]);
@@ -148,6 +148,15 @@
   let rolesSequence = 0;
   let pendingServerInvites = $state<any[]>([]);
   let shareInviteLinks = $state<ShareInviteLink[]>([]);
+  let canManageInvites = $state(false);
+  let invitesPaused = $state(false);
+  let invitePage = $state(0);
+  let inviteNextPage = $state<number | null>(null);
+  let inviteExpiration = $state<'1h' | '1d' | '7d' | '30d' | 'never'>('7d');
+  let inviteMaxUses = $state('unlimited');
+  let editingInviteId = $state<string | null>(null);
+  let editInviteExpiration = $state<'keep' | '1h' | '1d' | '7d' | '30d' | 'never'>('keep');
+  let editInviteMaxUses = $state('unlimited');
   let showRevokedInviteLinks = $state(false);
   let oneTimeInviteUrl = $state('');
   let shareInviteBusy = $state(false);
@@ -655,9 +664,11 @@
     pendingServerInvites = [];
     shareInviteSequence += 1;
     shareInviteLinks = [];
+    canManageInvites = false;
     oneTimeInviteUrl = '';
     serverInviteTarget = '';
     void refreshServerMembership(server);
+    void refreshShareInviteLinks(server);
   }
 
   function subscribeServerVoicePresence(serverId: string) {
@@ -688,7 +699,7 @@
 
   function openServerSurface(view: ServerSurface) {
     const server = activeServer;
-    if (!server || (view === 'invites' && server.ownerUserId !== currentUser.id)) return;
+    if (!server || (view === 'invites' && !canManageInvites)) return;
     navigationMenu = null;
     serverMenuOpen = false;
     serverMembersOpen = false;
@@ -903,30 +914,37 @@
     } finally { serverMembershipBusy = false; }
   }
 
-  async function refreshShareInviteLinks(server: ServerSummary) {
+  async function refreshShareInviteLinks(server: ServerSummary, page = 0) {
     const sequence = ++shareInviteSequence;
     shareInviteError = '';
     try {
-      const payload = await api(`/api/v1/servers/${server.id}/invite-links`);
+      const payload = await api(`/api/v1/servers/${server.id}/invite-links?page=${page}`);
       if (sequence !== shareInviteSequence || activeServer?.id !== server.id) return;
+      canManageInvites = true;
+      invitesPaused = payload.paused;
+      invitePage = page;
+      inviteNextPage = payload.nextPage;
       shareInviteLinks = payload.inviteLinks;
     } catch (cause) {
-      if (sequence === shareInviteSequence && activeServer?.id === server.id)
+      if (sequence === shareInviteSequence && activeServer?.id === server.id) {
+        if (!canManageInvites) return;
         shareInviteError = cause instanceof Error ? cause.message : 'Could not load share links.';
+      }
     }
   }
 
   async function createShareInviteLink() {
     const server = activeServer;
-    if (!server || server.ownerUserId !== currentUser.id || shareInviteBusy) return;
+    if (!server || !canManageInvites || shareInviteBusy) return;
     shareInviteBusy = true;
     shareInviteError = '';
     shareInviteNotice = '';
     try {
-      const result = await api(`/api/v1/servers/${server.id}/invite-links`, { method: 'POST' });
+      const result = await api(`/api/v1/servers/${server.id}/invite-links`, { method: 'POST',
+        body: JSON.stringify({ expiration: inviteExpiration, maxUses: inviteMaxUses === 'unlimited' ? null : Number(inviteMaxUses) }) });
       if (activeServer?.id !== server.id || (serverDialog !== 'invite' && serverSurface !== 'invites')) return;
       shareInviteSequence += 1;
-      shareInviteLinks = [result.inviteLink, ...shareInviteLinks];
+      shareInviteLinks = [result.inviteLink, ...shareInviteLinks].slice(0, 20);
       oneTimeInviteUrl = `${window.location.origin}/invite#${result.token}`;
     } catch (cause) {
       if (activeServer?.id === server.id) shareInviteError = cause instanceof Error ? cause.message : 'Could not create share link.';
@@ -949,9 +967,59 @@
     catch { /* User cancelled sharing or the platform declined it. */ }
   }
 
+  async function copyExistingInviteLink(linkId: string) {
+    const server = activeServer;
+    if (!server || !canManageInvites || shareInviteBusy) return;
+    shareInviteBusy = true;
+    shareInviteError = '';
+    try {
+      const result = await api(`/api/v1/servers/${server.id}/invite-links/${linkId}/copy`, { method: 'POST' });
+      if (activeServer?.id !== server.id) return;
+      oneTimeInviteUrl = `${window.location.origin}/invite#${result.token}`;
+      await copyShareInviteLink();
+    } catch (cause) {
+      if (activeServer?.id === server.id) shareInviteError = cause instanceof Error ? cause.message : 'Could not copy link.';
+    } finally { shareInviteBusy = false; }
+  }
+
+  async function editShareInviteLink(linkId: string) {
+    const server = activeServer;
+    if (!server || !canManageInvites || shareInviteBusy) return;
+    shareInviteBusy = true;
+    shareInviteError = '';
+    try {
+      const result = await api(`/api/v1/servers/${server.id}/invite-links/${linkId}`, { method: 'PATCH',
+        body: JSON.stringify({ ...(editInviteExpiration === 'keep' ? {} : { expiration: editInviteExpiration }),
+          maxUses: editInviteMaxUses === 'unlimited' ? null : Number(editInviteMaxUses) }) });
+      if (activeServer?.id !== server.id) return;
+      shareInviteLinks = shareInviteLinks.map((link) => link.id === linkId ? result.inviteLink : link);
+      editingInviteId = null;
+      shareInviteNotice = 'Invite link updated.';
+    } catch (cause) {
+      if (activeServer?.id === server.id) shareInviteError = cause instanceof Error ? cause.message : 'Could not edit link.';
+    } finally { shareInviteBusy = false; }
+  }
+
+  async function setInvitesPaused(paused: boolean) {
+    const server = activeServer;
+    if (!server || !canManageInvites || shareInviteBusy) return;
+    if (paused && !window.confirm('Pause all server invites? Existing members will remain.')) return;
+    shareInviteBusy = true;
+    shareInviteError = '';
+    try {
+      await api(`/api/v1/servers/${server.id}/invites/pause`, { method: 'PATCH', body: JSON.stringify({ paused }) });
+      if (activeServer?.id !== server.id) return;
+      invitesPaused = paused;
+      shareInviteNotice = paused ? 'Invites paused.' : 'Invites resumed.';
+      void refreshShareInviteLinks(server, invitePage);
+    } catch (cause) {
+      if (activeServer?.id === server.id) shareInviteError = cause instanceof Error ? cause.message : 'Could not update invites.';
+    } finally { shareInviteBusy = false; }
+  }
+
   async function revokeShareInviteLink(linkId: string) {
     const server = activeServer;
-    if (!server || server.ownerUserId !== currentUser.id || shareInviteBusy) return;
+    if (!server || !canManageInvites || shareInviteBusy) return;
     shareInviteBusy = true;
     shareInviteError = '';
     try {
@@ -4695,49 +4763,10 @@
           <button type="submit" disabled={layoutBusy || channelsLoading}>{layoutBusy ? 'Moving…' : 'Move to end'}</button>
         </form>
         {#if layoutError}<p class="inline-error" role="alert">{layoutError}</p>{/if}
-      {:else if serverDialog === 'invite' && activeServer && activeServer.ownerUserId === currentUser.id}
-        <h3>Targeted friend invitation</h3>
-        <form class="cubic-server-create" onsubmit={inviteServerFriend}>
-          <label for="cubic-server-invite-friend">Invite a friend</label>
-          <select id="cubic-server-invite-friend" bind:value={serverInviteTarget} required>
-            <option value="">Choose a friend</option>
-            {#each friends.filter((friend) => friend.id !== currentUser.id && !serverMembers.some((member) => member.id === friend.id) && !pendingServerInvites.some((invite) => invite.invitee.id === friend.id)) as friend (friend.id)}
-              <option value={friend.id}>{friend.displayName} (@{friend.username})</option>
-            {/each}
-          </select>
-          <button type="submit" disabled={serverMembershipBusy || !serverInviteTarget}>Invite friend</button>
-        </form>
-        {#if pendingServerInvites.length}<h3>Pending invitations</h3>{/if}
-        {#each pendingServerInvites as invite (invite.id)}
-          <div class="cubic-server-member-row"><span>{invite.invitee.displayName} · Pending</span><button type="button" aria-label={`Cancel invitation for ${invite.invitee.displayName}`} onclick={() => cancelServerInvite(invite.id)} disabled={serverMembershipBusy}>Cancel</button></div>
-        {/each}
-        <section class="cubic-share-invites" aria-label="Shareable invite links">
-          <h3>Share invite link</h3>
-          <p>Anyone with a link can join. Links expire after 7 days. Removing a member does not revoke a link.</p>
-          <button type="button" onclick={createShareInviteLink} disabled={shareInviteBusy}>{shareInviteBusy ? 'Creating…' : 'Create shareable link'}</button>
-          {#if oneTimeInviteUrl}
-            <div class="cubic-share-once">
-              <label for="cubic-share-invite-url">New link — shown only once</label>
-              <input id="cubic-share-invite-url" value={oneTimeInviteUrl} readonly onclick={(event) => event.currentTarget.select()} />
-              <div class="cubic-share-actions">
-                <button type="button" onclick={copyShareInviteLink}>Copy link</button>
-                {#if typeof navigator !== 'undefined' && typeof navigator.share === 'function'}<button type="button" onclick={shareInviteLink}>Share link</button>{/if}
-                <button type="button" onclick={() => { oneTimeInviteUrl = ''; shareInviteNotice = ''; }}>Done</button>
-              </div>
-              <small>After closing this link, it cannot be revealed again. Create a new one if needed.</small>
-            </div>
-          {/if}
-          {#if shareInviteNotice}<p role="status">{shareInviteNotice}</p>{/if}
-          {#if shareInviteLinks.length}<h3>Existing links</h3>{/if}
-          {#each shareInviteLinks as link (link.id)}
-            <div class="cubic-share-link-row">
-              <span>Created {new Date(link.createdAt).toLocaleDateString()} · {link.revokedAt ? 'Revoked' : Date.parse(link.expiresAt) <= Date.now() ? 'Expired' : `Expires ${new Date(link.expiresAt).toLocaleDateString()}`}</span>
-              {#if !link.revokedAt && Date.parse(link.expiresAt) > Date.now()}<button type="button" aria-label={`Revoke link created ${new Date(link.createdAt).toLocaleDateString()}`} onclick={() => revokeShareInviteLink(link.id)} disabled={shareInviteBusy}>Revoke</button>{/if}
-            </div>
-          {/each}
-          {#if shareInviteError}<p class="inline-error" role="alert">{shareInviteError} <button type="button" onclick={() => refreshShareInviteLinks(activeServer!)}>Retry</button></p>{/if}
-        </section>
-        {#if serverMembershipError}<p class="inline-error" role="alert">{serverMembershipError} <button type="button" onclick={() => refreshServerMembership(activeServer!)}>Retry</button></p>{/if}
+      {:else if serverDialog === 'invite' && activeServer && canManageInvites}
+        <h3>Invite links</h3>
+        <p>Manage expiration, uses, history and pause controls in server settings.</p>
+        <button type="button" onclick={() => { closeServerDialog(); openServerSurface('invites'); }}>Manage invite links</button>
       {:else if serverDialog === 'remove-member' && activeServer && memberRemovalTarget && activeServer.ownerUserId === currentUser.id}
         <div class="cubic-server-remove-confirm">
           <p>Remove <strong>{memberRemovalTarget.displayName}</strong> from <strong>{activeServer.name}</strong>?</p>
@@ -4939,7 +4968,7 @@
             <button type="button" aria-current={serverSurface === 'overview' ? 'page' : undefined} onclick={() => openServerSurface('overview')}><Icon name="server" size={17} /> Overview</button>
             <button type="button" aria-current={serverSurface === 'roles' ? 'page' : undefined} onclick={() => openServerSurface('roles')}><Icon name="shield" size={17} /> Roles</button>
             <button type="button" aria-current={serverSurface === 'members' ? 'page' : undefined} onclick={() => openServerSurface('members')}><Icon name="users" size={17} /> Members <span>{serverMembers.length}</span></button>
-            {#if activeServer.ownerUserId === currentUser.id}
+            {#if canManageInvites}
               <button type="button" aria-current={serverSurface === 'invites' ? 'page' : undefined} onclick={() => openServerSurface('invites')}><Icon name="user-plus" size={17} /> Invites</button>
             {/if}
           </nav>
@@ -5026,38 +5055,36 @@
                 {#if rolesError}<p class="inline-error" role="alert">{rolesError} <button type="button" onclick={() => refreshServerRoles(activeServer!)}>Retry</button></p>{/if}
                 {#if rolesNotice}<p role="status">{rolesNotice}</p>{/if}
               </section>
-            {:else if serverSurface === 'invites' && activeServer.ownerUserId === currentUser.id}
+            {:else if serverSurface === 'invites' && canManageInvites}
               <section class="cubic-settings-section" aria-labelledby="cubic-server-invites-title">
-                <div class="cubic-settings-title"><div><small>SERVER</small><h2 id="cubic-server-invites-title">Invites</h2><p>Invite friends directly or create a seven-day share link.</p></div></div>
+                <div class="cubic-settings-title"><div><small>SERVER</small><h2 id="cubic-server-invites-title">Invites</h2><p>Create and manage server invite links.</p></div></div>
                 <div class="cubic-settings-card cubic-settings-form-card">
-                  <h3>Invite a friend</h3>
-                  <form class="cubic-server-create" onsubmit={inviteServerFriend}>
-                    <label for="cubic-settings-server-invite-friend">Friend</label>
-                    <select id="cubic-settings-server-invite-friend" bind:value={serverInviteTarget} required>
-                      <option value="">Choose a friend</option>
-                      {#each friends.filter((friend) => friend.id !== currentUser.id && !serverMembers.some((member) => member.id === friend.id) && !pendingServerInvites.some((invite) => invite.invitee.id === friend.id)) as friend (friend.id)}<option value={friend.id}>{friend.displayName} (@{friend.username})</option>{/each}
-                    </select>
-                    <button class="cubic-control cubic-control-primary" type="submit" disabled={serverMembershipBusy || !serverInviteTarget}>Invite friend</button>
-                  </form>
+                  <h3>Invite access</h3>
+                  <p>{invitesPaused ? 'New memberships by invite are paused.' : 'Invite links are accepting new members.'}</p>
+                  <button class:cubic-control-danger={!invitesPaused} class="cubic-control cubic-control-secondary" type="button" onclick={() => setInvitesPaused(!invitesPaused)} disabled={shareInviteBusy}>{invitesPaused ? 'Resume invites' : 'Pause invites'}</button>
                   {#if pendingServerInvites.length}<h3>Pending invitations</h3>{/if}
                   {#each pendingServerInvites as invite (invite.id)}<div class="cubic-pending-invite-row"><span><strong>{invite.invitee.displayName}</strong><small>Pending invitation</small></span><button class="cubic-control cubic-control-ghost" type="button" aria-label={`Cancel invitation for ${invite.invitee.displayName}`} onclick={() => cancelServerInvite(invite.id)} disabled={serverMembershipBusy}>Cancel</button></div>{/each}
                 </div>
                 <div class="cubic-settings-card cubic-share-invites" aria-label="Shareable invite links">
-                  <h3>Share invite link</h3><p>Anyone with a link can join. Links expire after 7 days. Removing a member does not revoke a link.</p>
-                  <button class="cubic-control cubic-control-primary cubic-create-share-link" type="button" onclick={createShareInviteLink} disabled={shareInviteBusy}>{shareInviteBusy ? 'Creating…' : 'Create shareable link'}</button>
-                  {#if oneTimeInviteUrl}<div class="cubic-share-once"><label for="cubic-settings-share-invite-url">New link — shown only once</label><input id="cubic-settings-share-invite-url" value={oneTimeInviteUrl} readonly onclick={(event) => event.currentTarget.select()} /><div class="cubic-share-actions"><button class="cubic-control cubic-control-secondary" type="button" onclick={copyShareInviteLink}>Copy link</button>{#if typeof navigator !== 'undefined' && typeof navigator.share === 'function'}<button class="cubic-control cubic-control-secondary" type="button" onclick={shareInviteLink}>Share link</button>{/if}<button class="cubic-control cubic-control-ghost" type="button" onclick={() => { oneTimeInviteUrl = ''; shareInviteNotice = ''; }}>Done</button></div><small>After closing this link, it cannot be revealed again. Create a new one if needed.</small></div>{/if}
+                  <h3>Create invite link</h3><p>Anyone with a valid link can join. Removing a member does not revoke a link.</p>
+                  <label for="cubic-invite-expiration">Expiration</label>
+                  <select id="cubic-invite-expiration" bind:value={inviteExpiration}><option value="1h">1 hour</option><option value="1d">1 day</option><option value="7d">7 days</option><option value="30d">30 days</option><option value="never">Never</option></select>
+                  <label for="cubic-invite-max-uses">Maximum uses</label>
+                  <select id="cubic-invite-max-uses" bind:value={inviteMaxUses}><option value="unlimited">Unlimited</option><option value="1">1</option><option value="5">5</option><option value="10">10</option><option value="25">25</option><option value="100">100</option></select>
+                  <button class="cubic-control cubic-control-primary cubic-create-share-link" type="button" onclick={createShareInviteLink} disabled={shareInviteBusy || invitesPaused}>{shareInviteBusy ? 'Creating…' : 'Create invite link'}</button>
+                  {#if oneTimeInviteUrl}<div class="cubic-share-once"><label for="cubic-settings-share-invite-url">Invite link</label><input id="cubic-settings-share-invite-url" value={oneTimeInviteUrl} readonly onclick={(event) => event.currentTarget.select()} /><div class="cubic-share-actions"><button class="cubic-control cubic-control-secondary" type="button" onclick={copyShareInviteLink}>Copy link</button>{#if typeof navigator !== 'undefined' && typeof navigator.share === 'function'}<button class="cubic-control cubic-control-secondary" type="button" onclick={shareInviteLink}>Share link</button>{/if}<button class="cubic-control cubic-control-ghost" type="button" onclick={() => { oneTimeInviteUrl = ''; shareInviteNotice = ''; }}>Done</button></div><small>You can copy this link again from the list.</small></div>{/if}
                   {#if shareInviteNotice}<p role="status">{shareInviteNotice}</p>{/if}
-                  {#if shareInviteLinks.length}<h3>Existing links</h3>{/if}
-                  {#each shareInviteLinks.filter((link) => !link.revokedAt) as link (link.id)}
-                    <div class="cubic-share-link-row" class:cubic-share-link-inactive={Date.parse(link.expiresAt) <= Date.now()}>
-                      <span class="cubic-share-link-copy"><strong>Invite link <span class="cubic-share-link-status">{Date.parse(link.expiresAt) <= Date.now() ? 'Expired' : 'Active'}</span></strong><small>Created {new Date(link.createdAt).toLocaleDateString()} · Expires {new Date(link.expiresAt).toLocaleDateString()}</small></span>
-                      {#if Date.parse(link.expiresAt) > Date.now()}<button class="cubic-control cubic-control-danger" type="button" aria-label={`Revoke link created ${new Date(link.createdAt).toLocaleDateString()}`} onclick={() => revokeShareInviteLink(link.id)} disabled={shareInviteBusy}>Revoke</button>{/if}
+                  <h3>Manage invite links</h3>
+                  {#if !shareInviteLinks.length}<p>No invite links on this page.</p>{/if}
+                  {#each shareInviteLinks as link (link.id)}
+                    <div class="cubic-share-link-row" class:cubic-share-link-inactive={link.status !== 'Active'}>
+                      <span class="cubic-share-link-copy"><strong>Invite link <span class="cubic-share-link-status">{link.status}</span></strong><small>{link.useCount} / {link.maxUses ?? 'Unlimited'} uses · {link.expiresAt ? `Expires ${new Date(link.expiresAt).toLocaleDateString()}` : 'Never expires'} · Created {new Date(link.createdAt).toLocaleDateString()}</small></span>
+                      {#if link.status === 'Active' || link.status === 'Paused' || link.status === 'Exhausted'}<button class="cubic-control cubic-control-secondary" type="button" onclick={() => copyExistingInviteLink(link.id)} disabled={shareInviteBusy}>Copy link</button>{/if}
+                      {#if link.status !== 'Revoked' && link.status !== 'Expired'}<button class="cubic-control cubic-control-secondary" type="button" onclick={() => { editingInviteId = link.id; editInviteExpiration = 'keep'; editInviteMaxUses = link.maxUses === null ? 'unlimited' : String(link.maxUses); }} disabled={shareInviteBusy}>Edit</button><button class="cubic-control cubic-control-danger" type="button" aria-label={`Revoke link created ${new Date(link.createdAt).toLocaleDateString()}`} onclick={() => revokeShareInviteLink(link.id)} disabled={shareInviteBusy}>Revoke</button>{/if}
                     </div>
+                    {#if editingInviteId === link.id}<div class="cubic-share-actions"><label>Expiration <select bind:value={editInviteExpiration}><option value="keep">Keep current expiration</option><option value="1h">1 hour from now</option><option value="1d">1 day from now</option><option value="7d">7 days from now</option><option value="30d">30 days from now</option><option value="never">Never</option></select></label><label>Maximum uses <select bind:value={editInviteMaxUses}><option value="unlimited">Unlimited</option><option value="1">1</option><option value="5">5</option><option value="10">10</option><option value="25">25</option><option value="100">100</option></select></label><button class="cubic-control cubic-control-primary" type="button" onclick={() => editShareInviteLink(link.id)} disabled={shareInviteBusy}>Save link settings</button><button class="cubic-control cubic-control-ghost" type="button" onclick={() => editingInviteId = null}>Cancel</button></div>{/if}
                   {/each}
-                  {#if shareInviteLinks.some((link) => link.revokedAt)}
-                    <button class="cubic-control cubic-control-ghost cubic-revoked-toggle" type="button" aria-expanded={showRevokedInviteLinks} onclick={() => showRevokedInviteLinks = !showRevokedInviteLinks}>{showRevokedInviteLinks ? 'Hide' : 'Show'} {shareInviteLinks.filter((link) => link.revokedAt).length} revoked {shareInviteLinks.filter((link) => link.revokedAt).length === 1 ? 'link' : 'links'}</button>
-                    {#if showRevokedInviteLinks}{#each shareInviteLinks.filter((link) => link.revokedAt) as link (link.id)}<div class="cubic-share-link-row cubic-share-link-inactive"><span class="cubic-share-link-copy"><strong>Invite link <span class="cubic-share-link-status">Revoked</span></strong><small>Created {new Date(link.createdAt).toLocaleDateString()} · Expires {new Date(link.expiresAt).toLocaleDateString()}</small></span></div>{/each}{/if}
-                  {/if}
+                  <div class="cubic-share-actions"><button class="cubic-control cubic-control-secondary" type="button" onclick={() => refreshShareInviteLinks(activeServer!, Math.max(0, invitePage - 1))} disabled={invitePage === 0}>Previous</button><button class="cubic-control cubic-control-secondary" type="button" onclick={() => refreshShareInviteLinks(activeServer!, inviteNextPage!)} disabled={inviteNextPage === null}>Next</button></div>
                   {#if shareInviteError}<p class="inline-error" role="alert">{shareInviteError} <button type="button" onclick={() => refreshShareInviteLinks(activeServer!)}>Retry</button></p>{/if}
                 </div>
                 {#if serverMembershipError}<p class="inline-error" role="alert">{serverMembershipError} <button type="button" onclick={() => refreshServerMembership(activeServer!)}>Retry</button></p>{/if}

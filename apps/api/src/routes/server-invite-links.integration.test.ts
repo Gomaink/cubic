@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
@@ -12,6 +12,7 @@ import { serverRoutes } from './servers.js';
 import { serverInviteLinkRoutes } from './server-invite-links.js';
 import { conversationRoutes } from './conversations.js';
 import { joinServerViaInviteLink, revokeServerInviteLink } from '../servers/invite-links.js';
+import { InviteCredentials } from '../servers/invite-credentials.js';
 
 const connectionString = process.env.CUBIC_SERVER_TEST_DATABASE_URL ?? process.env.CUBIC_GROUP_TEST_DATABASE_URL;
 
@@ -22,6 +23,7 @@ test('shareable links are digest-only, owner-managed and grant normal removable 
     const serverId = randomUUID(), otherServerId = randomUUID(), conversationId = randomUUID();
     const suffix = owner.slice(0, 8);
     const app = Fastify({ logger: false });
+    const inviteCredentials = new InviteCredentials('test', { test: randomBytes(32).toString('base64url') });
     const actor = (name: string) => ({ cookie: `session=${name}` });
     const base = `/api/v1/servers/${serverId}`;
     const previewUrl = '/api/v1/server-invite-links/preview';
@@ -46,20 +48,24 @@ test('shareable links are digest-only, owner-managed and grant normal removable 
         return id ? { user: { id } } : null;
       } } as SessionService;
       const events = createRealtimeEvents();
-      await app.register(serverRoutes, { prefix: '/api/v1/servers', database, cookieName: 'session', sessionService, realtimeEvents: events });
-      await app.register(serverInviteLinkRoutes, { prefix: '/api/v1/server-invite-links', database, cookieName: 'session', sessionService });
+      await app.register(serverRoutes, { prefix: '/api/v1/servers', database, cookieName: 'session', sessionService, realtimeEvents: events, inviteCredentials });
+      await app.register(serverInviteLinkRoutes, { prefix: '/api/v1/server-invite-links', database, cookieName: 'session', sessionService, inviteCredentials });
       await app.register(conversationRoutes, { prefix: '/api/v1/conversations', database, cookieName: 'session', sessionService, realtimeEvents: events });
 
       const createUrl = `${base}/invite-links`;
       assert.equal((await app.inject({ method: 'POST', url: createUrl })).statusCode, 401);
+      assert.equal((await app.inject({ method: 'POST', url: createUrl, headers: actor('owner'), payload: { maxUses: 0 } })).statusCode, 400);
+      assert.equal((await app.inject({ method: 'POST', url: createUrl, headers: actor('owner'), payload: { expiration: 'forever' } })).statusCode, 400);
       assert.equal((await app.inject({ method: 'POST', url: createUrl, headers: actor('joiner') })).statusCode, 404);
       assert.equal((await app.inject({ method: 'POST', url: createUrl, headers: actor('outsider') })).statusCode, 404);
-      const created = await app.inject({ method: 'POST', url: createUrl, headers: actor('owner'), payload: { creatorUserId: outsider } });
+      assert.equal((await app.inject({ method: 'POST', url: createUrl, headers: actor('owner'), payload: { creatorUserId: outsider } })).statusCode, 400);
+      const created = await app.inject({ method: 'POST', url: createUrl, headers: actor('owner'), payload: {} });
       assert.equal(created.statusCode, 201);
       assert.equal(created.headers['cache-control'], 'no-store');
       const { inviteLink, token } = created.json();
-      assert.equal(/^[A-Za-z0-9_-]{43}$/.test(token), true);
-      assert.deepEqual(Object.keys(inviteLink).sort(), ['createdAt', 'expiresAt', 'id', 'revokedAt']);
+      assert.equal(inviteCredentials.verify(token), inviteLink.id);
+      assert.equal(inviteLink.useCount, 0);
+      assert.equal(inviteLink.maxUses, null);
       assert.equal(Date.parse(inviteLink.expiresAt) - Date.parse(inviteLink.createdAt), 7 * 24 * 60 * 60 * 1000);
       const stored = (await pool.query('select token_digest,creator_user_id from server_invite_links where id=$1', [inviteLink.id])).rows[0];
       assert.equal(stored.token_digest, createHash('sha256').update(token).digest('hex'));
@@ -73,6 +79,12 @@ test('shareable links are digest-only, owner-managed and grant normal removable 
       assert.equal(listed.json().inviteLinks.length, 2);
       assert.equal(JSON.stringify(listed.json()).includes(token), false);
       assert.equal(JSON.stringify(listed.json()).includes(stored.token_digest), false);
+      const copyUrl = `${createUrl}/${inviteLink.id}/copy`;
+      assert.equal((await app.inject({ method: 'POST', url: copyUrl })).statusCode, 401);
+      assert.equal((await app.inject({ method: 'POST', url: copyUrl, headers: actor('joiner') })).statusCode, 404);
+      assert.equal((await app.inject({ method: 'POST', url: `/api/v1/servers/${otherServerId}/invite-links/${inviteLink.id}/copy`, headers: actor('outsider') })).statusCode, 404);
+      assert.equal((await app.inject({ method: 'POST', url: copyUrl, headers: actor('owner') })).json().token, token);
+      assert.equal((await app.inject({ method: 'PATCH', url: `${createUrl}/${inviteLink.id}`, headers: actor('owner'), payload: { unknown: true } })).statusCode, 400);
       assert.equal((await app.inject({ method: 'GET', url: createUrl, headers: actor('joiner') })).statusCode, 404);
 
       const active = await app.inject({ method: 'POST', url: previewUrl, payload: { token } });
@@ -92,13 +104,19 @@ test('shareable links are digest-only, owner-managed and grant normal removable 
       assert.equal((await pool.query('select count(*)::int n from server_members where server_id=$1 and user_id=$2', [serverId, joiner])).rows[0].n, 1);
       assert.equal((await pool.query('select count(*)::int n from conversation_members where conversation_id=$1', [conversationId])).rows[0].n, 0);
       assert.equal((await app.inject({ method: 'GET', url: `${base}/channels`, headers: actor('joiner') })).statusCode, 200);
+      const pauseUrl = `${base}/invites/pause`;
+      assert.equal((await app.inject({ method: 'PATCH', url: pauseUrl, headers: actor('joiner'), payload: { paused: true } })).statusCode, 403);
+      assert.equal((await app.inject({ method: 'PATCH', url: pauseUrl, headers: actor('owner'), payload: { paused: true } })).statusCode, 200);
+      assert.equal((await app.inject({ method: 'POST', url: previewUrl, payload: { token } })).statusCode, 404);
+      assert.equal((await app.inject({ method: 'POST', url: joinUrl, headers: actor('outsider'), payload: { token } })).statusCode, 404);
+      assert.equal((await app.inject({ method: 'PATCH', url: pauseUrl, headers: actor('owner'), payload: { paused: false } })).statusCode, 200);
       assert.equal((await app.inject({ method: 'POST', url: createUrl, headers: actor('joiner') })).statusCode, 403);
       const delegatedRole = (await pool.query(
         'insert into server_roles (server_id,name,position,permissions) values ($1,$2,1,16) returning id',
         [serverId, 'Invites']
       )).rows[0].id;
       await pool.query('insert into server_member_roles (server_id,user_id,role_id) values ($1,$2,$3)', [serverId, joiner, delegatedRole]);
-      const delegated = await app.inject({ method: 'POST', url: createUrl, headers: actor('joiner'), payload: { creatorUserId: outsider } });
+      const delegated = await app.inject({ method: 'POST', url: createUrl, headers: actor('joiner'), payload: {} });
       assert.equal(delegated.statusCode, 201);
       assert.equal((await pool.query('select creator_user_id from server_invite_links where id=$1', [delegated.json().inviteLink.id])).rows[0].creator_user_id, joiner);
       assert.equal((await app.inject({ method: 'GET', url: createUrl, headers: actor('joiner') })).statusCode, 200);
@@ -143,7 +161,7 @@ test('join and revoke serialize on the server lock and reject stale pre-lock val
     const pool = new Pool({ connectionString, max: 8 });
     const owner = randomUUID(), joiner = randomUUID(), server = randomUUID();
     const suffix = owner.slice(0, 8);
-    const token = randomUUID();
+    const token = randomBytes(32).toString('base64url');
     const digest = createHash('sha256').update(token).digest('hex');
     const database = { pool, db: drizzle(pool) } as Database;
     try {

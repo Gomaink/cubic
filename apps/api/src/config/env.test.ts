@@ -14,6 +14,8 @@ const requiredEnvironment = {
   LIVEKIT_API_URL: 'http://localhost:7880',
   LIVEKIT_API_KEY: 'local-test-key',
   LIVEKIT_API_SECRET: 'local-test-secret-with-at-least-32-characters',
+  INVITE_LINK_ACTIVE_KEY_ID: 'test',
+  INVITE_LINK_HMAC_KEYS: JSON.stringify({ test: Buffer.alloc(32, 7).toString('base64url') }),
   TRUST_PROXY_CIDRS: '127.0.0.1/32,::1/128'
 };
 

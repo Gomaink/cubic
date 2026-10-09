@@ -133,6 +133,8 @@ export async function acceptServerInvite(database: Database, inviteId: string, a
   if (!serverId) return { denied: 'not_found' };
   return withServerTransaction(database, serverId, async (client, ownerId) => {
     if (!ownerId) return { denied: 'not_found' };
+    const pause = await client.query('select invites_paused_at from servers where id=$1', [serverId]);
+    if (pause.rows[0]?.invites_paused_at) return { denied: 'not_found' };
     const locked = await client.query<{ invitee_user_id: string; status: string }>(
       'select invitee_user_id, status from server_invites where id = $1 and server_id = $2 for update', [inviteId, serverId]
     );

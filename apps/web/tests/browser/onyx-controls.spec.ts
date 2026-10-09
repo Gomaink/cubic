@@ -94,13 +94,9 @@ test('Onyx rail, switches, avatar action, channel menu and server settings stay 
   await serverSettings.getByRole('navigation', { name: 'Server settings sections' }).getByRole('button', { name: /Members/ }).click();
   await expect(serverSettings.getByRole('heading', { name: /Members/ })).toBeVisible();
   await serverSettings.getByRole('navigation', { name: 'Server settings sections' }).getByRole('button', { name: /Invites/ }).click();
-  if (await hasCoarsePointer(page)) expect(await serverSettings.getByRole('combobox', { name: 'Friend' }).evaluate((node) => node.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
-  await serverSettings.getByRole('combobox', { name: 'Friend' }).selectOption('fixture-peer');
-  await serverSettings.getByRole('button', { name: 'Invite friend' }).click();
-  await expect(serverSettings.locator('.cubic-pending-invite-row')).toContainText('Fixture DM');
-  await serverSettings.getByRole('button', { name: 'Cancel invitation for Fixture DM' }).click();
-  await expect(serverSettings.locator('.cubic-pending-invite-row')).toHaveCount(0);
-  await serverSettings.getByRole('button', { name: 'Create shareable link' }).click();
+  if (await hasCoarsePointer(page)) expect(await serverSettings.getByRole('combobox', { name: 'Expiration' }).evaluate((node) => node.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+  await expect(serverSettings.getByRole('button', { name: 'Invite friend' })).toHaveCount(0);
+  await serverSettings.getByRole('button', { name: 'Create invite link' }).click();
   await serverSettings.getByRole('button', { name: 'Done' }).click();
   await expect(serverSettings.locator('.cubic-share-link-status')).toContainText('Active');
   if (prefix) {
@@ -112,8 +108,6 @@ test('Onyx rail, switches, avatar action, channel menu and server settings stay 
     }
   }
   await serverSettings.getByRole('button', { name: /Revoke link created/ }).click();
-  await expect(serverSettings.getByRole('button', { name: 'Show 1 revoked link' })).toBeVisible();
-  await serverSettings.getByRole('button', { name: 'Show 1 revoked link' }).click();
   await expect(serverSettings.locator('.cubic-share-link-inactive')).toContainText('Revoked');
   await expect(serverSettings.getByRole('button', { name: /Revoke link created/ })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
