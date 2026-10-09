@@ -50,9 +50,11 @@ import { PasskeyService } from './security/passkeys.js';
 import { PasskeyReauthenticationService } from './security/passkey-reauthentication.js';
 import { passkeyRoutes } from './routes/passkeys.js';
 import { PasskeyAuthenticationService } from './security/passkey-authentication.js';
+import type { InviteCredentials } from './servers/invite-credentials.js';
 
 export interface CreateAppOptions {
   database: Database;
+  inviteCredentials?: InviteCredentials | null;
   corsOrigin: string;
   trustedProxyCidrs: string[];
   cookieName: string;
@@ -224,6 +226,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   await app.register(serverRoutes, {
     prefix: '/api/v1/servers',
     database: options.database,
+    inviteCredentials: options.inviteCredentials ?? null,
     cookieName: options.cookieName,
     sessionService: options.sessionService,
     realtimeEvents,
@@ -239,6 +242,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   await app.register(serverInviteLinkRoutes, {
     prefix: '/api/v1/server-invite-links',
     database: options.database,
+    inviteCredentials: options.inviteCredentials ?? null,
     cookieName: options.cookieName,
     sessionService: options.sessionService
   });

@@ -13,6 +13,7 @@ test('default Compose requires private deployment credentials', async () => {
   assert.match(compose, /\$\{POSTGRES_PASSWORD:\?/);
   assert.match(compose, /\$\{LIVEKIT_API_KEY:\?/);
   assert.match(compose, /\$\{LIVEKIT_API_SECRET:\?/);
+  assert.match(compose, /\$\{INVITE_LINK_HMAC_KEYS:\?/);
   assert.match(compose, /\$\{SESSION_COOKIE_SECURE:\?/);
   assert.match(compose, /\$\{TRUST_PROXY_CIDRS:\?/);
   assert.doesNotMatch(compose, /POSTGRES_PASSWORD:-/);

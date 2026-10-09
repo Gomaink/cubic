@@ -67,22 +67,22 @@ test('targeted server invites serialize transitions, add membership and revoke i
       });
 
       const inviteUrl = `${url}/invites`;
+      const seedPending = async (invitee: string) => {
+        const inserted = await pool.query('insert into server_invites(server_id,inviter_user_id,invitee_user_id) values($1,$2,$3) returning id', [serverId, owner, invitee]);
+        return { json: () => ({ invite: { id: inserted.rows[0].id } }) };
+      };
       assert.equal((await app.inject({ method: 'POST', url: inviteUrl, payload: { userId: friend } })).statusCode, 401);
-      assert.equal((await app.inject({ method: 'POST', url: inviteUrl, headers: actor('outsider'), payload: { userId: friend } })).statusCode, 404);
-      assert.equal((await app.inject({ method: 'POST', url: inviteUrl, headers: actor('owner'), payload: { userId: outsider } })).statusCode, 403);
-      assert.equal((await app.inject({ method: 'POST', url: inviteUrl, headers: actor('owner'), payload: { userId: owner } })).statusCode, 403);
-      const [first, duplicate] = await Promise.all([
-        app.inject({ method: 'POST', url: inviteUrl, headers: actor('owner'), payload: { userId: friend, inviterUserId: outsider } }),
-        app.inject({ method: 'POST', url: inviteUrl, headers: actor('owner'), payload: { userId: friend } })
-      ]);
-      assert.deepEqual([first.statusCode, duplicate.statusCode].sort(), [201, 409]);
-      const invite = (first.statusCode === 201 ? first : duplicate).json().invite;
-      assert.equal(invite.inviter.id, owner);
-      assert.deepEqual(Object.keys(invite).sort(), ['createdAt', 'id', 'invitee', 'inviter', 'serverId', 'serverName']);
+      for (const name of ['outsider', 'owner']) assert.equal((await app.inject({ method: 'POST', url: inviteUrl, headers: actor(name), payload: { userId: friend } })).statusCode, 410);
+      const first = await seedPending(friend);
+      const invite = first.json().invite;
       assert.equal((await app.inject({ method: 'GET', url: '/api/v1/servers/invites', headers: actor('friend') })).json().invites.length, 1);
       assert.equal((await app.inject({ method: 'GET', url: inviteUrl, headers: actor('owner') })).json().invites.length, 1);
       assert.equal((await app.inject({ method: 'GET', url: inviteUrl, headers: actor('outsider') })).statusCode, 404);
       assert.equal((await app.inject({ method: 'POST', url: `/api/v1/servers/invites/${invite.id}/accept`, headers: actor('outsider') })).statusCode, 404);
+      assert.equal((await app.inject({ method: 'PATCH', url: `${url}/invites/pause`, headers: actor('owner'), payload: { paused: true } })).statusCode, 200);
+      assert.equal((await app.inject({ method: 'POST', url: `/api/v1/servers/invites/${invite.id}/accept`, headers: actor('friend') })).statusCode, 404);
+      assert.equal((await pool.query('select status from server_invites where id=$1', [invite.id])).rows[0].status, 'pending');
+      assert.equal((await app.inject({ method: 'PATCH', url: `${url}/invites/pause`, headers: actor('owner'), payload: { paused: false } })).statusCode, 200);
       await pool.query('delete from friendships where (user_low_id=$1 and user_high_id=$2) or (user_low_id=$2 and user_high_id=$1)', [owner, friend]);
 
       const [accepted, competing] = await Promise.all([
@@ -94,7 +94,7 @@ test('targeted server invites serialize transitions, add membership and revoke i
       assert.equal((await pool.query('select count(*)::int as n from server_members where server_id=$1 and user_id=$2', [serverId, friend])).rows[0].n, 1);
       assert.equal((await pool.query('select count(*)::int as n from conversation_members where conversation_id=$1', [conversationId])).rows[0].n, 0);
       assert.equal((await app.inject({ method: 'POST', url: `/api/v1/servers/invites/${invite.id}/accept`, headers: actor('friend') })).statusCode, 404);
-      assert.equal((await app.inject({ method: 'POST', url: inviteUrl, headers: actor('owner'), payload: { userId: friend } })).statusCode, 409);
+      assert.equal((await app.inject({ method: 'POST', url: inviteUrl, headers: actor('owner'), payload: { userId: friend } })).statusCode, 410);
       assert.equal((await app.inject({ method: 'GET', url: `${url}/channels`, headers: actor('friend') })).statusCode, 200);
       const messagesUrl = `/api/v1/conversations/${conversationId}/messages`;
       assert.equal((await app.inject({ method: 'GET', url: messagesUrl, headers: actor('friend') })).statusCode, 200);
@@ -123,8 +123,7 @@ test('targeted server invites serialize transitions, add membership and revoke i
 
       const [friendLow, friendHigh] = owner < friend ? [owner, friend] : [friend, owner];
       await pool.query('insert into friendships (user_low_id,user_high_id) values ($1,$2)', [friendLow, friendHigh]);
-      const reinvite = await app.inject({ method: 'POST', url: inviteUrl, headers: actor('owner'), payload: { userId: friend } });
-      assert.equal(reinvite.statusCode, 201);
+      const reinvite = await seedPending(friend);
       assert.equal((await app.inject({ method: 'POST', url: `/api/v1/servers/invites/${reinvite.json().invite.id}/accept`, headers: actor('friend') })).statusCode, 200);
       const removeUrl = `${url}/members/${friend}`;
       assert.equal((await app.inject({ method: 'DELETE', url: removeUrl })).statusCode, 401);
@@ -150,8 +149,7 @@ test('targeted server invites serialize transitions, add membership and revoke i
       assert.equal((await pool.query('select 1 from friendships where user_low_id=$1 and user_high_id=$2', [friendLow, friendHigh])).rowCount, 1);
       assert.equal((await pool.query('select count(*)::int as n from conversation_members where user_id=$1 and conversation_id=any($2::uuid[])', [friend, [directId, groupId]])).rows[0].n, 2);
 
-      const duplicateRaceInvite = await app.inject({ method: 'POST', url: inviteUrl, headers: actor('owner'), payload: { userId: friend } });
-      assert.equal(duplicateRaceInvite.statusCode, 201);
+      const duplicateRaceInvite = await seedPending(friend);
       assert.equal((await app.inject({ method: 'POST', url: `/api/v1/servers/invites/${duplicateRaceInvite.json().invite.id}/accept`, headers: actor('friend') })).statusCode, 200);
       const duplicateRemovals = await Promise.all([
         app.inject({ method: 'DELETE', url: removeUrl, headers: actor('owner') }),
@@ -160,8 +158,7 @@ test('targeted server invites serialize transitions, add membership and revoke i
       assert.deepEqual(duplicateRemovals.map((result) => result.statusCode).sort(), [204, 404]);
       assert.equal((await pool.query('select 1 from server_members where server_id=$1 and user_id=$2', [serverId, friend])).rowCount, 0);
 
-      const leaveRaceInvite = await app.inject({ method: 'POST', url: inviteUrl, headers: actor('owner'), payload: { userId: friend } });
-      assert.equal(leaveRaceInvite.statusCode, 201);
+      const leaveRaceInvite = await seedPending(friend);
       assert.equal((await app.inject({ method: 'POST', url: `/api/v1/servers/invites/${leaveRaceInvite.json().invite.id}/accept`, headers: actor('friend') })).statusCode, 200);
       const leaveRemoveRace = await Promise.all([
         app.inject({ method: 'POST', url: `${url}/leave`, headers: actor('friend') }),
@@ -170,15 +167,13 @@ test('targeted server invites serialize transitions, add membership and revoke i
       assert.deepEqual(leaveRemoveRace.map((result) => result.statusCode).sort(), [204, 404]);
       assert.equal((await pool.query('select 1 from server_members where server_id=$1 and user_id=$2', [serverId, friend])).rowCount, 0);
 
-      const second = await app.inject({ method: 'POST', url: inviteUrl, headers: actor('owner'), payload: { userId: secondFriend } });
-      assert.equal(second.statusCode, 201);
+      const second = await seedPending(secondFriend);
       const secondId = second.json().invite.id;
       assert.equal((await app.inject({ method: 'DELETE', url: `/api/v1/servers/invites/${secondId}`, headers: actor('outsider') })).statusCode, 404);
       assert.equal((await app.inject({ method: 'DELETE', url: `/api/v1/servers/invites/${secondId}`, headers: actor('owner') })).statusCode, 204);
       assert.equal((await app.inject({ method: 'POST', url: `/api/v1/servers/invites/${secondId}/accept`, headers: actor('second') })).statusCode, 404);
       assert.equal((await pool.query('select status from server_invites where id=$1', [secondId])).rows[0].status, 'cancelled');
-      const raceInvite = await app.inject({ method: 'POST', url: inviteUrl, headers: actor('owner'), payload: { userId: secondFriend } });
-      assert.equal(raceInvite.statusCode, 201);
+      const raceInvite = await seedPending(secondFriend);
       const raceId = raceInvite.json().invite.id;
       const [raceAccept, raceCancel] = await Promise.all([
         app.inject({ method: 'POST', url: `/api/v1/servers/invites/${raceId}/accept`, headers: actor('second') }),

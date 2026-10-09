@@ -153,6 +153,7 @@ export const servers = pgTable('servers', {
   name: varchar('name', { length: 96 }).notNull(),
   iconKey: text('icon_key'),
   ownerUserId: uuid('owner_user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  invitesPausedAt: timestamp('invites_paused_at', { withTimezone: true, mode: 'date' }),
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
 });
@@ -239,17 +240,23 @@ export const serverInviteLinks = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
-    creatorUserId: uuid('creator_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    creatorUserId: uuid('creator_user_id').references(() => users.id, { onDelete: 'set null' }),
     tokenDigest: varchar('token_digest', { length: 64 }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
-    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
-    revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' })
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' }),
+    maxUses: integer('max_uses'),
+    useCount: integer('use_count').notNull().default(0),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true, mode: 'date' }),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
   },
   (table) => [
     uniqueIndex('server_invite_links_token_digest_uq').on(table.tokenDigest),
     index('server_invite_links_server_created_idx').on(table.serverId, table.createdAt, table.id),
     check('server_invite_links_token_digest_ck', sql`${table.tokenDigest} ~ '^[0-9a-f]{64}$'`),
-    check('server_invite_links_expiry_ck', sql`${table.expiresAt} > ${table.createdAt}`)
+    check('server_invite_links_expiry_ck', sql`${table.expiresAt} is null or ${table.expiresAt} > ${table.createdAt}`),
+    check('server_invite_links_max_uses_ck', sql`${table.maxUses} is null or ${table.maxUses} > 0`),
+    check('server_invite_links_use_count_ck', sql`${table.useCount} >= 0 and (${table.maxUses} is null or ${table.useCount} <= ${table.maxUses})`)
   ]
 );
 

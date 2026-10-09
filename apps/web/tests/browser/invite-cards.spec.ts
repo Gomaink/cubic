@@ -9,8 +9,8 @@ async function createLink(page: Page) {
   await create.getByRole('button', { name: 'Create server' }).click();
   await openServerSettingsSection(page, 'Invites');
   const invite = page.getByRole('region', { name: 'Card destination server settings' });
-  await invite.getByRole('button', { name: 'Create shareable link' }).click();
-  const url = await invite.getByRole('textbox', { name: 'New link — shown only once' }).inputValue();
+  await invite.getByRole('button', { name: 'Create invite link' }).click();
+  const url = await invite.getByRole('textbox', { name: 'Invite link' }).inputValue();
   await invite.getByRole('button', { name: 'Done' }).click();
   await closeServerSettings(page);
   return url;

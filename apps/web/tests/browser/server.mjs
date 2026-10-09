@@ -126,6 +126,14 @@ function reset() {
 }
 reset();
 
+function canManageServerInvites(server, userId) {
+  if (!server || !fixtureServerMembers.get(server.id)?.has(userId)) return false;
+  if (server.ownerUserId === userId) return true;
+  const assigned = fixtureRoleAssignments.get(server.id)?.get(userId) ?? new Set();
+  return (fixtureServerRoles.get(server.id) ?? []).some((role) =>
+    (role.isDefault || assigned.has(role.id)) && role.permissions.includes('MANAGE_INVITES'));
+}
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url, 'http://127.0.0.1:3198');
   const json = (value, status = 200) => {
@@ -143,6 +151,52 @@ const server = createServer(async (request, response) => {
   if (url.pathname === '/__test/mail') return json({ messages: fixtureMail });
   if (url.pathname === '/__test/email-verified') { fixtureEmailVerifiedAt = url.searchParams.get('value') === 'true' ? new Date().toISOString() : null; return json({ ok: true }); }
   if (url.pathname === '/__test/server-friends') { fixtureServerFriends = true; return json({ ok: true }); }
+  if (url.pathname === '/__test/pending-server-invite' && request.method === 'POST') {
+    const server = fixtureServers.find((item) => item.id === url.searchParams.get('serverId'));
+    if (!server) return json({ error: 'Server not found.' }, 404);
+    fixtureServerInvites.push({ id: randomUUID(), serverId: server.id, serverName: server.name,
+      inviter: user, invitee: peer, status: 'pending', createdAt: new Date().toISOString() });
+    return json({ ok: true });
+  }
+  if (url.pathname === '/__test/manage-invites-role' && request.method === 'POST') {
+    const server = fixtureServers.find((item) => item.id === url.searchParams.get('serverId'));
+    if (!server) return json({ error: 'Server not found.' }, 404);
+    fixtureServerMembers.get(server.id).add(peer.id);
+    const role = { id: randomUUID(), name: 'Invite manager', position: 1, isDefault: false, permissions: ['MANAGE_INVITES'] };
+    fixtureServerRoles.get(server.id).push(role);
+    fixtureRoleAssignments.get(server.id).set(peer.id, new Set([role.id]));
+    return json({ ok: true });
+  }
+  if (url.pathname === '/__test/legacy-server-link' && request.method === 'POST') {
+    const server = fixtureServers.find((item) => item.id === url.searchParams.get('serverId'));
+    if (!server) return json({ error: 'Server not found.' }, 404);
+    const id = randomUUID(), createdAt = new Date().toISOString();
+    const originalToken = randomBytes(32).toString('base64url');
+    const token = `v2.fixture.${id}.${randomBytes(32).toString('base64url')}`;
+    fixtureShareInviteLinks.push({ id, serverId: server.id, token, legacyToken: originalToken, createdAt,
+      updatedAt: createdAt, expiresAt: new Date(Date.now() + 86400000).toISOString(), revokedAt: null,
+      maxUses: null, useCount: 0, lastUsedAt: null });
+    return json({ id, originalToken });
+  }
+  if (url.pathname === '/__test/invite-history' && request.method === 'POST') {
+    const server = fixtureServers.find((item) => item.id === url.searchParams.get('serverId'));
+    if (!server) return json({ error: 'Server not found.' }, 404);
+    for (let index = 0; index < 22; index += 1) {
+      const id = randomUUID(), createdAt = new Date(Date.now() - 2 * 86400000 + index).toISOString();
+      fixtureShareInviteLinks.push({ id, serverId: server.id,
+        token: `v2.fixture.${id}.${randomBytes(32).toString('base64url')}`, createdAt, updatedAt: createdAt,
+        expiresAt: new Date(Date.now() - 86400000).toISOString(), revokedAt: null,
+        maxUses: null, useCount: index, lastUsedAt: null });
+    }
+    return json({ ok: true });
+  }
+  if (url.pathname === '/__test/expire-server-link' && request.method === 'POST') {
+    const link = fixtureShareInviteLinks.find((item) => item.id === url.searchParams.get('linkId'));
+    if (!link) return json({ error: 'Invite link not found.' }, 404);
+    link.createdAt = new Date(Date.now() - 2 * 86400000).toISOString();
+    link.expiresAt = new Date(Date.now() - 1000).toISOString();
+    return json({ ok: true });
+  }
   if (url.pathname === '/__test/server-voice-connected') {
     fixtureServerVoiceConnected = true;
     return json({ ok: true });
@@ -289,7 +343,7 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === '/api/v1/server-invite-links/preview' && request.method === 'POST') {
     const payload = JSON.parse((await body()).toString());
-    const link = fixtureShareInviteLinks.find((item) => item.token === payload.token && !item.revokedAt && Date.parse(item.expiresAt) > Date.now());
+    const link = fixtureShareInviteLinks.find((item) => (item.token === payload.token || item.legacyToken === payload.token) && !item.revokedAt && !fixtureServers.find((server) => server.id === item.serverId)?.invitesPaused && (item.expiresAt === null || Date.parse(item.expiresAt) > Date.now()) && (item.maxUses === null || item.useCount < item.maxUses));
     if (!link) return json({ error: 'Invite unavailable.' }, 404);
     const server = fixtureServers.find((item) => item.id === link.serverId);
     if (!server) return json({ error: 'Invite unavailable.' }, 404);
@@ -423,12 +477,12 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === '/api/v1/server-invite-links/join' && request.method === 'POST') {
     const payload = JSON.parse((await body()).toString());
-    const link = fixtureShareInviteLinks.find((item) => item.token === payload.token && !item.revokedAt && Date.parse(item.expiresAt) > Date.now());
+    const link = fixtureShareInviteLinks.find((item) => (item.token === payload.token || item.legacyToken === payload.token) && !item.revokedAt && !fixtureServers.find((server) => server.id === item.serverId)?.invitesPaused && (item.expiresAt === null || Date.parse(item.expiresAt) > Date.now()) && (item.maxUses === null || item.useCount < item.maxUses));
     if (!link) return json({ error: 'Invite unavailable.' }, 404);
     const selected = fixtureServers.find((item) => item.id === link.serverId);
     if (!selected) return json({ error: 'Invite unavailable.' }, 404);
     const alreadyMember = fixtureServerMembers.get(selected.id).has(requestUser.id);
-    fixtureServerMembers.get(selected.id).add(requestUser.id);
+    if (!alreadyMember) { fixtureServerMembers.get(selected.id).add(requestUser.id); link.useCount += 1; link.lastUsedAt = new Date().toISOString(); link.updatedAt = link.lastUsedAt; }
     return json({ server: { id: selected.id, name: selected.name }, joined: !alreadyMember, alreadyMember });
   }
   if (url.pathname === '/api/v1/users/me/profile' && request.method === 'PATCH') {
@@ -534,6 +588,7 @@ const server = createServer(async (request, response) => {
     if (!invite) return json({ error: 'Invitation not found.' }, 404);
     if (inviteAction[2] && request.method === 'POST') {
       if (invite.invitee.id !== requestUser.id) return json({ error: 'Invitation not found.' }, 404);
+      if (fixtureServers.find((item) => item.id === invite.serverId)?.invitesPaused) return json({ error: 'Invitation not found.' }, 404);
       invite.status = 'accepted';
       fixtureServerMembers.get(invite.serverId).add(requestUser.id);
       return json({ server: fixtureServers.find((item) => item.id === invite.serverId) });
@@ -555,32 +610,62 @@ const server = createServer(async (request, response) => {
     const selected = fixtureServers.find((item) => item.id === serverInvites[1]);
     if (selected?.ownerUserId !== requestUser.id) return json({ error: 'Server not found.' }, 404);
     if (request.method === 'GET') return json({ invites: fixtureServerInvites.filter((item) => item.serverId === selected.id && item.status === 'pending') });
-    if (request.method === 'POST') {
-      const payload = JSON.parse((await body()).toString());
-      if (!fixtureServerFriends || payload.userId !== (isPeer ? user.id : peer.id)) return json({ error: 'You can only invite friends.' }, 403);
-      if (fixtureServerMembers.get(selected.id)?.has(payload.userId)) return json({ error: 'Already a member.' }, 409);
-      if (fixtureServerInvites.some((item) => item.serverId === selected.id && item.invitee.id === payload.userId && item.status === 'pending')) return json({ error: 'Already pending.' }, 409);
-      const invite = { id: randomUUID(), serverId: selected.id, serverName: selected.name, inviter: requestUser, invitee: isPeer ? user : peer, status: 'pending', createdAt: new Date().toISOString() };
-      fixtureServerInvites.push(invite);
-      return json({ invite }, 201);
-    }
+    if (request.method === 'POST') return json({ error: 'Create a server invite link instead.' }, 410);
   }
-  const shareLinks = /^\/api\/v1\/servers\/([0-9a-f-]+)\/invite-links(?:\/([0-9a-f-]+)\/revoke)?$/.exec(url.pathname);
+  const pauseInvites = /^\/api\/v1\/servers\/([0-9a-f-]+)\/invites\/pause$/.exec(url.pathname);
+  if (pauseInvites && request.method === 'PATCH') {
+    const selected = fixtureServers.find((item) => item.id === pauseInvites[1]);
+    if (!canManageServerInvites(selected, requestUser.id)) return json({ error: 'Server not found.' }, 404);
+    const payload = JSON.parse((await body()).toString());
+    if (typeof payload.paused !== 'boolean') return json({ error: 'Invalid invite pause setting.' }, 400);
+    selected.invitesPaused = payload.paused;
+    return json({ paused: payload.paused });
+  }
+  const shareLinks = /^\/api\/v1\/servers\/([0-9a-f-]+)\/invite-links(?:\/([0-9a-f-]+)(?:\/(copy|revoke))?)?$/.exec(url.pathname);
   if (shareLinks) {
     const selected = fixtureServers.find((item) => item.id === shareLinks[1]);
-    if (selected?.ownerUserId !== requestUser.id) return json({ error: 'Server not found.' }, 404);
+    if (!canManageServerInvites(selected, requestUser.id)) return json({ error: 'Server not found.' }, 404);
+    const status = (link) => link.revokedAt ? 'Revoked' : link.expiresAt && Date.parse(link.expiresAt) <= Date.now() ? 'Expired' : link.maxUses !== null && link.useCount >= link.maxUses ? 'Exhausted' : selected.invitesPaused ? 'Paused' : 'Active';
+    const metadata = (link) => ({ id: link.id, createdAt: link.createdAt, updatedAt: link.updatedAt, expiresAt: link.expiresAt,
+      revokedAt: link.revokedAt, maxUses: link.maxUses, useCount: link.useCount, lastUsedAt: link.lastUsedAt,
+      creatorUserId: requestUser.id, status: status(link) });
     if (shareLinks[2]) {
       const link = fixtureShareInviteLinks.find((item) => item.id === shareLinks[2] && item.serverId === selected.id);
       if (!link) return json({ error: 'Invite link not found.' }, 404);
-      link.revokedAt ??= new Date().toISOString();
-      return json({ inviteLink: { id: link.id, createdAt: link.createdAt, expiresAt: link.expiresAt, revokedAt: link.revokedAt } });
+      if (shareLinks[3] === 'copy' && request.method === 'POST') return status(link) !== 'Revoked' && status(link) !== 'Expired' ? json({ token: link.token }) : json({ error: 'Invite unavailable.' }, 404);
+      if (shareLinks[3] === 'revoke' && request.method === 'POST') { link.revokedAt ??= new Date().toISOString(); link.updatedAt = new Date().toISOString(); return json({ inviteLink: metadata(link) }); }
+      if (!shareLinks[3] && request.method === 'PATCH') {
+        const payload = JSON.parse((await body()).toString());
+        if (Object.keys(payload).some((key) => !['expiration', 'maxUses'].includes(key)) ||
+          (!Object.hasOwn(payload, 'expiration') && !Object.hasOwn(payload, 'maxUses')) ||
+          (Object.hasOwn(payload, 'expiration') && !['1h','1d','7d','30d','never'].includes(payload.expiration)) ||
+          (Object.hasOwn(payload, 'maxUses') && ![null,1,5,10,25,100].includes(payload.maxUses)) ||
+          link.revokedAt || (link.expiresAt && Date.parse(link.expiresAt) <= Date.now()) ||
+          (payload.maxUses !== undefined && payload.maxUses !== null && payload.maxUses < link.useCount)) return json({ error: 'Invalid settings.' }, 400);
+        const periods = { '1h': 3600000, '1d': 86400000, '7d': 604800000, '30d': 2592000000, never: null };
+        if (payload.expiration !== undefined) link.expiresAt = periods[payload.expiration] === null ? null : new Date(Date.now() + periods[payload.expiration]).toISOString();
+        if (payload.maxUses !== undefined) link.maxUses = payload.maxUses;
+        link.updatedAt = new Date().toISOString();
+        return json({ inviteLink: metadata(link) });
+      }
     }
-    if (request.method === 'GET') return json({ inviteLinks: fixtureShareInviteLinks.filter((item) => item.serverId === selected.id).map(({ token, serverId, ...metadata }) => metadata) });
-    if (request.method === 'POST') {
+    if (request.method === 'GET') {
+      const page = Number(url.searchParams.get('page') ?? 0);
+      const links = fixtureShareInviteLinks.filter((item) => item.serverId === selected.id).reverse();
+      return json({ inviteLinks: links.slice(page * 20, page * 20 + 20).map(metadata), nextPage: links.length > (page + 1) * 20 ? page + 1 : null, paused: Boolean(selected.invitesPaused) });
+    }
+    if (request.method === 'POST' && !shareLinks[2]) {
+      const payload = JSON.parse((await body()).toString());
+      const periods = { '1h': 3600000, '1d': 86400000, '7d': 604800000, '30d': 2592000000, never: null };
+      if (!['1h','1d','7d','30d','never'].includes(payload.expiration) || ![null,1,5,10,25,100].includes(payload.maxUses)) return json({ error: 'Invalid settings.' }, 400);
       const createdAt = new Date().toISOString();
-      const link = { id: randomUUID(), serverId: selected.id, token: randomUUID().replaceAll('-', '') + 'abcdefghijk', createdAt, expiresAt: new Date(Date.parse(createdAt) + 7 * 24 * 60 * 60 * 1000).toISOString(), revokedAt: null };
+      const id = randomUUID();
+      const token = `v2.fixture.${id}.${randomBytes(32).toString('base64url')}`;
+      const link = { id, serverId: selected.id, token, createdAt, updatedAt: createdAt,
+        expiresAt: periods[payload.expiration] === null ? null : new Date(Date.now() + periods[payload.expiration]).toISOString(),
+        revokedAt: null, maxUses: payload.maxUses, useCount: 0, lastUsedAt: null };
       fixtureShareInviteLinks.push(link);
-      return json({ inviteLink: { id: link.id, createdAt: link.createdAt, expiresAt: link.expiresAt, revokedAt: null }, token: link.token }, 201);
+      return json({ inviteLink: metadata(link), token }, 201);
     }
   }
   const serverMembers = /^\/api\/v1\/servers\/([0-9a-f-]+)\/members$/.exec(url.pathname);

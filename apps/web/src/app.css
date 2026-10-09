@@ -4930,6 +4930,9 @@ main.cubic-app-shell.cubic-app-reduce-motion *::after {
 .cubic-settings-form-card .cubic-control-primary:hover:not(:disabled) { background: var(--cubic-brand-hover); }
 .cubic-settings-form-card .cubic-control-ghost { border-color: transparent; background: transparent; color: var(--cubic-muted); }
 .cubic-settings-card.cubic-share-invites { margin-top: 0; padding: 14px; }
+.cubic-share-invites > label { color: var(--cubic-text); font-size: .82rem; font-weight: 650; }
+.cubic-share-invites > select { width: min(100%, 280px); min-height: var(--cubic-control-height); padding: 8px 11px; border: 1px solid var(--cubic-control-border); border-radius: var(--cubic-control-radius); background: var(--cubic-control-bg); color: var(--cubic-text); font: inherit; }
+.cubic-share-invites > select:focus-visible { outline: 2px solid var(--cubic-brand-focus); outline-offset: 2px; }
 .cubic-pending-invite-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 8px 0; border-top: 1px solid var(--cubic-border); }
 .cubic-pending-invite-row span, .cubic-pending-invite-row strong, .cubic-pending-invite-row small { display: block; min-width: 0; }
 .cubic-pending-invite-row strong { overflow-wrap: anywhere; font-size: .84rem; }
@@ -4939,6 +4942,7 @@ main.cubic-app-shell.cubic-app-reduce-motion *::after {
 .cubic-share-actions .cubic-control-secondary { border-color: var(--cubic-control-border); background: var(--cubic-control-bg); }
 .cubic-share-actions .cubic-control-ghost { border-color: transparent; background: transparent; }
 .cubic-share-link-row { min-width: 0; padding: 12px; border: 1px solid var(--cubic-border); border-radius: var(--cubic-control-radius); background: var(--cubic-bg-2); }
+.cubic-share-link-row > button { margin: 8px 6px 0 0; }
 .cubic-share-link-copy { display: grid; gap: 5px; min-width: 0; }
 .cubic-share-link-copy strong { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: .85rem; }
 .cubic-share-link-copy small { color: var(--cubic-muted); overflow-wrap: anywhere; }
@@ -4952,6 +4956,8 @@ main.cubic-app-shell.cubic-app-reduce-motion *::after {
   .cubic-settings-nav button,
   .cubic-settings-form-card input,
   .cubic-settings-form-card select,
+  .cubic-share-invites > select,
+  .cubic-share-link-row button,
   .cubic-server-create input,
   .cubic-server-create select,
   .cubic-navigation-actions button { min-height: 44px; }

@@ -95,8 +95,8 @@ test('server overview, members, invites, and channel settings use dedicated hone
 
   await settings.getByRole('button', { name: 'Invites' }).click();
   await expect(settings.getByRole('heading', { name: 'Invites' })).toBeVisible();
-  await expect(settings.getByRole('button', { name: 'Create shareable link' })).toBeVisible();
-  await expect(settings.getByRole('combobox', { name: 'Friend' })).toBeVisible();
+  await expect(settings.getByRole('button', { name: 'Create invite link' })).toBeVisible();
+  await expect(settings.getByRole('combobox', { name: 'Expiration' })).toBeVisible();
 
   if (isCompactNavigation(page)) await page.getByRole('button', { name: 'Back to server', exact: true }).click();
   else await page.getByRole('button', { name: 'Close server settings' }).click();

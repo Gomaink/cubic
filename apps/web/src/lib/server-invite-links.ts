@@ -1,4 +1,4 @@
-export const serverInviteTokenPattern = /^[A-Za-z0-9_-]{43}$/;
+export const serverInviteTokenPattern = /^(?:[A-Za-z0-9_-]{43}|v2\.[a-z0-9_-]{1,24}\.[0-9a-f-]{36}\.[A-Za-z0-9_-]{43})$/;
 
 export function validServerInviteToken(value: unknown): value is string {
   return typeof value === 'string' && serverInviteTokenPattern.test(value);
@@ -10,7 +10,7 @@ export function firstTrustedServerInviteToken(body: string, trustedOrigin: strin
   const candidates = /(?:^|[\s(<])((?:https?:\/\/)[^\s<>"'`]+)/g;
   for (const match of body.matchAll(candidates)) {
     const candidate = match[1].replace(/[.,!?;:)\]}]+$/, '');
-    if (!/^https?:\/\/[^/?#]+\/invite#[A-Za-z0-9_-]{43}$/.test(candidate)) continue;
+    if (!/^https?:\/\/[^/?#]+\/invite#(?:[A-Za-z0-9_-]{43}|v2\.[a-z0-9_-]{1,24}\.[0-9a-f-]{36}\.[A-Za-z0-9_-]{43})$/.test(candidate)) continue;
     try {
       const url = new URL(candidate);
       if (url.origin === trustedOrigin && url.pathname === '/invite' && !url.username && !url.password &&

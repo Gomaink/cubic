@@ -10,8 +10,10 @@ import {
 } from './voice/authorization.js';
 import { ServerVoiceService } from './server-voice/service.js';
 import { createMailTransport } from './mail/transport.js';
+import { parseInviteCredentials } from './servers/invite-credentials.js';
 
 const env = loadEnv();
+const inviteCredentials = parseInviteCredentials(env.INVITE_LINK_ACTIVE_KEY_ID, env.INVITE_LINK_HMAC_KEYS);
 const database = createDatabase(env.DATABASE_URL);
 const realtimeEvents = createRealtimeEvents();
 const sessionService = createSessionService(database, env.SESSION_IDLE_TIMEOUT_MS);
@@ -37,6 +39,7 @@ const serverVoice = new ServerVoiceService({
 });
 const app = await createApp({
   database,
+  inviteCredentials,
   corsOrigin: env.CORS_ORIGIN,
   trustedProxyCidrs: env.TRUST_PROXY_CIDRS,
   cookieName: env.SESSION_COOKIE_NAME,

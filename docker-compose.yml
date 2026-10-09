@@ -116,6 +116,8 @@ services:
       LIVEKIT_AUTHORIZATION_RECONCILE_MS: ${LIVEKIT_AUTHORIZATION_RECONCILE_MS:-30000}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required; set a strong unique value}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required; set a strong unique value}
+      INVITE_LINK_ACTIVE_KEY_ID: ${INVITE_LINK_ACTIVE_KEY_ID:?INVITE_LINK_ACTIVE_KEY_ID is required}
+      INVITE_LINK_HMAC_KEYS: ${INVITE_LINK_HMAC_KEYS:?INVITE_LINK_HMAC_KEYS is required}
     depends_on:
       migrate:
         condition: service_completed_successfully
