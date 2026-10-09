@@ -25,7 +25,7 @@ test('an owner cannot assign a role with unknown stored permission bits', async 
       statements.push(statement);
       if (statement.startsWith('select 1 from servers')) return { rows: [{}], rowCount: 1 };
       if (statement.includes('from servers s')) return { rows: [{ owner_user_id: 'owner-id', permissions_mask: '8001', highest_position: 0 }], rowCount: 1 };
-      if (statement.includes('from server_roles where')) return { rows: [{ position: 1, permissions: '8192' }], rowCount: 1 };
+      if (statement.includes('from server_roles where')) return { rows: [{ position: 1, permissions: '65536' }], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     },
     release: () => {}

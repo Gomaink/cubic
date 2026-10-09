@@ -18,7 +18,7 @@ import { ServerIconStore, SERVER_ICON_MAX_BYTES, InvalidServerIconError } from '
 import { checkIconOwner, replaceServerIcon, removeServerIcon } from '../server-icons/service.js';
 import type { ServerVoiceService } from '../server-voice/service.js';
 import { assignCustomRole, createCustomRole, deleteCustomRole, listMemberRoles, listServerRoles, removeCustomRoleAssignment, updateServerRole } from '../servers/roles.js';
-import { CHANNEL_OVERRIDE_PERMISSIONS, listChannelOverrides, writeChannelOverride } from '../servers/channel-overrides.js';
+import { CHANNEL_OVERRIDE_PERMISSIONS, VOICE_CHANNEL_OVERRIDE_PERMISSIONS, listChannelOverrides, writeChannelOverride } from '../servers/channel-overrides.js';
 
 export interface ServerRoutesOptions {
   database: Database;
@@ -48,7 +48,8 @@ const inviteTargetSchema = z.object({ userId: z.string().uuid() });
 const memberParamsSchema = serverParamsSchema.extend({ userId: z.string().uuid() });
 const roleParamsSchema = serverParamsSchema.extend({ roleId: z.string().uuid() });
 const memberRoleParamsSchema = memberParamsSchema.extend({ roleId: z.string().uuid() });
-const rolePermissionsSchema = z.array(z.string().refine((value) => parseServerPermissionName(value) !== null)).max(13);
+const rolePermissionsSchema = z.array(z.string().refine((value) => parseServerPermissionName(value) !== null))
+  .max(Object.keys(SERVER_PERMISSION_BITS).length).refine((names) => new Set(names).size === names.length);
 const createRoleSchema = z.strictObject({ name: z.string().trim().min(1).max(64), permissions: rolePermissionsSchema.optional() });
 const updateRoleSchema = z.strictObject({ name: z.string().trim().min(1).max(64).optional(), permissions: rolePermissionsSchema.optional() }).refine((value) => value.name !== undefined || value.permissions !== undefined);
 const inviteLinkParamsSchema = serverParamsSchema.extend({ linkId: z.string().uuid() });
@@ -73,7 +74,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
   const layoutChanged = (serverId: string, deletedConversationId?: string) =>
     options.realtimeEvents?.emitServerLayoutChanged(deletedConversationId ? { serverId, deletedConversationId } : { serverId });
   const channelDenial = (reply: FastifyReply, denied: string) =>
-    reply.code(denied === 'not_owner' ? 403 : denied === 'invalid_index' ? 400 : 404)
+    reply.code(denied === 'not_owner' ? 403 : denied === 'invalid_index' || denied === 'invalid_permission' ? 400 : 404)
       .send({ error: 'Channel management denied or resource not found.' });
   const overrideCommitted = async (serverId: string, kind: 'text' | 'voice', needsVoiceReconcile: boolean) => {
     try { options.realtimeEvents?.emitServerLayoutChanged({ serverId }); }
@@ -210,6 +211,8 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     const params = overrideParamsSchema.safeParse(request.params);
     const body = overrideBodySchema.safeParse(request.body);
     if (!params.success || !body.success) return reply.code(400).send({ error: 'Invalid channel override.' });
+    if (params.data.kind === 'voice' && [...body.data.allow, ...body.data.deny].some((name) => !VOICE_CHANNEL_OVERRIDE_PERMISSIONS.includes(name as typeof VOICE_CHANNEL_OVERRIDE_PERMISSIONS[number])))
+      return reply.code(400).send({ error: 'Invalid channel override.' });
     const result = await writeChannelOverride(options.database, params.data.serverId, request.auth.user.id,
       params.data.kind, params.data.channelId, params.data.targetType, params.data.targetId, body.data);
     if ('denied' in result) return channelDenial(reply, result.denied);

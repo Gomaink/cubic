@@ -165,7 +165,8 @@
   type ChannelOverrideTarget = { id: string; name: string; isDefault?: boolean };
   type ChannelOverride = { targetType: 'role' | 'member'; targetId: string; targetName: string; allow: string[]; deny: string[] };
   const channelPermissionLabels: Record<string, string> = { VIEW_CHANNEL: 'View channel', SEND_MESSAGES: 'Send messages',
-    MANAGE_MESSAGES: 'Manage messages', CONNECT: 'Connect', SPEAK: 'Speak', VIDEO: 'Video', SCREEN_SHARE: 'Screen share' };
+    MANAGE_MESSAGES: 'Manage messages', CONNECT: 'Connect', SPEAK: 'Speak', VIDEO: 'Video', SCREEN_SHARE: 'Screen share',
+    MENTION_EVERYONE: 'Mention @everyone', MENTION_HERE: 'Mention @here', MENTION_ROLES: 'Mention roles' };
   let channelPermissions = $state<string[]>([]);
   let channelOverrides = $state<ChannelOverride[]>([]);
   let channelOverrideRoles = $state<ChannelOverrideTarget[]>([]);
@@ -4968,7 +4969,7 @@
               </section>
             {:else if serverSurface === 'roles'}
               <section class="cubic-settings-section" aria-labelledby="cubic-server-roles-title">
-                <div class="cubic-settings-title"><div><small>SERVER</small><h2 id="cubic-server-roles-title">Roles</h2><p>Permissions apply to everyone with a role. Higher roles have more management authority.</p></div><button class="cubic-settings-secondary" type="button" onclick={() => refreshServerRoles(activeServer!)}>Refresh</button></div>
+                <div class="cubic-settings-title"><div><small>SERVER</small><h2 id="cubic-server-roles-title">Roles</h2><p>Permissions apply to everyone with a role. Higher roles have more management authority. Mention permissions are ready to configure; pings arrive in Alpha 13.3.</p></div><button class="cubic-settings-secondary" type="button" onclick={() => refreshServerRoles(activeServer!)}>Refresh</button></div>
                 <div class="cubic-role-layout">
                   <div class="cubic-settings-member-list" aria-label="Server roles">
                     {#each serverRoles as role (role.id)}
@@ -4986,7 +4987,7 @@
                         <fieldset disabled={!canManageRole(selectedRole) || rolesBusy}>
                           <legend>Permissions</legend>
                           {#each rolePermissionNames as permission (permission)}
-                            <label class="cubic-role-permission"><input type="checkbox" value={permission} checked={rolePermissions.includes(permission)} disabled={!currentRoleAuthority().owner && !currentRoleAuthority().permissions.includes(permission)} onchange={(event) => { rolePermissions = event.currentTarget.checked ? [...rolePermissions, permission] : rolePermissions.filter((name) => name !== permission); }} /><span>{permission.replaceAll('_', ' ').toLowerCase()}</span></label>
+                            <label class="cubic-role-permission"><input type="checkbox" value={permission} checked={rolePermissions.includes(permission)} disabled={!currentRoleAuthority().owner && !currentRoleAuthority().permissions.includes(permission)} onchange={(event) => { rolePermissions = event.currentTarget.checked ? [...rolePermissions, permission] : rolePermissions.filter((name) => name !== permission); }} /><span>{channelPermissionLabels[permission] ?? permission.replaceAll('_', ' ').toLowerCase()}</span></label>
                           {/each}
                         </fieldset>
                         {#if canManageRole(selectedRole)}<div class="cubic-settings-actions"><button type="submit" disabled={rolesBusy}>{rolesBusy ? 'Saving…' : 'Save role'}</button>{#if !selectedRole.isDefault}<button class="cubic-control-danger" type="button" onclick={() => deleteServerRole(selectedRole)} disabled={rolesBusy}>Delete role</button>{/if}</div>{:else}<p class="cubic-settings-empty">You cannot manage this role.</p>{/if}
@@ -5079,7 +5080,7 @@
             <form class="cubic-settings-card cubic-settings-form-card" onsubmit={saveChannelSettingsCategory}><label for="cubic-channel-settings-category">Category</label><select id="cubic-channel-settings-category" bind:value={channelSettingsCategoryId}><option value="">Uncategorized</option>{#each serverCategories as category (category.id)}<option value={category.id}>{category.name}</option>{/each}</select><button type="submit" disabled={channelSettingsBusy || channelSettingsCategoryId === (settingsChannel.categoryId ?? '')}>{channelSettingsBusy ? 'Moving…' : 'Move to category'}</button></form>
             {#if canManageChannels}
               <section class="cubic-settings-card cubic-channel-permissions" aria-labelledby="channel-permissions-title">
-                <div class="cubic-settings-row"><div><h3 id="channel-permissions-title">Permissions</h3><small>Inherit uses the permissions resolved from the server and previous overrides.</small></div></div>
+                <div class="cubic-settings-row"><div><h3 id="channel-permissions-title">Permissions</h3><small>Inherit uses the permissions resolved from the server and previous overrides.{settingsChannel.kind === 'text' ? ' Mention permissions are configurable now; pings arrive in Alpha 13.3.' : ''}</small></div></div>
                 {#if channelOverridesLoading}<p class="cubic-settings-empty" role="status">Loading permissions…</p>{/if}
                 {#if channelOverridesError}<p class="inline-error" role="alert">{channelOverridesError} <button type="button" onclick={() => void loadChannelOverrides()}>Retry</button></p>{/if}
                 {#if channelOverridesNotice}<p class="cubic-channel-permissions-notice" role="status">{channelOverridesNotice}</p>{/if}

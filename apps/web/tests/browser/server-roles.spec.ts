@@ -84,3 +84,29 @@ test('ordinary member sees role details without management controls', async ({ p
     expect(denied).toBe(403);
   } finally { await friendContext.close(); }
 });
+
+test('mention bits remain ungranted by default and persist in the role editor', async ({ page }) => {
+  await openServers(page);
+  await page.getByRole('button', { name: 'Create server' }).first().click();
+  const create = page.getByRole('dialog', { name: 'Create server' });
+  await create.getByRole('textbox', { name: 'Server name' }).fill('Mention Role Lab');
+  await create.getByRole('button', { name: 'Create server' }).click();
+  await openServerSettings(page);
+  const settings = page.getByRole('region', { name: 'Mention Role Lab server settings' });
+  await settings.getByRole('navigation', { name: 'Server settings sections' }).getByRole('button', { name: 'Roles' }).click();
+  await settings.getByRole('button', { name: /@everyone/ }).click();
+  for (const name of ['Mention @everyone', 'Mention @here', 'Mention roles'])
+    await expect(settings.getByRole('checkbox', { name })).not.toBeChecked();
+  await settings.getByRole('button', { name: 'New role' }).click();
+  await settings.getByRole('textbox', { name: 'Role name' }).fill('Pingers');
+  await settings.getByRole('button', { name: 'Create role' }).click();
+  for (const name of ['Mention @everyone', 'Mention @here', 'Mention roles'])
+    await settings.getByRole('checkbox', { name }).check();
+  await settings.getByRole('button', { name: 'Save role' }).click();
+  await settings.getByRole('button', { name: 'Refresh' }).click();
+  await settings.getByRole('button', { name: /Pingers/ }).click();
+  for (const name of ['Mention @everyone', 'Mention @here', 'Mention roles'])
+    await expect(settings.getByRole('checkbox', { name })).toBeChecked();
+  await expect(settings.getByText('pings arrive in Alpha 13.3', { exact: false })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

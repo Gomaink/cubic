@@ -2,7 +2,9 @@ import { SERVER_PERMISSION_BITS, parseServerPermissionName, type ServerPermissio
 import { ALL_SERVER_PERMISSIONS, getEffectiveServerPermissions, serverPermissionNames, type ServerPermissionExecutor } from './server-permissions.js';
 
 export type ChannelKind = 'text' | 'voice';
-export const CHANNEL_OVERRIDE_MASK = ['VIEW_CHANNEL', 'SEND_MESSAGES', 'MANAGE_MESSAGES', 'CONNECT', 'SPEAK', 'VIDEO', 'SCREEN_SHARE']
+export const VOICE_CHANNEL_OVERRIDE_MASK = ['VIEW_CHANNEL', 'SEND_MESSAGES', 'MANAGE_MESSAGES', 'CONNECT', 'SPEAK', 'VIDEO', 'SCREEN_SHARE']
+  .reduce((mask, name) => mask | (1n << BigInt(SERVER_PERMISSION_BITS[name as ServerPermissionName])), 0n);
+export const CHANNEL_OVERRIDE_MASK = VOICE_CHANNEL_OVERRIDE_MASK | ['MENTION_EVERYONE', 'MENTION_HERE', 'MENTION_ROLES']
   .reduce((mask, name) => mask | (1n << BigInt(SERVER_PERMISSION_BITS[name as ServerPermissionName])), 0n);
 
 interface OverrideRow {
@@ -13,19 +15,20 @@ interface OverrideRow {
   deny_mask: string | null;
 }
 
-function checkedMask(value: string | null): bigint {
+function checkedMask(value: string | null, allowedMask: bigint): bigint {
   if (value === null) return 0n;
   if (!/^\d+$/u.test(value)) throw new Error('Invalid channel override mask.');
   const mask = BigInt(value);
-  if ((mask & ~CHANNEL_OVERRIDE_MASK) !== 0n) throw new Error('Unknown channel override bits.');
+  if ((mask & ~allowedMask) !== 0n) throw new Error('Unknown channel override bits.');
   return mask;
 }
 
-export function resolveChannelPermissionMask(base: bigint, serverId: string, userId: string, rows: readonly OverrideRow[], isOwner = false): bigint {
+export function resolveChannelPermissionMask(base: bigint, serverId: string, userId: string, rows: readonly OverrideRow[], isOwner = false, kind: ChannelKind = 'text'): bigint {
   if (isOwner) return ALL_SERVER_PERMISSIONS;
+  const allowedMask = kind === 'text' ? CHANNEL_OVERRIDE_MASK : VOICE_CHANNEL_OVERRIDE_MASK;
   let defaultAllow = 0n, defaultDeny = 0n, roleAllow = 0n, roleDeny = 0n, memberAllow = 0n, memberDeny = 0n;
   for (const row of rows) {
-    const allow = checkedMask(row.allow_mask), deny = checkedMask(row.deny_mask);
+    const allow = checkedMask(row.allow_mask, allowedMask), deny = checkedMask(row.deny_mask, allowedMask);
     if ((allow & deny) !== 0n) throw new Error('Overlapping channel override masks.');
     if (row.member_user_id === userId) { memberAllow |= allow; memberDeny |= deny; }
     else if (row.role_id === serverId) { defaultAllow |= allow; defaultDeny |= deny; }
@@ -67,7 +70,7 @@ export async function getEffectiveChannelPermissionsBatch(
     grouped.set(row.channel_id, rows);
   }
   return new Map([...grouped].map(([id, rows]) =>
-    [id, resolveChannelPermissionMask(authority.effectivePermissions, serverId, userId, rows, authority.isOwner)]));
+    [id, resolveChannelPermissionMask(authority.effectivePermissions, serverId, userId, rows, authority.isOwner, kind)]));
 }
 
 export async function getEffectiveChannelPermissions(

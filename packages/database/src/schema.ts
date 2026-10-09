@@ -189,7 +189,7 @@ export const serverRoles = pgTable(
     uniqueIndex('server_roles_server_position_uq').on(table.serverId, table.position),
     uniqueIndex('server_roles_one_default_uq').on(table.serverId).where(sql`${table.isDefault}`),
     check('server_roles_name_ck', sql`length(btrim(${table.name})) between 1 and 64 and ${table.name} = btrim(${table.name})`),
-    check('server_roles_permissions_ck', sql`${table.permissions} >= 0 and (${table.permissions} & ~8191::bigint) = 0`),
+    check('server_roles_permissions_ck', sql`${table.permissions} >= 0 and (${table.permissions} & ~65535::bigint) = 0`),
     check('server_roles_identity_ck', sql`(${table.isDefault} and ${table.id} = ${table.serverId} and ${table.position} = 0) or (not ${table.isDefault} and ${table.id} <> ${table.serverId} and ${table.position} > 0)`)
   ]
 );
@@ -423,7 +423,7 @@ export const serverChannelOverrides = pgTable(
     uniqueIndex('server_channel_overrides_voice_member_uq').on(table.voiceChannelId, table.memberUserId).where(sql`${table.voiceChannelId} is not null and ${table.memberUserId} is not null`),
     check('server_channel_overrides_channel_ck', sql`num_nonnulls(${table.textChannelId}, ${table.voiceChannelId}) = 1`),
     check('server_channel_overrides_target_ck', sql`num_nonnulls(${table.roleId}, ${table.memberUserId}) = 1`),
-    check('server_channel_overrides_masks_ck', sql`${table.allow} >= 0 and ${table.deny} >= 0 and (${table.allow} & ~8128::bigint) = 0 and (${table.deny} & ~8128::bigint) = 0 and (${table.allow} & ${table.deny}) = 0`)
+    check('server_channel_overrides_masks_ck', sql`${table.allow} >= 0 and ${table.deny} >= 0 and (${table.allow} & ~(case when ${table.textChannelId} is not null then 65472::bigint else 8128::bigint end)) = 0 and (${table.deny} & ~(case when ${table.textChannelId} is not null then 65472::bigint else 8128::bigint end)) = 0 and (${table.allow} & ${table.deny}) = 0`)
   ]
 );
 

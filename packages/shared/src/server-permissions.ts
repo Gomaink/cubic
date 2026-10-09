@@ -12,7 +12,10 @@ export const SERVER_PERMISSION_BITS = {
   SPEAK: 9,
   VIDEO: 10,
   SCREEN_SHARE: 11,
-  VIEW_CHANNEL: 12
+  VIEW_CHANNEL: 12,
+  MENTION_EVERYONE: 13,
+  MENTION_HERE: 14,
+  MENTION_ROLES: 15
 } as const;
 
 export type ServerPermissionName = keyof typeof SERVER_PERMISSION_BITS;

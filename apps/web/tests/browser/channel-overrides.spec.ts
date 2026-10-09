@@ -25,6 +25,7 @@ test('channel permission editor supports role, member and @everyone tri-state', 
   const dialog = page.getByRole('dialog', { name: 'Create text channel' });
   await dialog.getByRole('textbox', { name: 'Channel name' }).fill('smoke');
   await dialog.getByRole('button', { name: 'Create text channel' }).click();
+  const channelId = await page.evaluate(async (id) => (await (await fetch(`/api/v1/servers/${id}/channels`)).json()).channels.find((channel: { name: string }) => channel.name === 'smoke').id as string, serverId);
   if (isCompactNavigation(page)) await page.getByRole('button', { name: 'Back to server' }).click();
   await chooseChannelAction(page, 'text', 'smoke', 'Channel settings for smoke');
   const settings = page.getByRole('region', { name: 'smoke channel settings' });
@@ -34,6 +35,30 @@ test('channel permission editor supports role, member and @everyone tri-state', 
   const view = settings.getByRole('group', { name: 'View channel' });
   await view.getByRole('radio', { name: 'Deny' }).check();
   await settings.getByRole('button', { name: 'Save permissions' }).click();
+  const mentionEveryone = settings.getByRole('group', { name: 'Mention @everyone' });
+  const mentionHere = settings.getByRole('group', { name: 'Mention @here' });
+  const mentionRoles = settings.getByRole('group', { name: 'Mention roles' });
+  for (const group of [mentionEveryone, mentionHere, mentionRoles]) await expect(group.getByRole('radio', { name: 'Inherit' })).toBeChecked();
+  await mentionEveryone.getByRole('radio', { name: 'Allow' }).check();
+  await mentionHere.getByRole('radio', { name: 'Deny' }).check();
+  await mentionRoles.getByRole('radio', { name: 'Allow' }).check();
+  await settings.getByRole('button', { name: 'Save permissions' }).click();
+  const savedMentions = await page.evaluate(async ({ serverId, channelId, roleId }) => {
+    const response = await fetch(`/api/v1/servers/${serverId}/layout/text/${channelId}/permissions`);
+    return response.ok ? (await response.json()).overrides.find((item: { targetId: string }) => item.targetId === roleId) : null;
+  }, { serverId, channelId, roleId });
+  expect(savedMentions?.allow).toEqual(['MENTION_EVERYONE', 'MENTION_ROLES']);
+  expect(savedMentions?.deny).toEqual(['VIEW_CHANNEL', 'MENTION_HERE']);
+  await mentionEveryone.getByRole('radio', { name: 'Inherit' }).check();
+  await mentionHere.getByRole('radio', { name: 'Inherit' }).check();
+  await mentionRoles.getByRole('radio', { name: 'Inherit' }).check();
+  await settings.getByRole('button', { name: 'Save permissions' }).click();
+  for (const group of [mentionEveryone, mentionHere, mentionRoles]) await expect(group.getByRole('radio', { name: 'Inherit' })).toBeChecked();
+  const inheritedMentions = await page.evaluate(async ({ serverId, channelId, roleId }) =>
+    (await (await fetch(`/api/v1/servers/${serverId}/layout/text/${channelId}/permissions`)).json()).overrides.find((item: { targetId: string }) => item.targetId === roleId),
+  { serverId, channelId, roleId });
+  expect(inheritedMentions?.allow).toEqual([]);
+  expect(inheritedMentions?.deny).toEqual(['VIEW_CHANNEL']);
   await expect(settings.getByRole('button', { name: /Smoke Manager.*Role/ })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
