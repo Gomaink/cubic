@@ -597,7 +597,7 @@ const server = createServer(async (request, response) => {
     const selected = fixtureServers.find((item) => item.id === serverRoles[1]);
     if (!selected || !fixtureServerMembers.get(selected.id)?.has(requestUser.id)) return json({ error: 'Server not found.' }, 404);
     const roles = fixtureServerRoles.get(selected.id) ?? [];
-    if (request.method === 'GET' && !serverRoles[2]) return json({ roles: [...roles].sort((a, b) => b.position - a.position), permissionNames: ['VIEW_SERVER', 'MANAGE_SERVER', 'MANAGE_ROLES', 'MANAGE_CHANNELS', 'MANAGE_INVITES', 'KICK_MEMBERS', 'SEND_MESSAGES', 'MANAGE_MESSAGES', 'CONNECT', 'SPEAK', 'VIDEO', 'SCREEN_SHARE', 'VIEW_CHANNEL'] });
+    if (request.method === 'GET' && !serverRoles[2]) return json({ roles: [...roles].sort((a, b) => b.position - a.position), permissionNames: ['VIEW_SERVER', 'MANAGE_SERVER', 'MANAGE_ROLES', 'MANAGE_CHANNELS', 'MANAGE_INVITES', 'KICK_MEMBERS', 'SEND_MESSAGES', 'MANAGE_MESSAGES', 'CONNECT', 'SPEAK', 'VIDEO', 'SCREEN_SHARE', 'VIEW_CHANNEL', 'MENTION_EVERYONE', 'MENTION_HERE', 'MENTION_ROLES'] });
     if (selected.ownerUserId !== requestUser.id) return json({ error: 'Role management denied.' }, 403);
     if (request.method === 'POST' && !serverRoles[2]) {
       const payload = JSON.parse((await body()).toString());
@@ -679,9 +679,10 @@ const server = createServer(async (request, response) => {
     apply(overrides.find((item) => item.targetType === 'member' && item.targetId === requestUser.id));
     return visible;
   };
-  const permissionNames = ['VIEW_CHANNEL', 'SEND_MESSAGES', 'MANAGE_MESSAGES', 'CONNECT', 'SPEAK', 'VIDEO', 'SCREEN_SHARE'];
   const overrideRoute = /^\/api\/v1\/servers\/([0-9a-f-]+)\/layout\/(text|voice)\/([0-9a-f-]+)\/permissions(?:\/(role|member)\/([0-9a-f-]+|fixture-peer|fixture-user))?$/.exec(url.pathname);
   if (overrideRoute) {
+    const permissionNames = ['VIEW_CHANNEL', 'SEND_MESSAGES', 'MANAGE_MESSAGES', 'CONNECT', 'SPEAK', 'VIDEO', 'SCREEN_SHARE',
+      ...(overrideRoute[2] === 'text' ? ['MENTION_EVERYONE', 'MENTION_HERE', 'MENTION_ROLES'] : [])];
     const selected = fixtureServers.find((item) => item.id === overrideRoute[1] && fixtureServerMembers.get(item.id)?.has(requestUser.id));
     if (!selected) return json({ error: 'Server not found.' }, 404);
     if (!canManageChannels(selected)) return json({ error: 'Channel management denied.' }, 403);

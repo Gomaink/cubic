@@ -4,7 +4,7 @@
 
 ## Storage and resolution
 
-`server_channel_overrides` has exactly one channel target (text or voice) and exactly one subject (role or member). The implicit default role is targeted by its deterministic ID, equal to the server ID. Composite foreign keys enforce that channel and subject belong to the same server; partial unique indexes allow one override per channel and subject. Deleting a channel, custom role or member cascades to its overrides. The database rejects negative masks, unknown bits and bits present in both `allow` and `deny`. Allowed override bits are `VIEW_CHANNEL`, `SEND_MESSAGES`, `MANAGE_MESSAGES`, `CONNECT`, `SPEAK`, `VIDEO`, and `SCREEN_SHARE` (mask 8128). Server administration bits cannot be overridden.
+`server_channel_overrides` has exactly one channel target (text or voice) and exactly one subject (role or member). The implicit default role is targeted by its deterministic ID, equal to the server ID. Composite foreign keys enforce that channel and subject belong to the same server; partial unique indexes allow one override per channel and subject. Deleting a channel, custom role or member cascades to its overrides. The database rejects negative masks, unknown bits and bits present in both `allow` and `deny`. Voice channels retain `VIEW_CHANNEL`, `SEND_MESSAGES`, `MANAGE_MESSAGES`, `CONNECT`, `SPEAK`, `VIDEO`, and `SCREEN_SHARE` (mask 8128). Text channels also accept `MENTION_EVERYONE`, `MENTION_HERE`, and `MENTION_ROLES` (mask 65472). These three bits only configure future structured pings; literal message text does not ping. Server administration bits cannot be overridden.
 
 For a non-owner member, start with the effective server mask (default OR assigned custom role permissions). Then apply stages in this order:
 
@@ -26,12 +26,12 @@ Overrides belong only to individual text or voice channels. Categories are layou
 
 ## Management API and editor
 
-Channel Settings has a Permissions editor for members with `MANAGE_CHANNELS`. It lists configured overrides and supports the default `@everyone` role, custom roles, and members. The owner cannot be an individual member target because their channel bypass would make the setting misleading. Each of the seven permissions has exactly one state: Inherit, Allow, or Deny. Inherit leaves the bit absent from both masks, so the permission comes from the server and earlier override stages.
+Channel Settings has a Permissions editor for members with `MANAGE_CHANNELS`. It lists configured overrides and supports the default `@everyone` role, custom roles, and members. The owner cannot be an individual member target because their channel bypass would make the setting misleading. Each permission has exactly one state: Inherit, Allow, or Deny. Inherit leaves the bit absent from both masks, so the permission comes from the server and earlier override stages. Text channels expose ten permissions; voice channels retain seven.
 
 All routes require an authenticated session and `MANAGE_CHANNELS`:
 
 - `GET /api/v1/servers/:serverId/layout/:kind/:channelId/permissions` returns canonical permission names, overrides, and available role/member targets. `kind` is `text` or `voice`.
-- `PUT /api/v1/servers/:serverId/layout/:kind/:channelId/permissions/:targetType/:targetId` replaces the target's entire state with `{ "allow": [...], "deny": [...] }`; empty arrays remove the row. `targetType` is `role` or `member`. The API accepts only distinct canonical names from the seven channel permissions, rejects overlap, and never accepts numeric masks.
+- `PUT /api/v1/servers/:serverId/layout/:kind/:channelId/permissions/:targetType/:targetId` replaces the target's entire state with `{ "allow": [...], "deny": [...] }`; empty arrays remove the row. `targetType` is `role` or `member`. The API accepts only distinct canonical names valid for that channel kind, rejects overlap, and never accepts numeric masks.
 - `DELETE` at the same target URL removes the row idempotently, normally returning 204.
 
 The API locks the server row in a transaction, recalculates membership and `MANAGE_CHANNELS` after the lock, validates the channel and target in that server, then updates the row. Outsiders and foreign or removed resources receive 404; members without authority receive 403. The owner bypass applies only while they remain a member. `MANAGE_CHANNELS` is server authority: a manager can edit a channel they cannot view, and can grant channel-scoped permissions to themselves or their own role. No role hierarchy is imposed on override editing.

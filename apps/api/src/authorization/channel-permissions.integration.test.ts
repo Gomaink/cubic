@@ -46,6 +46,7 @@ test('channel overrides enforce same-server targets, masks, uniqueness, resoluti
       await assert.rejects(insertOverride(null, foreignMember, 0, 0), (error: any) => error.code === '23503');
       await assert.rejects(insertOverride(role, null, 4096, 4096), (error: any) => error.code === '23514');
       await assert.rejects(insertOverride(role, null, 8192, 0), (error: any) => error.code === '23514');
+      await assert.rejects(insertOverride(role, null, 65536, 0), (error: any) => error.code === '23514');
       await assert.rejects(insertOverride(null, null, 0, 0), (error: any) => error.code === '23514');
       await assert.rejects(insertOverride(role, member, 0, 0), (error: any) => error.code === '23514');
       await assert.rejects(pool.query(`insert into server_channel_overrides(server_id,voice_channel_id,role_id)

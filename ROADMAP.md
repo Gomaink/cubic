@@ -47,6 +47,8 @@ The functional Windows preview passed shell/auth/navigation, Windows Hello passk
 | 13.7 Rich invite cards | Server banner/icon/name, online/member counts, description, Join / Go to Server and expired/revoked states. Existing basic invite cards are already implemented. |
 | 13.8 Link previews | Safe external link previews/unfurls, subject to SSRF and content-security design. |
 
+For 13.3, enforce structured mention permissions on the backend for both message POST and PATCH. An edit that creates a new mention must be validated even though today's own-message edit path does not recheck `SEND_MESSAGES`. Literal `@everyone` and `@here` remain plain text until structured mentions ship.
+
 ## Alpha 14 — Profiles, Presence & Member Experience 2.0 (planned)
 
 Extended profiles: bio, user banner, badges, account-created and server-joined dates, profile cards and full profiles, mutual friends/servers, private notes, per-server nickname, later server-specific avatar/bio. Presence, custom status, rich activity, linked accounts, Spotify and possible Listen Along are future work. Clicking a user anywhere should open the same ProfileCard; context actions should use one shared UserContextMenu plus context-specific actions. Today's basic profile and presence are separate from these plans.

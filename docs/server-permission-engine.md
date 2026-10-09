@@ -1,6 +1,6 @@
 # Server permission engine (Alpha 12.2)
 
-Server role permissions are a nonnegative PostgreSQL `BIGINT` mask. The shared catalog assigns stable bit numbers; append future bits without renumbering. The database currently accepts only bits 0–12. The API serializes canonical names, never a raw `BigInt`. Unknown names and unknown stored bits fail closed. There is no `ADMINISTRATOR` bit: the owner is structurally distinct.
+Server role permissions are a nonnegative PostgreSQL `BIGINT` mask. The shared catalog assigns stable bit numbers; append future bits without renumbering. The database accepts only bits 0–15. The API serializes canonical names, never a raw `BigInt`. Unknown names and unknown stored bits fail closed. There is no `ADMINISTRATOR` bit: the owner is structurally distinct.
 
 | Bit | Permission | Meaning |
 | ---: | --- | --- |
@@ -17,8 +17,13 @@ Server role permissions are a nonnegative PostgreSQL `BIGINT` mask. The shared c
 | 10 | `VIDEO` | Publish camera video in server voice. |
 | 11 | `SCREEN_SHARE` | Publish screen content in server voice. |
 | 12 | `VIEW_CHANNEL` | Discover and access an individual text or voice channel. `VIEW_SERVER` does not grant this. |
+| 13 | `MENTION_EVERYONE` | Reserved for a future structured `@everyone` ping in text channels. |
+| 14 | `MENTION_HERE` | Reserved for a future structured `@here` ping in text channels. |
+| 15 | `MENTION_ROLES` | Reserved for future structured role pings in text channels. |
 
 The implicit default role starts with bits 0, 6 and 8–12 (mask 8001), preserving current membership capabilities and channel visibility. Migration 0022 created mask 3905; migration 0023 adds VIEW_CHANNEL to existing defaults and updates the server insert trigger for future servers. Custom roles start at zero. Changing the default mask immediately changes every member's effective mask without assignments. The engine obtains membership and owner from the server, joins only same-server assignments, and uses PostgreSQL `bit_or` to combine custom masks with the default mask in one query. A duplicate assignment cannot change the result. An owner who is a member receives all defined server permissions regardless of assignments or default mask. If the owner's membership is absent or corrupted, the engine returns no authority and fails closed. `servers.owner_user_id` remains the ownership source.
+
+Alpha 12.6 adds bits 13–15 to roles and text-channel overrides without granting them to existing roles or the default role. These settings do not create pings: message bodies remain plain text, including literal `@everyone` and `@here`. Alpha 13.3 must implement structured mentions and enforce the effective text-channel mention bit on the server for both message creation and editing. In particular, PATCH must validate newly created mentions even though today's own-message edit path does not recheck `SEND_MESSAGES`. Unread counts and notification preferences remain planned for 13.4 and 13.5.
 
 Hierarchy is separate from permission bits. Higher `position` means higher role; default is zero. An actor must hold the required permission and have a strictly higher highest assigned role than the target for hierarchical actions. Equal positions deny. The owner can act on any other non-owner member regardless of position; nobody acts on the owner or self through this helper. The helper requires both authorities to belong to the same server. Channel overrides do not change role hierarchy; reorder behavior remains unimplemented.
 

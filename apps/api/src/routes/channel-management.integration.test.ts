@@ -104,6 +104,7 @@ test('channel management uses current server permission and deletes only scoped 
       assert.equal((await send('GET', permissionsUrl, 'outsider')).statusCode, 404);
       assert.equal((await send('GET', `${base}/layout/text/${foreign.id}/permissions`, 'manager')).statusCode, 404);
       assert.equal((await send('GET', permissionsUrl, 'manager')).json().availableRoles.some((item: { name: string }) => item.name === '@everyone'), true);
+      assert.deepEqual((await send('GET', permissionsUrl, 'manager')).json().permissions.slice(-3), ['MENTION_EVERYONE', 'MENTION_HERE', 'MENTION_ROLES']);
       assert.equal((await put(`${permissionsUrl}/member/${owner}`, 'manager', ['VIEW_CHANNEL'], [])).statusCode, 404);
       assert.equal((await put(`${permissionsUrl}/role/${randomUUID()}`, 'manager', ['VIEW_CHANNEL'], [])).statusCode, 404);
       assert.equal((await put(`${permissionsUrl}/member/${outsider}`, 'manager', ['VIEW_CHANNEL'], [])).statusCode, 404);
@@ -126,6 +127,11 @@ test('channel management uses current server permission and deletes only scoped 
         { allow: ['VIEW_CHANNEL'], deny: ['VIEW_CHANNEL'] }, { allow: ['VIEW_CHANNEL', 'VIEW_CHANNEL'], deny: [] },
         { allow: ['MANAGE_CHANNELS'], deny: [] }, { allow: [4096], deny: [] }, { allow: 4096, deny: [] }
       ]) assert.equal((await send('PUT', roleUrl, 'manager', payload)).statusCode, 400);
+      assert.equal((await put(roleUrl, 'manager', ['MENTION_EVERYONE'], ['MENTION_HERE'])).statusCode, 200);
+      const mentionOverride = (await send('GET', permissionsUrl, 'manager')).json().overrides.find((item: { targetId: string }) => item.targetId === role.id);
+      assert.deepEqual(mentionOverride.allow, ['MENTION_EVERYONE']);
+      assert.deepEqual(mentionOverride.deny, ['MENTION_HERE']);
+      assert.equal((await put(roleUrl, 'manager', [], [])).statusCode, 200);
       const beforeOverrideEvents = layoutEvents.length;
       assert.equal((await put(roleUrl, 'manager', [], ['VIEW_CHANNEL'])).statusCode, 200);
       assert.deepEqual(layoutEvents.at(-1), { serverId: primary.id });
@@ -165,6 +171,10 @@ test('channel management uses current server permission and deletes only scoped 
       const voice = (await send('POST', `${base}/voice-channels`, 'manager', { name: 'Call', categoryId: category.id })).json().channel;
       assert.equal((await send('PATCH', `${base}/voice-channels/${voice.id}`, 'manager', { name: 'Renamed call' })).statusCode, 200);
       const voiceUrl = `${base}/layout/voice/${voice.id}/permissions/role/${role.id}`;
+      assert.equal((await send('GET', `${base}/layout/voice/${voice.id}/permissions`, 'manager')).json().permissions.includes('MENTION_EVERYONE'), false);
+      assert.equal((await put(voiceUrl, 'manager', ['MENTION_EVERYONE'], [])).statusCode, 400);
+      await assert.rejects(pool.query(`insert into server_channel_overrides(server_id,voice_channel_id,role_id,allow)
+        values($1,$2,$3,8192)`, [primary.id, voice.id, role.id]), (error: any) => error.code === '23514');
       assert.equal((await put(voiceUrl, 'manager', [], ['CONNECT', 'SPEAK'])).statusCode, 200);
       assert.equal(voiceReconciliations, 1);
       assert.equal((await pool.query('select deny::text from server_channel_overrides where server_id=$1 and voice_channel_id=$2 and role_id=$3', [primary.id, voice.id, role.id])).rows[0].deny, '768');

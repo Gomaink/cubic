@@ -15,7 +15,7 @@ async function chooseAction(message: Locator, accessibleName: string, menuName: 
     return;
   }
 
-  await message.hover();
+  await message.hover({ position: { x: 20, y: 20 } });
   await message.getByRole('button', { name: accessibleName }).click();
 }
 
@@ -24,6 +24,18 @@ test.beforeEach(async ({ page, context, request }) => {
   await context.addCookies([{ name: 'cubic_session', value: 'browser-fixture', domain: '127.0.0.1', path: '/' }]);
   await page.goto('/app');
   await openConversation(page);
+});
+
+test('literal @everyone and @here remain plain message text', async ({ page }) => {
+  const body = 'Literal @everyone and @here';
+  await page.locator('.composer input:not([type=file])').fill(body);
+  await page.getByRole('button', { name: 'Send message' }).click();
+  const sent = page.locator('.discord-message').last();
+  await expect(sent.locator('.discord-message-body')).toHaveText(body);
+  await expect(sent.locator('.discord-message-body').locator('a, button, [data-mention]')).toHaveCount(0);
+  await page.reload();
+  await openConversation(page);
+  await expect(page.locator('.discord-message').last().locator('.discord-message-body')).toHaveText(body);
 });
 
 test('reply banner cancels, sends, renders a preview, and scrolls to its loaded target', async ({ page }) => {

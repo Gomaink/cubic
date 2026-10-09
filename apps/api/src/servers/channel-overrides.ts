@@ -2,19 +2,26 @@ import type { Database } from '@cubic/database';
 import { SERVER_PERMISSION_BITS } from '@cubic/shared';
 import { withChannelManagementLock } from './layout.js';
 
-export const CHANNEL_OVERRIDE_PERMISSIONS = [
+export const VOICE_CHANNEL_OVERRIDE_PERMISSIONS = [
   'VIEW_CHANNEL', 'SEND_MESSAGES', 'MANAGE_MESSAGES', 'CONNECT', 'SPEAK', 'VIDEO', 'SCREEN_SHARE'
 ] as const;
+export const CHANNEL_OVERRIDE_PERMISSIONS = [...VOICE_CHANNEL_OVERRIDE_PERMISSIONS,
+  'MENTION_EVERYONE', 'MENTION_HERE', 'MENTION_ROLES'] as const;
 export type ChannelOverridePermission = typeof CHANNEL_OVERRIDE_PERMISSIONS[number];
 export type OverrideTargetType = 'role' | 'member';
 export type OverrideKind = 'text' | 'voice';
 
 const allowedMask = CHANNEL_OVERRIDE_PERMISSIONS.reduce((mask, name) => mask | (1n << BigInt(SERVER_PERMISSION_BITS[name])), 0n);
-function names(maskValue: string): ChannelOverridePermission[] {
+const voiceAllowedMask = VOICE_CHANNEL_OVERRIDE_PERMISSIONS.reduce((mask, name) => mask | (1n << BigInt(SERVER_PERMISSION_BITS[name])), 0n);
+function permissionsForKind(kind: OverrideKind): readonly ChannelOverridePermission[] {
+  return kind === 'text' ? CHANNEL_OVERRIDE_PERMISSIONS : VOICE_CHANNEL_OVERRIDE_PERMISSIONS;
+}
+function names(maskValue: string, kind: OverrideKind): ChannelOverridePermission[] {
   if (!/^\d+$/u.test(maskValue)) throw new Error('Invalid channel override mask.');
   const mask = BigInt(maskValue);
-  if ((mask & ~allowedMask) !== 0n) throw new Error('Invalid channel override mask.');
-  return CHANNEL_OVERRIDE_PERMISSIONS.filter((name) => (mask & (1n << BigInt(SERVER_PERMISSION_BITS[name]))) !== 0n);
+  const permitted = permissionsForKind(kind);
+  if ((mask & ~(kind === 'text' ? allowedMask : voiceAllowedMask)) !== 0n) throw new Error('Invalid channel override mask.');
+  return permitted.filter((name) => (mask & (1n << BigInt(SERVER_PERMISSION_BITS[name]))) !== 0n);
 }
 function mask(permissions: readonly ChannelOverridePermission[]): string {
   return permissions.reduce((bits, name) => bits | (1n << BigInt(SERVER_PERMISSION_BITS[name])), 0n).toString();
@@ -37,7 +44,7 @@ export async function listChannelOverrides(database: Database, serverId: string,
       `select role_id, member_user_id, allow::text, deny::text from server_channel_overrides
         where server_id = $1 and ${channelColumn(kind)} = $2 order by role_id nulls last, member_user_id`, [serverId, channelId]);
     return {
-      permissions: [...CHANNEL_OVERRIDE_PERMISSIONS],
+      permissions: [...permissionsForKind(kind)],
       availableRoles: roles.rows.map((row) => ({ id: row.id, name: row.is_default ? '@everyone' : row.name, isDefault: row.is_default })),
       availableMembers: members.rows,
       overrides: overrides.rows.map((row) => {
@@ -46,7 +53,7 @@ export async function listChannelOverrides(database: Database, serverId: string,
         const targetName = targetType === 'role' ? roles.rows.find((role) => role.id === targetId)?.name : members.rows.find((member) => member.id === targetId)?.name;
         if (!targetName) throw new Error('Channel override target missing.');
         return { targetType, targetId, targetName: targetType === 'role' && targetId === serverId ? '@everyone' : targetName,
-          allow: names(row.allow), deny: names(row.deny) };
+          allow: names(row.allow, kind), deny: names(row.deny, kind) };
       })
     };
   });
@@ -58,6 +65,7 @@ export async function writeChannelOverride(database: Database, serverId: string,
   return withChannelManagementLock(database, serverId, actorId, async (client) => {
     const channel = await client.query(`select 1 from ${channelTable(kind)} where server_id = $1 and id = $2`, [serverId, channelId]);
     if (!channel.rowCount) return { denied: 'not_found' as const };
+    if (permissions && [...permissions.allow, ...permissions.deny].some((name) => !permissionsForKind(kind).includes(name))) return { denied: 'invalid_permission' as const };
     const target = targetType === 'role'
       ? await client.query(`select 1 from server_roles where server_id = $1 and id = $2`, [serverId, targetId])
       : await client.query(`select 1 from server_members m join servers s on s.id = m.server_id

@@ -159,9 +159,15 @@ test('role write API enforces permissions, hierarchy, owner and server scoping i
       assert.equal((await send('POST', '/roles', 'outsider', { name: 'No' })).statusCode, 404);
       assert.equal((await send('POST', '/roles', 'member', { name: 'No' })).statusCode, 403);
       assert.equal((await send('POST', '/roles', 'owner', { name: 'Invalid', permissions: ['UNKNOWN'] })).statusCode, 400);
+      assert.equal((await send('POST', '/roles', 'owner', { name: 'Repeated', permissions: ['MENTION_HERE', 'MENTION_HERE'] })).statusCode, 400);
+      assert.equal((await send('POST', '/roles', 'owner', { name: 'Too many', permissions: Array(17).fill('MENTION_HERE') })).statusCode, 400);
       const lowResponse = await send('POST', '/roles', 'owner', { name: 'Low', permissions: ['VIEW_SERVER'] });
       assert.equal(lowResponse.statusCode, 201);
       const low = lowResponse.json().role;
+      assert.deepEqual(low.permissions, ['VIEW_SERVER']);
+      const mentionResponse = await send('POST', '/roles', 'owner', { name: 'Pingers', permissions: ['MENTION_EVERYONE', 'MENTION_HERE', 'MENTION_ROLES'] });
+      assert.equal(mentionResponse.statusCode, 201);
+      assert.deepEqual(mentionResponse.json().role.permissions, ['MENTION_EVERYONE', 'MENTION_HERE', 'MENTION_ROLES']);
       const managerResponse = await send('POST', '/roles', 'owner', { name: 'Manager', permissions: ['MANAGE_ROLES'] });
       const managerRole = managerResponse.json().role;
       const highResponse = await send('POST', '/roles', 'owner', { name: 'High', permissions: ['MANAGE_ROLES'] });
@@ -169,6 +175,7 @@ test('role write API enforces permissions, hierarchy, owner and server scoping i
       assert.equal((await send('PUT', `/members/${manager}/roles/${managerRole.id}`, 'owner')).statusCode, 200);
       assert.equal((await send('POST', '/roles', 'manager', { name: 'Above me' })).statusCode, 403);
       assert.equal((await send('PATCH', `/roles/${high.id}`, 'manager', { name: 'Too high' })).statusCode, 403);
+      assert.equal((await send('PATCH', `/roles/${low.id}`, 'manager', { permissions: ['MENTION_EVERYONE'] })).statusCode, 403);
       assert.equal((await send('DELETE', `/roles/${managerRole.id}`, 'manager')).statusCode, 403);
       assert.equal((await send('PATCH', `/roles/${first.id}`, 'manager', { permissions: [] })).statusCode, 403);
       assert.equal((await send('PUT', `/members/${manager}/roles/${low.id}`, 'manager')).statusCode, 403);
@@ -197,7 +204,7 @@ test('role write API enforces permissions, hierarchy, owner and server scoping i
       assert.deepEqual(defaultUpdate.json().role.permissions, ['VIEW_SERVER', 'VIEW_CHANNEL']);
       assert.equal((await send('PATCH', `/roles/${first.id}`, 'owner', { name: 'Everyone' })).statusCode, 404);
       assert.equal((await pool.query('select permissions::text from server_roles where id = $1', [first.id])).rows[0].permissions, '4097');
-      await assert.rejects(pool.query('update server_roles set permissions = 8192 where id = $1', [low.id]), (error: any) => error.code === '23514');
+      await assert.rejects(pool.query('update server_roles set permissions = 65536 where id = $1', [low.id]), (error: any) => error.code === '23514');
       assert.deepEqual((await send('GET', '/roles', 'owner')).json().roles.find((item: { id: string }) => item.id === low.id).permissions, ['VIEW_SERVER']);
       assert.equal((await send('DELETE', `/members/${manager}/roles/${managerRole.id}`, 'owner')).statusCode, 200);
       assert.equal((await send('PATCH', `/roles/${low.id}`, 'manager', { name: 'Stale authority' })).statusCode, 403);
