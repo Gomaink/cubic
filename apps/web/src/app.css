@@ -1751,6 +1751,54 @@ body {
   --cubic-red: #da373c;
 }
 
+/* UI-1 foundation: surface roles sampled from the desktop reference.
+   Accent is a Cubic-owned input, so a later theme can change it without
+   turning the reference video's violet into a fixed product color. */
+main.cubic-app-shell {
+  --ui-bg-deep: #121114;
+  --ui-bg-nav: #18171c;
+  --ui-bg-canvas: #1b1a1f;
+  --ui-bg-raised: #222028;
+  --ui-stroke: #34313b;
+  --ui-text: #f2f1f4;
+  --ui-muted: #aaa6b1;
+  --ui-accent: var(--cubic-theme-accent, var(--cubic-brand-action));
+  --ui-focus-ring: var(--cubic-brand-action);
+  --ui-control-height: 42px;
+  --ui-radius: 7px;
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-motion-fast: 120ms;
+  --ui-motion-standard: 180ms;
+
+  --cubic-bg-0: var(--ui-bg-deep);
+  --cubic-bg-1: var(--ui-bg-nav);
+  --cubic-bg-2: var(--ui-bg-canvas);
+  --cubic-bg-3: var(--ui-bg-raised);
+  --cubic-bg-hover: color-mix(in srgb, var(--ui-text) 8%, var(--ui-bg-raised));
+  --cubic-border: var(--ui-stroke);
+  --cubic-text: var(--ui-text);
+  --cubic-muted: var(--ui-muted);
+  --cubic-control-height: var(--ui-control-height);
+  --cubic-control-radius: var(--ui-radius);
+  --cubic-control-border: var(--ui-stroke);
+  --cubic-control-bg: var(--ui-bg-raised);
+  --cubic-control-hover: var(--cubic-bg-hover);
+  --cubic-brand-soft: color-mix(in srgb, var(--ui-accent) 13%, var(--ui-bg-raised));
+  --cubic-brand-border: color-mix(in srgb, var(--ui-accent) 45%, var(--ui-stroke));
+  --cubic-brand-focus: var(--ui-focus-ring);
+  --cubic-onyx-0: var(--ui-bg-deep);
+  --cubic-onyx-1: var(--ui-bg-nav);
+  --cubic-onyx-2: var(--ui-bg-canvas);
+  --cubic-onyx-3: var(--ui-bg-raised);
+  --cubic-onyx-hover: var(--cubic-bg-hover);
+  --cubic-onyx-border: var(--ui-stroke);
+  --cubic-onyx-text: var(--ui-text);
+  --cubic-onyx-muted: var(--ui-muted);
+}
+
 /* The messenger owns exactly one viewport. Only messages/lists scroll. */
 .messenger-shell {
   position: fixed !important;
@@ -1859,7 +1907,7 @@ body {
   top: 0;
   z-index: 3;
   min-height: 66px;
-  background: rgba(14, 15, 18, .96) !important;
+  background: var(--cubic-bg-1) !important;
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--cubic-border);
 }
@@ -1878,7 +1926,7 @@ body {
   border: 0 !important;
   background: transparent !important;
 }
-.conversation-row:hover { background: #1b1c20 !important; }
+.conversation-row:hover { background: var(--cubic-bg-hover) !important; }
 .conversation-row.active { background: var(--cubic-bg-hover) !important; }
 .conversation-copy strong { color: var(--cubic-text) !important; }
 .conversation-copy small { color: var(--cubic-muted) !important; }
@@ -1896,7 +1944,7 @@ body {
   overflow: hidden !important;
   display: grid !important;
   grid-template-rows: auto minmax(0, 1fr) auto !important;
-  background: #101115 !important;
+  background: var(--cubic-bg-2) !important;
 }
 
 .chat-header {
@@ -1904,7 +1952,7 @@ body {
   min-height: 66px !important;
   padding: 0 16px !important;
   border-bottom: 1px solid var(--cubic-border) !important;
-  background: #101115 !important;
+  background: var(--cubic-bg-2) !important;
   gap: 10px !important;
 }
 .chat-heading { min-width: 0; }
@@ -1960,7 +2008,7 @@ body {
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   padding: 20px 22px 18px !important;
-  background: #101115 !important;
+  background: var(--cubic-bg-2) !important;
 }
 
 .message {
@@ -1975,7 +2023,7 @@ body {
   background: var(--cubic-brand-soft) !important;
 }
 .message:not(.mine) .message-bubble {
-  background: #1c1d22 !important;
+  background: var(--cubic-bg-3) !important;
 }
 .message > small,
 .message-author { color: var(--cubic-muted) !important; }
@@ -1985,7 +2033,7 @@ body {
   bottom: auto !important;
   min-width: 0;
   padding: 12px 16px 16px !important;
-  background: #101115 !important;
+  background: var(--cubic-bg-2) !important;
   border-top: 0 !important;
 }
 .composer input {
@@ -1993,7 +2041,7 @@ body {
   padding: 0 var(--cubic-attachment-input-end, 52px) 0 14px !important;
   border: 1px solid transparent !important;
   border-radius: 8px !important;
-  background: #1e1f24 !important;
+  background: var(--cubic-bg-3) !important;
   color: var(--cubic-text) !important;
 }
 .composer input:focus {
@@ -2232,7 +2280,7 @@ body { background: var(--cubic-onyx-0); }
   min-height: 0;
   height: 100%;
   overflow: hidden;
-  background: #101115;
+  background: var(--cubic-bg-2);
 }
 .messages-wrap > .messages {
   width: 100%;
