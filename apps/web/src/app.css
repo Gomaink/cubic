@@ -1755,6 +1755,11 @@ body {
    Accent is a Cubic-owned input, so a later theme can change it without
    turning the reference video's violet into a fixed product color. */
 main.cubic-app-shell {
+  --ui-topbar-height: 32px;
+  --ui-rail-width: 70px;
+  --ui-sidebar-width: 270px;
+  --ui-content-header-height: 48px;
+  --ui-context-panel-width: 270px;
   --ui-bg-deep: #121114;
   --ui-bg-nav: #18171c;
   --ui-bg-canvas: #1b1a1f;
@@ -4839,17 +4844,21 @@ main.cubic-app-shell.cubic-app-reduce-motion *::after {
    These qualified rules supersede the legacy messenger grid without changing
    message, media, or server-management styling. */
 .messenger-shell.cubic-app-shell {
-  grid-template-columns: 66px minmax(230px, 294px) minmax(0, 1fr) !important;
+  grid-template-columns: var(--ui-rail-width) var(--ui-sidebar-width) minmax(0, 1fr) !important;
+  grid-template-rows: var(--ui-topbar-height) minmax(0, 1fr) !important;
 }
+.cubic-app-shell > .cubic-app-topbar { grid-column: 1 / -1; grid-row: 1; }
+.cubic-app-shell > .cubic-primary-rail { grid-column: 1; grid-row: 2; }
 .cubic-app-shell > .cubic-context-column {
   display: flex;
   flex-direction: column;
   grid-column: 2;
+  grid-row: 2;
   min-width: 0;
   min-height: 0;
-  max-height: 100dvh;
+  max-height: calc(100dvh - var(--ui-topbar-height));
   overflow: visible;
-  border-right: 1px solid #ffffff14;
+  border-right: 1px solid var(--ui-stroke);
   background: var(--cubic-bg-1);
 }
 .cubic-app-shell .cubic-context-column > .conversation-list,
@@ -4861,7 +4870,37 @@ main.cubic-app-shell.cubic-app-reduce-motion *::after {
   min-height: 0;
   border-right: 0 !important;
 }
-.cubic-app-shell > .chat-panel { grid-column: 3; }
+.cubic-app-shell > .chat-panel { grid-column: 3; grid-row: 2; }
+.cubic-app-shell .conversation-list-header,
+.cubic-app-shell .cubic-server-sidebar-head {
+  min-height: var(--ui-content-header-height);
+  height: var(--ui-content-header-height);
+  padding: 0 10px 0 14px;
+  backdrop-filter: none;
+}
+.cubic-app-shell .conversation-list-header small { display: none; }
+.cubic-app-shell .conversation-list-header h1 { font-size: .9rem !important; }
+.cubic-app-shell .chat-header {
+  min-height: var(--ui-content-header-height) !important;
+  height: var(--ui-content-header-height);
+  padding: 0 14px !important;
+  gap: 8px !important;
+  backdrop-filter: none;
+}
+.cubic-app-shell .chat-heading strong { font-size: .9rem; }
+.cubic-app-shell .chat-heading small { margin-top: 0; font-size: .68rem; }
+.cubic-app-shell .cubic-server-member-pane,
+.cubic-app-shell .cubic-member-panel { top: var(--ui-content-header-height); width: var(--ui-context-panel-width); background: var(--ui-bg-nav); box-shadow: none; }
+.cubic-app-shell .cubic-server-member-pane > header,
+.cubic-app-shell .cubic-member-panel-head { min-height: var(--ui-content-header-height); border-color: var(--ui-stroke); }
+@media (min-width: 900px) {
+  .cubic-app-shell > .chat-panel.cubic-members-open,
+  .cubic-app-shell > .chat-panel.cubic-server-members-open { padding-right: var(--ui-context-panel-width); }
+}
+@media (min-width: 681px) and (max-width: 899px) {
+  .cubic-app-shell .cubic-server-member-pane,
+  .cubic-app-shell .cubic-member-panel { width: 100%; }
+}
 .cubic-mobile-user-settings-trigger { display: none; }
 .cubic-mobile-user-settings-avatar {
   position: relative;
@@ -4891,6 +4930,7 @@ main.cubic-app-shell.cubic-app-reduce-motion *::after {
 @media (max-width: 680px) {
   .cubic-app-shell .cubic-mobile-user-settings-trigger { display: grid; flex: 0 0 38px; width: 38px; }
   .messenger-shell.cubic-app-shell { grid-template-columns: 64px minmax(0, 1fr) !important; grid-template-rows: minmax(0, 1fr) !important; }
+  .cubic-app-shell > .cubic-primary-rail { grid-row: 1; }
   .cubic-app-shell > .cubic-context-column { grid-column: 2; grid-row: 1; max-height: 100dvh; }
   .cubic-app-shell > .chat-panel {
     position: absolute !important;
@@ -4905,6 +4945,16 @@ main.cubic-app-shell.cubic-app-reduce-motion *::after {
   .cubic-app-shell > .chat-panel.open { transform: translateX(0) !important; pointer-events: auto; }
   .cubic-app-shell > .chat-panel.cubic-server-empty:not(.cubic-server-members-open) { transform: translateX(100%) !important; pointer-events: none; }
   .cubic-app-shell .cubic-context-column > .conversation-list.cubic-server-sidebar { height: auto !important; }
+  .cubic-app-shell .chat-header { min-height: 66px !important; height: 66px; padding: 0 10px !important; }
+  .cubic-app-shell .cubic-server-member-pane,
+  .cubic-app-shell .cubic-member-panel { top: 0; width: 100%; }
+}
+
+@media (min-width: 681px) and (max-width: 900px) and (max-height: 500px) {
+  .messenger-shell.cubic-app-shell { grid-template-rows: minmax(0, 1fr) !important; }
+  .cubic-app-shell > .cubic-primary-rail,
+  .cubic-app-shell > .cubic-context-column,
+  .cubic-app-shell > .chat-panel { grid-row: 1; max-height: 100dvh; }
 }
 
 /* Contextual server/channel menus must stay above the persistent voice dock. */
