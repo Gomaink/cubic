@@ -47,12 +47,13 @@ test('App preferences load, save, persist and apply across viewport sizes', asyn
   page.on('request', (request) => {
     if (request.url().endsWith('/api/v1/users/me/settings') && request.method() === 'PATCH') patchBodies.push(request.postDataJSON());
   });
-  const beforeGap = await page.locator('.discord-message:not(.continuation)').first().evaluate((node) => Number.parseFloat(getComputedStyle(node).marginTop));
+  const messageMargin = () => page.locator('.discord-message:not(.continuation)').first().evaluate((node) => Number.parseFloat(getComputedStyle(node).marginTop));
+  const beforeGap = await messageMargin();
   await compact.check();
   await expect(compact).toBeChecked();
   await expect(page.locator('.cubic-app-shell')).toHaveClass(/cubic-app-compact/);
-  const afterGap = await page.locator('.discord-message:not(.continuation)').first().evaluate((node) => Number.parseFloat(getComputedStyle(node).marginTop));
-  expect(afterGap).toBeLessThan(beforeGap - 8);
+  // Observe rendered density as well as the preference's class; keep the same spacing threshold.
+  await expect.poll(messageMargin).toBeLessThan(beforeGap - 8);
   const compactStreamGap = await page.locator('.cubic-attachment-message-stream').evaluate((node) => Number.parseFloat(getComputedStyle(node).gap));
   expect(compactStreamGap).toBeLessThan(normalStreamGap - 4);
   const compactContinuationHeight = await page.locator('.discord-message.continuation').first().evaluate((node) => node.getBoundingClientRect().height);
@@ -75,6 +76,14 @@ test('App preferences load, save, persist and apply across viewport sizes', asyn
   expect((await saved.json()).settings).toMatchObject({ compactMode: true, reduceMotion: false });
   await settings.getByRole('button', { name: 'Close User Settings' }).click();
   await expect(page.locator('.chat-heading')).toContainText('Fixture DM');
+  await expect.poll(messageMargin).toBeLessThan(beforeGap - 8);
+  if (testInfo.project.name === 'phone-landscape' || testInfo.project.name === 'phone-portrait') {
+    const viewport = page.viewportSize()!;
+    await page.setViewportSize({ width: viewport.height, height: viewport.width });
+    await expect.poll(messageMargin).toBeLessThan(beforeGap - 8);
+    await page.setViewportSize(viewport);
+    await expect.poll(messageMargin).toBeLessThan(beforeGap - 8);
+  }
   if (screenshotProjects.has(testInfo.project.name)) {
     await page.locator('#message-message-45').evaluate((node) => node.scrollIntoView({ block: 'start' }));
     await page.screenshot({ path: `${densityArtifacts}/${testInfo.project.name}-compact-messages.png` });

@@ -5,6 +5,7 @@
   import type { Room as LiveKitRoom } from 'livekit-client';
   import { mediaDeviceErrorMessage, microphoneCaptureOptions, missingSelectedCameraNotice, screenShareFailure } from '$lib/media-ux';
   import Icon from '$lib/ui/Icon.svelte';
+  import AppTopBar from '$lib/ui/AppTopBar.svelte';
   import PrimaryRail from '$lib/ui/PrimaryRail.svelte';
   import UserBar from '$lib/ui/UserBar.svelte';
   import VideoTile from '$lib/ui/VideoTile.svelte';
@@ -4692,6 +4693,7 @@
 {/snippet}
 
 <main class="messenger-shell cubic-app-shell" class:cubic-app-compact={appPreferences?.compactMode} class:cubic-app-reduce-motion={appPreferences?.reduceMotion}>
+  <AppTopBar title={activeServer?.name ?? (activeConversation ? conversationName(activeConversation) : tab === 'people' ? 'People' : tab === 'servers' ? 'Servers' : 'Messages')} />
   <PrimaryRail servers={servers} selectedServerId={activeServer?.id ?? null} messagesSelected={tab !== 'servers'} serverBrowserSelected={tab === 'servers' && activeServer === null} loading={serversLoading} onmessages={showMessages} onbrowse={showServerBrowser} onserver={selectServer} oncreate={(event) => openServerDialog('server', event)} />
 
   {#if userSettingsOpen}

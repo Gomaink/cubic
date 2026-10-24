@@ -23,12 +23,12 @@
 </div>
 
 <style>
-  .cubic-user-bar { position: relative; display: flex; flex: 0 0 auto; align-items: center; gap: 6px; min-width: 0; min-height: 66px; padding: 8px 10px max(8px, env(safe-area-inset-bottom)); border-top: 1px solid #ffffff1c; background: #181a20; }
+  .cubic-user-bar { position: relative; display: flex; flex: 0 0 auto; align-items: center; gap: 6px; min-width: 0; min-height: 58px; padding: 5px 8px max(5px, env(safe-area-inset-bottom)); border-top: 1px solid var(--ui-stroke); background: var(--ui-bg-nav); }
   button { border: 0; color: var(--cubic-text); font: inherit; cursor: pointer; }
   button:focus-visible { outline: 2px solid var(--cubic-brand-focus); outline-offset: 2px; }
   .cubic-user-identity { display: flex; flex: 1 1 auto; align-items: center; gap: 9px; min-width: 0; padding: 3px; border-radius: 7px; background: transparent; text-align: left; }
   .cubic-user-identity:hover, .cubic-user-menu-trigger:hover { background: var(--cubic-bg-hover); }
-  .cubic-user-bar-avatar { position: relative; display: grid; flex: 0 0 38px; place-items: center; width: 38px; height: 38px; overflow: hidden; border-radius: 50%; background: #34363b; font-weight: 800; }
+  .cubic-user-bar-avatar { position: relative; display: grid; flex: 0 0 36px; place-items: center; width: 36px; height: 36px; overflow: hidden; border-radius: 50%; background: var(--ui-bg-raised); font-weight: 800; }
   .cubic-user-bar-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .cubic-user-bar-copy { display: block; min-width: 0; }
   .cubic-user-bar-copy strong, .cubic-user-bar-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
