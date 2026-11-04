@@ -41,18 +41,19 @@
 </nav>
 
 <style>
-  .cubic-primary-rail { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0; min-height: 0; height: 100%; padding: 14px 8px; border-right: 1px solid #ffffff14; background: var(--cubic-bg-0); }
-  .cubic-primary-servers { display: flex; flex: 1 1 auto; min-height: 0; width: 100%; flex-direction: column; align-items: center; gap: 8px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
-  button { display: grid; flex: 0 0 46px; place-items: center; width: 46px; height: 46px; padding: 0; border: 1px solid transparent; border-radius: 13px; background: transparent; color: var(--cubic-muted); cursor: pointer; }
-  button:hover { background: var(--cubic-bg-hover); color: var(--cubic-text); }
-  button:focus-visible { outline: 2px solid var(--cubic-brand-focus); outline-offset: 2px; }
-  button.selected { border-color: var(--cubic-brand-border); border-radius: 13px; background: var(--cubic-brand-soft); color: var(--cubic-text); }
-  button.selected:hover { background: color-mix(in srgb, var(--cubic-brand) 30%, var(--cubic-bg-2)); }
-  .cubic-primary-rule { flex: 0 0 1px; width: 30px; background: #ffffff1c; }
-  .cubic-primary-server-icon { position: relative; display: grid; place-items: center; width: 42px; height: 42px; overflow: hidden; border-radius: 12px; background: #292c35; color: #eceef8; font-weight: 800; }
+  .cubic-primary-rail { --rail-padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; min-height: 0; height: 100%; padding: 8px var(--rail-padding); border-right: 1px solid var(--ui-stroke); background: var(--ui-bg-deep); }
+  .cubic-primary-servers { display: flex; flex: 1 1 auto; min-height: 0; width: calc(100% + var(--rail-padding) + var(--rail-padding)); padding-inline: var(--rail-padding); flex-direction: column; align-items: center; gap: 7px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
+  button { position: relative; display: grid; flex: 0 0 44px; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid transparent; border-radius: 14px; background: var(--ui-bg-raised); color: var(--ui-muted); cursor: pointer; transition: background var(--ui-motion-fast), border-radius var(--ui-motion-fast), color var(--ui-motion-fast); }
+  button:hover { border-radius: 12px; background: var(--cubic-bg-hover); color: var(--ui-text); }
+  button:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: 2px; }
+  button.selected { border-color: var(--cubic-brand-border); border-radius: 12px; background: var(--cubic-brand-soft); color: var(--ui-text); }
+  button.selected:hover { background: color-mix(in srgb, var(--ui-accent) 22%, var(--ui-bg-raised)); }
+  button.selected::before { position: absolute; left: calc(0px - var(--rail-padding)); width: 3px; height: 30px; border-radius: 0 3px 3px 0; background: var(--ui-text); content: ''; }
+  .cubic-primary-rule { flex: 0 0 1px; width: 28px; background: var(--ui-stroke); }
+  .cubic-primary-server-icon { position: relative; display: grid; place-items: center; width: 40px; height: 40px; overflow: hidden; border-radius: 11px; background: var(--ui-bg-raised); color: var(--ui-text); font-weight: 800; }
   .cubic-primary-server-icon img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-  .cubic-primary-create { border: 1px dashed var(--cubic-control-border); }
+  .cubic-primary-create { border-color: var(--ui-stroke); color: var(--ui-accent); }
   .cubic-primary-status { max-width: 52px; color: var(--cubic-muted); font-size: .65rem; text-align: center; }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
-  @media (max-width: 680px) { .cubic-primary-rail { padding: 9px 6px max(9px, env(safe-area-inset-bottom)); } button { width: 46px; min-height: 46px; } }
+  @media (max-width: 680px) { .cubic-primary-rail { --rail-padding: 6px; padding: 9px var(--rail-padding) max(9px, env(safe-area-inset-bottom)); } button { width: 46px; min-height: 46px; } }
 </style>

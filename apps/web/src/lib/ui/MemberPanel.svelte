@@ -66,10 +66,10 @@
 </aside>
 
 <style>
-  .cubic-member-panel { position: absolute; z-index: 12; inset: 0 0 0 auto; width: 240px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid #232428; background: #111214; box-shadow: -12px 0 28px rgba(0,0,0,.2); }
-  .cubic-member-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 68px; padding: 12px 14px; border-bottom: 1px solid #232428; }
-  .cubic-member-panel-head small { color: #949ba4; font-size: .6rem; letter-spacing: .08em; font-weight: 700; }
-  .cubic-member-panel-head h2 { margin: 2px 0 0; color: #f2f3f5; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 165px; }
+  .cubic-member-panel { position: absolute; z-index: 12; inset: var(--ui-content-header-height, 48px) 0 0 auto; width: var(--ui-context-panel-width, 270px); display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--ui-stroke); background: var(--ui-bg-nav); }
+  .cubic-member-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: var(--ui-content-header-height, 48px); padding: 4px 12px; border-bottom: 1px solid var(--ui-stroke); }
+  .cubic-member-panel-head small { color: var(--ui-muted); font-size: .6rem; letter-spacing: .08em; font-weight: 700; }
+  .cubic-member-panel-head h2 { margin: 2px 0 0; color: var(--ui-text); font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 165px; }
   .cubic-member-panel-head button { display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 4px; background: transparent; color: #b5bac1; cursor: pointer; }
   .cubic-member-panel-head button:hover { background: #2b2d31; }
   .cubic-member-panel-list { overflow-y: auto; min-height: 0; padding: 12px 8px; }
@@ -78,12 +78,13 @@
   .cubic-member-panel-row:hover { background: #1e1f22; }
   .cubic-member-panel-avatar { position: relative; display: grid; flex: 0 0 34px; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: #34363d; color: #f2f3f5; font-size: .8rem; font-weight: 700; }
   .cubic-member-panel-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
-  .cubic-member-panel-dot { position: absolute; right: -2px; bottom: -2px; width: 12px; height: 12px; border: 3px solid #111214; border-radius: 50%; background: #73767d; }
+  .cubic-member-panel-dot { position: absolute; right: -2px; bottom: -2px; width: 12px; height: 12px; border: 3px solid var(--ui-bg-nav); border-radius: 50%; background: #73767d; }
   .cubic-member-panel-dot.cubic-online { background: #23a55a; }
   .cubic-member-panel-dot.cubic-idle { background: #f0b232; }
   .cubic-member-panel-copy { min-width: 0; }
   .cubic-member-panel-copy strong, .cubic-member-panel-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cubic-member-panel-copy strong { color: #dbdee1; font-size: .78rem; }
   .cubic-member-panel-copy small { color: #949ba4; font-size: .66rem; text-transform: capitalize; }
-  @media (max-width: 680px) { .cubic-member-panel { width: 100%; border-left: 0; } }
+  @media (max-width: 899px) { .cubic-member-panel { width: 100%; } }
+  @media (max-width: 680px) { .cubic-member-panel { inset-block-start: 0; border-left: 0; } }
 </style>

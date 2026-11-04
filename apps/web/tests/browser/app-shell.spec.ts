@@ -17,6 +17,41 @@ test('create-group dialog takes focus and returns it on Escape', async ({ page }
   await expect(trigger).toBeFocused();
 });
 
+test('shell regions fit the viewport and keep the composer visible', async ({ page }, testInfo) => {
+  await page.locator('.conversation-row').filter({ hasText: 'Fixture DM' }).click();
+  const sizes = await page.evaluate(() => {
+    const box = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
+    const topbar = box('.cubic-app-topbar');
+    const rail = box('.cubic-primary-rail');
+    const sidebar = box('.cubic-context-column');
+    const header = box('.chat-panel > .chat-header');
+    const composer = box('.chat-panel > .composer');
+    return { topbar: topbar?.height, rail: rail?.width, sidebar: sidebar?.width, header: header?.height, composerBottom: composer?.bottom, viewportHeight: innerHeight, overflow: document.documentElement.scrollWidth > innerWidth };
+  });
+  expect(sizes.overflow).toBe(false);
+  expect(sizes.composerBottom).toBeLessThanOrEqual(sizes.viewportHeight);
+  if (testInfo.project.name === 'desktop' || testInfo.project.name === 'narrow-desktop') {
+    expect(sizes.topbar).toBe(32);
+    expect(sizes.rail).toBe(70);
+    expect(sizes.sidebar).toBe(270);
+    expect(sizes.header).toBe(48);
+  } else {
+    expect(sizes.topbar).toBe(0);
+  }
+  await page.locator('.chat-header button[aria-label="Members"]').click();
+  const pane = await page.evaluate(() => {
+    const panel = document.querySelector('.cubic-member-panel')!.getBoundingClientRect();
+    const composer = document.querySelector('.chat-panel > .composer')!.getBoundingClientRect();
+    const chat = document.querySelector('.chat-panel')!.getBoundingClientRect();
+    return { panelLeft: panel.left, panelWidth: panel.width, composerRight: composer.right, chatWidth: chat.width };
+  });
+  if (testInfo.project.name === 'desktop' || testInfo.project.name === 'narrow-desktop') {
+    expect(pane.composerRight).toBeLessThanOrEqual(pane.panelLeft);
+  } else {
+    expect(pane.panelWidth).toBe(pane.chatWidth);
+  }
+});
+
 test('primary rail, user bar, and contextual navigation retain existing actions', async ({ page }, testInfo) => {
   const rail = page.getByRole('navigation', { name: 'Primary navigation' });
   const messages = rail.getByRole('button', { name: 'Messages' });
@@ -45,6 +80,11 @@ test('primary rail, user bar, and contextual navigation retain existing actions'
   await dialog.getByRole('button', { name: 'Create server' }).click();
   const server = rail.getByRole('button', { name: 'Open server Alpha Shell' });
   await expect(server).toHaveAttribute('aria-current', 'page');
+  const marker = await server.evaluate((node) => ({
+    left: node.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(node, '::before').left),
+    clipLeft: node.closest('.cubic-primary-servers')!.getBoundingClientRect().left
+  }));
+  expect(marker.left).toBeGreaterThanOrEqual(marker.clipLeft);
   await expect(page.locator('.cubic-server-sidebar-head')).toContainText('Alpha Shell');
   await expect(page.locator('.cubic-server-sidebar-head .icon-action')).toHaveCount(1);
   if (testInfo.project.name === 'desktop') await page.screenshot({ path: '/tmp/cubic-alpha11-slice1/desktop-server.png' });
